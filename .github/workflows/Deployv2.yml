@@ -1,14 +1,12 @@
 name: Deploy Supabase Backend
 
 on:
-  # Auto deploy on push to main
   push:
     branches: [main]
     paths:
       - "supabase/functions/**"
       - "supabase/migrations/**"
 
-  # Manual trigger from GitHub UI
   workflow_dispatch:
     inputs:
       deploy_functions:
@@ -40,10 +38,11 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REFV2 }}
         run: |
-          # Deploy all functions with the flag
-          supabase functions deploy --no-verify-jwt
+          supabase functions deploy \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --no-verify-jwt
 
-      # Run DB migrations (MANUAL OR AUTO)
+      # Run DB migrations
       - name: Apply Database Migrations
         if: ${{ inputs.run_migrations == 'true' }}
         env:
@@ -51,4 +50,6 @@ jobs:
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REFV2 }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
-          supabase db push --password "$SUPABASE_DB_PASSWORD"
+          supabase db push \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --password "$SUPABASE_DB_PASSWORD"
