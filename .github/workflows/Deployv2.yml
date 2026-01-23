@@ -1,0 +1,54 @@
+name: Deploy Supabase Backend
+
+on:
+  # Auto deploy on push to main
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - "supabase/migrations/**"
+
+  # Manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      deploy_functions:
+        description: "Deploy Edge Functions"
+        required: true
+        default: "true"
+      run_migrations:
+        description: "Run database migrations"
+        required: true
+        default: "false"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Deploy Edge Functions
+      - name: Deploy Edge Functions
+        if: ${{ github.event_name == 'push' || inputs.deploy_functions == 'true' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REFV2 }}
+        run: |
+          # Deploy all functions with the flag
+          supabase functions deploy --no-verify-jwt
+
+      # Run DB migrations (MANUAL OR AUTO)
+      - name: Apply Database Migrations
+        if: ${{ inputs.run_migrations == 'true' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase db push --password "$SUPABASE_DB_PASSWORD"
