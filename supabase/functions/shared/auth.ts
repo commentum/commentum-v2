@@ -112,7 +112,7 @@ export async function verifyAdminAccess(supabase: any, clientType: string, userI
 }
 
 // Get user role from configuration
-async function getUserRole(supabase: any, userId: string) {
+export async function getUserRole(supabase: any, userId: string) {
   try {
     const { data: superAdmins } = await supabase
       .from('config')
