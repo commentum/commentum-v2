@@ -4,6 +4,7 @@ import { verifyKey } from 'https://deno.land/x/discordeno@18.0.1/mod.ts'
 
 const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')!
 const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')!
+const DISCORD_APPLICATION_ID = Deno.env.get('DISCORD_APPLICATION_ID')!
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_KEY')!
 
@@ -106,6 +107,73 @@ const COMMANDS = {
     name: 'roles',
     description: 'View all user roles (Moderator+)',
     options: []
+  },
+  config: {
+    name: 'config',
+    description: 'Configure Discord integration',
+    options: [
+      {
+        name: 'action',
+        description: 'Configuration action',
+        type: 3, // STRING
+        required: true,
+        choices: [
+          { name: 'setup', value: 'setup' },
+          { name: 'verify', value: 'verify' },
+          { name: 'approve', value: 'approve' },
+          { name: 'revoke', value: 'revoke' },
+          { name: 'register', value: 'register' }
+        ]
+      },
+      {
+        name: 'user_id',
+        description: 'Commentum user ID',
+        type: 3, // STRING
+        required: false
+      },
+      {
+        name: 'client_type',
+        description: 'Platform (anilist, myanimelist, simkl, other)',
+        type: 3, // STRING
+        required: false,
+        choices: [
+          { name: 'AniList', value: 'anilist' },
+          { name: 'MyAnimeList', value: 'myanimelist' },
+          { name: 'SIMKL', value: 'simkl' },
+          { name: 'Other', value: 'other' }
+        ]
+      },
+      {
+        name: 'discord_user',
+        description: 'Discord user ID (for admin approval)',
+        type: 3, // STRING
+        required: false
+      },
+      {
+        name: 'auth_token',
+        description: 'Authentication token (for admin approval)',
+        type: 3, // STRING
+        required: false
+      },
+      {
+        name: 'role',
+        description: 'User role (for admin approval)',
+        type: 3, // STRING,
+        required: false,
+        choices: [
+          { name: 'User', value: 'user' },
+          { name: 'Moderator', value: 'moderator' },
+          { name: 'Admin', value: 'admin' },
+          { name: 'Super Admin', value: 'super_admin' }
+        ]
+      },
+      {
+        name: 'guild_id',
+        description: 'Guild ID (for command registration - leave empty for global)',
+        type: 3, // STRING
+        required: false
+      }
+    ]
   }
 }
 
@@ -192,20 +260,23 @@ async function getDiscordUserRole(discordUserId: string, guildId: string): Promi
 
 // Validate command permissions
 function validateCommandPermission(userRole: string, commandName: string, options: any[]): { valid: boolean; reason?: string } {
-  const roleHierarchy = { 'moderator': 1, 'admin': 2, 'super_admin': 3 }
+  const roleHierarchy = { 'user': 0, 'moderator': 1, 'admin': 2, 'super_admin': 3 }
   const userLevel = roleHierarchy[userRole as keyof typeof roleHierarchy] || 0
 
   switch (commandName) {
     case 'comment':
       const commentAction = options.find((opt: any) => opt.name === 'action')?.value
-      if (['ban', 'delete_others'].includes(commentAction) && userLevel < 2) {
-        return { valid: false, reason: 'Only admins and super admins can perform this action' }
+      if (['delete'].includes(commentAction) && userLevel < 2) {
+        return { valid: false, reason: 'Only admins and super admins can delete comments' }
       }
       break
     case 'user':
       const userAction = options.find((opt: any) => opt.name === 'action')?.value
-      if (['ban'].includes(userAction) && userLevel < 2) {
-        return { valid: false, reason: 'Only admins and super admins can ban users' }
+      if (['ban', 'promote', 'demote'].includes(userAction) && userLevel < 2) {
+        return { valid: false, reason: 'Only admins and super admins can perform this action' }
+      }
+      if (['warn', 'unban'].includes(userAction) && userLevel < 1) {
+        return { valid: false, reason: 'Only moderators and above can perform this action' }
       }
       break
     case 'reports':
@@ -218,13 +289,20 @@ function validateCommandPermission(userRole: string, commandName: string, option
         return { valid: false, reason: 'Only moderators and above can view roles' }
       }
       break
+    case 'config':
+      const configAction = options.find((opt: any) => opt.name === 'action')?.value
+      if (['approve', 'revoke', 'register'].includes(configAction) && userLevel < 2) {
+        return { valid: false, reason: 'Only admins and super admins can perform this action' }
+      }
+      // setup and verify are available to all users
+      break
   }
 
   return { valid: true }
 }
 
 // Handle comment-related commands
-async function handleCommentCommand(options: any[], userRole: string) {
+async function handleCommentCommand(options: any[], userRole: string, userMapping: any) {
   const action = options.find((opt: any) => opt.name === 'action')?.value
   const commentId = options.find((opt: any) => opt.name === 'comment_id')?.value
   const reason = options.find((opt: any) => opt.name === 'reason')?.value
@@ -264,7 +342,7 @@ async function handleCommentCommand(options: any[], userRole: string) {
 }
 
 // Handle user-related commands
-async function handleUserCommand(options: any[], userRole: string) {
+async function handleUserCommand(options: any[], userRole: string, userMapping: any) {
   const action = options.find((opt: any) => opt.name === 'action')?.value
   const targetUserId = options.find((opt: any) => opt.name === 'user_id')?.value
   const reason = options.find((opt: any) => opt.name === 'reason')?.value
@@ -308,7 +386,7 @@ async function handleUserCommand(options: any[], userRole: string) {
 }
 
 // Handle reports-related commands
-async function handleReportsCommand(options: any[], userRole: string) {
+async function handleReportsCommand(options: any[], userRole: string, userMapping: any) {
   const action = options.find((opt: any) => opt.name === 'action')?.value
   const reportId = options.find((opt: any) => opt.name === 'report_id')?.value
 
@@ -336,13 +414,13 @@ async function handleReportsCommand(options: any[], userRole: string) {
 }
 
 // Handle roles command
-async function handleRolesCommand(options: any[], userRole: string) {
+async function handleRolesCommand(options: any[], userRole: string, userMapping: any) {
   try {
     const { data, error } = await supabase.functions.invoke('moderation', {
       body: {
         action: 'get_user_roles',
-        user_id: await getAdminUserId(userRole),
-        token: await getAdminToken(userRole)
+        user_id: userMapping.user_id,
+        token: await getTokenForUser(userMapping)
       }
     })
     
@@ -376,13 +454,13 @@ async function handleRolesCommand(options: any[], userRole: string) {
 }
 
 // Backend action functions (using existing Edge Functions)
-async function deleteComment(commentId: number, userRole: string) {
+async function deleteComment(commentId: number, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('comments', {
     body: {
       action: 'delete',
       comment_id: commentId,
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole)
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -390,14 +468,14 @@ async function deleteComment(commentId: number, userRole: string) {
   return data
 }
 
-async function pinComment(commentId: number, userRole: string) {
+async function pinComment(commentId: number, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'pin',
       target_id: commentId,
       target_type: 'comment',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole)
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -405,14 +483,14 @@ async function pinComment(commentId: number, userRole: string) {
   return data
 }
 
-async function unpinComment(commentId: number, userRole: string) {
+async function unpinComment(commentId: number, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'unpin',
       target_id: commentId,
       target_type: 'comment',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole)
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -420,14 +498,14 @@ async function unpinComment(commentId: number, userRole: string) {
   return data
 }
 
-async function lockComment(commentId: number, userRole: string) {
+async function lockComment(commentId: number, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'lock',
       target_id: commentId,
       target_type: 'comment',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole)
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -435,14 +513,14 @@ async function lockComment(commentId: number, userRole: string) {
   return data
 }
 
-async function unlockComment(commentId: number, userRole: string) {
+async function unlockComment(commentId: number, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'unlock',
       target_id: commentId,
       target_type: 'comment',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole)
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -450,7 +528,7 @@ async function unlockComment(commentId: number, userRole: string) {
   return data
 }
 
-async function warnCommentAuthor(commentId: number, reason: string, userRole: string) {
+async function warnCommentAuthor(commentId: number, reason: string, userMapping: any) {
   // Get comment author first
   const { data: comment } = await supabase
     .from('comments')
@@ -465,8 +543,8 @@ async function warnCommentAuthor(commentId: number, reason: string, userRole: st
       action: 'warn',
       target_id: parseInt(comment.user_id),
       target_type: 'user',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole),
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping),
       reason: reason
     }
   })
@@ -475,7 +553,7 @@ async function warnCommentAuthor(commentId: number, reason: string, userRole: st
   return data
 }
 
-async function banCommentAuthor(commentId: number, reason: string, userRole: string) {
+async function banCommentAuthor(commentId: number, reason: string, userMapping: any) {
   // Get comment author first
   const { data: comment } = await supabase
     .from('comments')
@@ -490,8 +568,8 @@ async function banCommentAuthor(commentId: number, reason: string, userRole: str
       action: 'ban',
       target_id: parseInt(comment.user_id),
       target_type: 'user',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole),
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping),
       reason: reason
     }
   })
@@ -500,14 +578,14 @@ async function banCommentAuthor(commentId: number, reason: string, userRole: str
   return data
 }
 
-async function warnUser(userId: string, reason: string, userRole: string) {
+async function warnUser(userId: string, reason: string, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'warn',
       target_id: parseInt(userId),
       target_type: 'user',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole),
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping),
       reason: reason
     }
   })
@@ -516,14 +594,14 @@ async function warnUser(userId: string, reason: string, userRole: string) {
   return data
 }
 
-async function banUser(userId: string, reason: string, duration: number | undefined, userRole: string) {
+async function banUser(userId: string, reason: string, duration: number | undefined, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'ban',
       target_id: parseInt(userId),
       target_type: 'user',
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole),
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping),
       reason: reason,
       duration: duration
     }
@@ -533,7 +611,7 @@ async function banUser(userId: string, reason: string, duration: number | undefi
   return data
 }
 
-async function unbanUser(userId: string, userRole: string) {
+async function unbanUser(userId: string, userMapping: any) {
   // This would need to be implemented in the moderation function
   // For now, we'll update the user_banned flag directly
   const { data, error } = await supabase
@@ -545,7 +623,7 @@ async function unbanUser(userId: string, userRole: string) {
   return data
 }
 
-async function muteUser(userId: string, duration: number, userRole: string) {
+async function muteUser(userId: string, duration: number, userMapping: any) {
   const muteUntil = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString()
   
   const { data, error } = await supabase
@@ -557,7 +635,7 @@ async function muteUser(userId: string, duration: number, userRole: string) {
   return data
 }
 
-async function unmuteUser(userId: string, userRole: string) {
+async function unmuteUser(userId: string, userMapping: any) {
   const { data, error } = await supabase
     .from('comments')
     .update({ user_muted_until: null })
@@ -579,13 +657,13 @@ async function getPendingReports() {
   return data
 }
 
-async function resolveReport(reportId: number, userRole: string) {
+async function resolveReport(reportId: number, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('reports', {
     body: {
       action: 'resolve',
       report_id: reportId,
-      user_id: await getAdminUserId(userRole),
-      token: await getAdminToken(userRole)
+      user_id: userMapping.user_id,
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -604,14 +682,14 @@ async function dismissReport(reportId: number, userRole: string) {
   return data
 }
 
-async function promoteUser(userId: string, reason: string, userRole: string) {
+async function promoteUser(userId: string, reason: string, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'promote_user',
       target_user_id: userId,
-      moderator_id: await getAdminUserId(userRole),
+      moderator_id: userMapping.user_id,
       reason: reason,
-      token: await getAdminToken(userRole)
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -619,14 +697,14 @@ async function promoteUser(userId: string, reason: string, userRole: string) {
   return data
 }
 
-async function demoteUser(userId: string, reason: string, userRole: string) {
+async function demoteUser(userId: string, reason: string, userMapping: any) {
   const { data, error } = await supabase.functions.invoke('moderation', {
     body: {
       action: 'demote_user',
       target_user_id: userId,
-      moderator_id: await getAdminUserId(userRole),
+      moderator_id: userMapping.user_id,
       reason: reason,
-      token: await getAdminToken(userRole)
+      token: await getTokenForUser(userMapping)
     }
   })
   
@@ -634,24 +712,247 @@ async function demoteUser(userId: string, reason: string, userRole: string) {
   return data
 }
 
-// Helper functions
-async function getAdminUserId(userRole: string): Promise<string> {
-  // This should map Discord roles to actual user IDs
-  // For now, return a default admin user ID
-  const { data } = await supabase
-    .from('config')
-    .select('value')
-    .eq('key', 'super_admin_users')
-    .single()
-  
-  const adminUsers = data ? JSON.parse(data.value) : []
-  return adminUsers[0] || '1'
+// Missing critical functions
+
+// Get or create Discord user mapping
+async function getOrCreateDiscordUser(
+  discordUserId: string,
+  username: string,
+  guildId: string,
+  roles: string[]
+) {
+  try {
+    const { data, error } = await supabase
+      .from('discord_users')
+      .select('*')
+      .eq('discord_user_id', discordUserId)
+      .eq('guild_id', guildId)
+      .eq('is_active', true)
+      .single()
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = not found
+      console.error('Error fetching Discord user:', error)
+      return null
+    }
+
+    if (data) {
+      // Update last_verified and roles
+      await supabase
+        .from('discord_users')
+        .update({ 
+          last_verified: new Date().toISOString(),
+          discord_roles: roles,
+          discord_username: username
+        })
+        .eq('id', data.id)
+      
+      return data
+    }
+
+    // User doesn't exist - return null so they need to set up
+    return null
+  } catch (error) {
+    console.error('Error in getOrCreateDiscordUser:', error)
+    return null
+  }
 }
 
-async function getAdminToken(userRole: string): Promise<string> {
-  // This should return actual admin tokens
-  // For now, return a placeholder
-  return 'admin_token_placeholder'
+// Handle config command for Discord user setup
+async function handleConfigCommand(
+  options: any[],
+  userRole: string,
+  userMapping: any,
+  guildId: string,
+  channelId: string
+) {
+  const action = options.find((opt: any) => opt.name === 'action')?.value
+  const userId = options.find((opt: any) => opt.name === 'user_id')?.value
+  const clientType = options.find((opt: any) => opt.name === 'client_type')?.value
+  const discordUser = options.find((opt: any) => opt.name === 'discord_user')?.value
+  const authToken = options.find((opt: any) => opt.name === 'auth_token')?.value
+  const role = options.find((opt: any) => opt.name === 'role')?.value
+
+  try {
+    switch (action) {
+      case 'setup':
+        if (!userId || !clientType) {
+          return createErrorResponse(
+            'Setup requires both user_id and client_type. Example: `/config setup user_id:12345 client_type:anilist`'
+          )
+        }
+
+        // Check if user already exists
+        const { data: existingUser } = await supabase
+          .from('discord_users')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('client_type', clientType)
+          .single()
+
+        if (existingUser) {
+          return createErrorResponse(
+            'This Commentum user is already linked to another Discord user. Contact an admin if you need to change it.'
+          )
+        }
+
+        return createSuccessResponse(
+          `**Discord Integration Setup**\n\n` +
+          `To complete your setup, please ask an administrator to run the following command:\n` +
+          `\`/config approve user_id:${userId} client_type:${clientType} discord_user:<YOUR_DISCORD_ID> auth_token:<YOUR_TOKEN> role:<ROLE>\`\n\n` +
+          `Your Discord ID: \`${userMapping?.discord_user_id || 'Unknown'}\`\n` +
+          `Make sure to provide your actual Discord user ID and authentication token to the admin.\n\n` +
+          `**Token Sources:**\n` +
+          `• **AniList**: Get from your account settings\n` +
+          `• **MyAnimeList**: Generate from API settings\n` +
+          `• **SIMKL**: Get from account settings`
+        )
+
+      case 'verify':
+        if (!userMapping || !userMapping.user_id) {
+          return createErrorResponse(
+            'No Discord integration found. Use `/config setup` to get started.'
+          )
+        }
+
+        const verificationResult = await supabase
+          .rpc('verify_discord_user_role', {
+            discord_user_id_param: userMapping.discord_user_id,
+            guild_id_param: guildId
+          })
+
+        if (verificationResult.error) {
+          return createErrorResponse('Verification failed: ' + verificationResult.error.message)
+        }
+
+        const verification = verificationResult.data[0]
+        if (verification.is_valid) {
+          return createSuccessResponse(
+            `✅ **Verification Successful**\n\n` +
+            `Discord User: ${userMapping.discord_username}\n` +
+            `Commentum User ID: ${userMapping.user_id}\n` +
+            `Role: ${userMapping.user_role}\n` +
+            `Client: ${userMapping.client_type}\n` +
+            `Last Verified: ${new Date(userMapping.last_verified).toLocaleString()}\n` +
+            `Token Status: ${userMapping.auth_token ? 'Stored' : 'Missing'}`
+          )
+        } else {
+          return createErrorResponse(
+            '❌ **Verification Failed**\n\n' +
+            'Your Discord integration has expired or needs re-verification. ' +
+            'Please contact an administrator to refresh your verification.'
+          )
+        }
+
+      case 'approve':
+        if (!userId || !clientType || !discordUser || !authToken || !role) {
+          return createErrorResponse(
+            'Admin approval requires all parameters: user_id, client_type, discord_user, auth_token, role'
+          )
+        }
+
+        // Verify the token first
+        const { verifyToken } = await import('../shared/auth.ts')
+        const tokenValid = await verifyToken(supabase, clientType, userId, authToken)
+        if (!tokenValid) {
+          return createErrorResponse('Token verification failed. The provided token is invalid for this user/platform.')
+        }
+
+        // Get Discord user info
+        const discordUserInfo = await getDiscordUserInfo(discordUser)
+        if (!discordUserInfo) {
+          return createErrorResponse('Failed to fetch Discord user information. Check the Discord user ID.')
+        }
+
+        // Create the Discord user mapping
+        const { error: upsertError } = await supabase
+          .rpc('upsert_discord_user', {
+            discord_user_id_param: discordUser,
+            discord_username_param: discordUserInfo.username,
+            guild_id_param: guildId,
+            user_id_param: userId,
+            user_role_param: role,
+            client_type_param: clientType,
+            auth_token_param: authToken
+          })
+
+        if (upsertError) {
+          return createErrorResponse('Failed to create Discord integration: ' + upsertError.message)
+        }
+
+        return createSuccessResponse(
+          `✅ **Discord Integration Approved**\n\n` +
+          `Discord User: ${discordUserInfo.username} (${discordUser})\n` +
+          `Commentum User: ${userId}\n` +
+          `Platform: ${clientType}\n` +
+          `Role: ${role}\n` +
+          `Token: Verified and stored\n\n` +
+          'The user can now use Discord commands to manage comments.'
+        )
+
+      case 'revoke':
+        if (!discordUser) {
+          return createErrorResponse('Revoke requires discord_user parameter')
+        }
+
+        const { error: revokeError } = await supabase
+          .from('discord_users')
+          .update({ is_active: false })
+          .eq('discord_user_id', discordUser)
+          .eq('guild_id', guildId)
+
+        if (revokeError) {
+          return createErrorResponse('Failed to revoke Discord integration: ' + revokeError.message)
+        }
+
+        return createSuccessResponse(
+          `✅ **Discord Integration Revoked**\n\n` +
+          `Discord User ID: ${discordUser}\n` +
+          'The user can no longer use Discord commands.'
+        )
+
+      case 'register':
+        const guildIdForRegister = options.find((opt: any) => opt.name === 'guild_id')?.value
+        
+        try {
+          const result = await registerCommands(guildIdForRegister)
+          if (result.success) {
+            return createSuccessResponse(
+              `✅ **Commands Registered Successfully!**\n\n` +
+              `${result.message}\n\n` +
+              `📝 **Registered Commands:**\n` +
+              `${Object.values(COMMANDS).map(cmd => `• /${cmd.name} - ${cmd.description}`).join('\n')}\n\n` +
+              `🎯 **Next Steps:**\n` +
+              `• Test the commands in your server\n` +
+              `• Use \`/config setup\` to link your Discord account`
+            )
+          } else {
+            return createErrorResponse(`Failed to register commands: ${result.error}`)
+          }
+        } catch (error) {
+          return createErrorResponse(`Command registration failed: ${error.message}`)
+        }
+
+      default:
+        return createErrorResponse('Unknown config action')
+    }
+  } catch (error) {
+    console.error('Config command error:', error)
+    return createErrorResponse('Failed to execute config command: ' + error.message)
+  }
+}
+
+// Get proper authentication token for user
+async function getTokenForUser(userMapping: any): Promise<string> {
+  // Retrieve the stored authentication token for the user
+  if (!userMapping || !userMapping.user_id) {
+    throw new Error('Invalid user mapping')
+  }
+
+  if (!userMapping.auth_token) {
+    throw new Error('No authentication token stored for this user')
+  }
+
+  return userMapping.auth_token
 }
 
 // Response helpers
@@ -671,6 +972,70 @@ function createErrorResponse(message: string) {
     data: {
       content: `❌ ${message}`,
       flags: 64 // EPHEMERAL
+    }
+  }
+}
+
+// Command Registration Function
+async function registerCommands(guildId?: string) {
+  try {
+    console.log('🚀 Registering Discord slash commands...')
+    
+    // Validate required environment variables
+    if (!DISCORD_APPLICATION_ID) {
+      throw new Error('DISCORD_APPLICATION_ID environment variable is required')
+    }
+    
+    if (!DISCORD_BOT_TOKEN) {
+      throw new Error('DISCORD_BOT_TOKEN environment variable is required')
+    }
+    
+    // Convert COMMANDS object to array for Discord API
+    const commandsArray = Object.values(COMMANDS)
+    
+    // Choose endpoint based on whether guildId is provided
+    const endpoint = guildId 
+      ? `https://discord.com/api/v10/applications/${DISCORD_APPLICATION_ID}/guilds/${guildId}/commands`
+      : `https://discord.com/api/v10/applications/${DISCORD_APPLICATION_ID}/commands`
+
+    const response = await fetch(endpoint, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(commandsArray)
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      console.error('❌ Failed to register commands:', error)
+      throw new Error(`Failed to register commands: ${error}`)
+    }
+
+    const data = await response.json()
+    console.log('✅ Commands registered successfully!')
+    
+    if (Array.isArray(data)) {
+      console.log(`📝 Registered ${data.length} commands:`)
+      data.forEach(cmd => {
+        console.log(`  • /${cmd.name} - ${cmd.description}`)
+      })
+    }
+
+    return {
+      success: true,
+      commands: data,
+      endpoint: guildId ? 'guild' : 'global',
+      message: guildId 
+        ? 'Commands registered for guild (instant availability)'
+        : 'Commands registered globally (may take up to 1 hour to propagate)'
+    }
+  } catch (error) {
+    console.error('❌ Error registering commands:', error)
+    return {
+      success: false,
+      error: error.message
     }
   }
 }
@@ -731,6 +1096,31 @@ async function getDiscordUserInfo(userId: string) {
 
 // Main handler
 serve(async (req) => {
+  // Handle command registration requests (bypass Discord signature verification)
+  if (req.url.includes('/register')) {
+    if (req.method !== 'POST') {
+      return new Response('Method Not Allowed', { status: 405 })
+    }
+
+    try {
+      const { guild_id } = await req.json()
+      const result = await registerCommands(guild_id)
+      
+      return new Response(JSON.stringify(result), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    } catch (error) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: error.message 
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+  }
+
+  // Handle Discord interactions
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }

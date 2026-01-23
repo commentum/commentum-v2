@@ -19,6 +19,9 @@ CREATE TABLE discord_users (
     user_role TEXT NOT NULL CHECK (user_role IN ('user', 'moderator', 'admin', 'super_admin')),
     client_type TEXT NOT NULL CHECK (client_type IN ('anilist', 'myanimelist', 'simkl', 'other')),
     
+    -- Authentication token (encrypted storage)
+    auth_token TEXT, -- Store the user's platform token for Discord bot actions
+    
     -- Status
     is_active BOOLEAN DEFAULT TRUE,
     last_verified TIMESTAMPTZ,
@@ -92,20 +95,16 @@ BEGIN
         RETURN;
     END IF;
     
-    -- Check if user was verified within the last 24 hours
-    IF user_record.last_verified IS NULL 
-       OR user_record.last_verified < NOW() - INTERVAL '24 hours' THEN
-        RETURN QUERY SELECT 
-            user_record.user_id,
-            user_record.user_role,
-            false as is_valid;
-    END IF;
-    
-    -- Return valid user
+    -- Return the validation result, don't just exit
     RETURN QUERY SELECT 
         user_record.user_id,
         user_record.user_role,
-        true as is_valid;
+        CASE 
+            WHEN user_record.last_verified IS NULL 
+                OR user_record.last_verified < NOW() - INTERVAL '24 hours'
+            THEN false
+            ELSE true
+        END as is_valid;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -117,6 +116,7 @@ CREATE OR REPLACE FUNCTION upsert_discord_user(
     user_id_param TEXT,
     user_role_param TEXT,
     client_type_param TEXT,
+    auth_token_param TEXT DEFAULT NULL,
     discord_roles_param TEXT[] DEFAULT '{}'
 )
 RETURNS BOOLEAN AS $$
@@ -137,6 +137,7 @@ BEGIN
             user_id = user_id_param,
             user_role = user_role_param,
             client_type = client_type_param,
+            auth_token = auth_token_param,
             last_verified = NOW(),
             is_active = true
         WHERE id = existing_user.id;
@@ -163,6 +164,7 @@ BEGIN
             user_id,
             user_role,
             client_type,
+            auth_token,
             last_verified,
             is_active
         ) VALUES (
@@ -173,6 +175,7 @@ BEGIN
             user_id_param,
             user_role_param,
             client_type_param,
+            auth_token_param,
             NOW(),
             true
         );
