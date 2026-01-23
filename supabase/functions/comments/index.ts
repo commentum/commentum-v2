@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { fetchUserInfo, fetchMediaInfo } from '../shared/clientAPIs.ts'
 import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
+import { validateActionPermission } from '../shared/permissions.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -328,6 +329,15 @@ async function handleEditComment(supabase: any, params: any) {
     )
   }
 
+  // Additional permission validation using the new system
+  const permissionCheck = validateActionPermission(userRole, 'edit', comment.user_id, comment.user_role)
+  if (!permissionCheck.valid) {
+    return new Response(
+      JSON.stringify({ error: permissionCheck.reason || 'Permission denied' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
   // Update comment with edit history
   const editHistory = comment.edit_history ? JSON.parse(comment.edit_history) : []
   editHistory.push({
@@ -384,10 +394,10 @@ async function handleDeleteComment(supabase: any, params: any) {
 
   // Check permissions - user can delete own comment, only admins and super admins can delete others
   if (comment.user_id !== user_id) {
-    const isAdmin = userRole === 'admin' || userRole === 'super_admin'
-    if (!isAdmin) {
+    const permissionCheck = validateActionPermission(userRole, 'delete_others', comment.user_id, comment.user_role)
+    if (!permissionCheck.valid) {
       return new Response(
-        JSON.stringify({ error: 'Only admins and super admins can delete other users comments' }),
+        JSON.stringify({ error: permissionCheck.reason || 'Only admins and super admins can delete other users comments' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

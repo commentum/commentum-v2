@@ -72,6 +72,15 @@ serve(async (req) => {
       case 'get_queue':
         return await handleGetModerationQueue(supabase)
       
+      case 'promote_user':
+        return await handlePromoteUser(supabase, { target_user_id, moderator_id, reason, moderatorRole })
+      
+      case 'demote_user':
+        return await handleDemoteUser(supabase, { target_user_id, moderator_id, reason, moderatorRole })
+      
+      case 'get_user_roles':
+        return await handleGetUserRoles(supabase)
+      
       default:
         return new Response(
           JSON.stringify({ error: 'Invalid action' }),
@@ -482,4 +491,249 @@ async function handleGetModerationQueue(supabase: any) {
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
+}
+
+async function handlePromoteUser(supabase: any, params: any) {
+  const { target_user_id, moderator_id, reason, moderatorRole } = params
+
+  // Only admin and super_admin can promote users
+  if (!['admin', 'super_admin'].includes(moderatorRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Admin permissions required to promote users' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Get target user's current role
+  const targetUserRole = await getUserRole(supabase, target_user_id)
+  
+  // Check permissions (can't promote users with equal or higher role)
+  if (!canModerate(moderatorRole, targetUserRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Cannot promote user with equal or higher role' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Define promotion hierarchy
+  const roleHierarchy = ['user', 'moderator', 'admin', 'super_admin']
+  const currentRoleIndex = roleHierarchy.indexOf(targetUserRole)
+  
+  if (currentRoleIndex === -1 || currentRoleIndex >= roleHierarchy.length - 1) {
+    return new Response(
+      JSON.stringify({ error: 'User is already at the highest role or has invalid role' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const newRole = roleHierarchy[currentRoleIndex + 1]
+
+  // Remove user from current role list
+  await removeFromRoleList(supabase, target_user_id, targetUserRole)
+  
+  // Add user to new role list
+  await addToRoleList(supabase, target_user_id, newRole)
+
+  // Update all user's comments to reflect new role
+  const { error } = await supabase
+    .from('comments')
+    .update({
+      user_role: newRole,
+      moderated: true,
+      moderated_at: new Date().toISOString(),
+      moderated_by: moderator_id,
+      moderation_reason: reason,
+      moderation_action: `promoted_to_${newRole}`
+    })
+    .eq('user_id', target_user_id)
+
+  if (error) throw error
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      action: 'promoted',
+      targetUserId: target_user_id,
+      previousRole: targetUserRole,
+      newRole: newRole,
+      reason
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleDemoteUser(supabase: any, params: any) {
+  const { target_user_id, moderator_id, reason, moderatorRole } = params
+
+  // Only admin and super_admin can demote users
+  if (!['admin', 'super_admin'].includes(moderatorRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Admin permissions required to demote users' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Get target user's current role
+  const targetUserRole = await getUserRole(supabase, target_user_id)
+  
+  // Check permissions (can't demote users with equal or higher role, except super_admin can demote admin)
+  if (moderatorRole !== 'super_admin' && !canModerate(moderatorRole, targetUserRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Cannot demote user with equal or higher role' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Special rule: Only super_admin can demote admins
+  if (targetUserRole === 'admin' && moderatorRole !== 'super_admin') {
+    return new Response(
+      JSON.stringify({ error: 'Only super admins can demote admins' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Define demotion hierarchy
+  const roleHierarchy = ['user', 'moderator', 'admin', 'super_admin']
+  const currentRoleIndex = roleHierarchy.indexOf(targetUserRole)
+  
+  if (currentRoleIndex <= 0) {
+    return new Response(
+      JSON.stringify({ error: 'User is already at the lowest role or has invalid role' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const newRole = roleHierarchy[currentRoleIndex - 1]
+
+  // Remove user from current role list
+  await removeFromRoleList(supabase, target_user_id, targetUserRole)
+  
+  // Add user to new role list
+  await addToRoleList(supabase, target_user_id, newRole)
+
+  // Update all user's comments to reflect new role
+  const { error } = await supabase
+    .from('comments')
+    .update({
+      user_role: newRole,
+      moderated: true,
+      moderated_at: new Date().toISOString(),
+      moderated_by: moderator_id,
+      moderation_reason: reason,
+      moderation_action: `demoted_to_${newRole}`
+    })
+    .eq('user_id', target_user_id)
+
+  if (error) throw error
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      action: 'demoted',
+      targetUserId: target_user_id,
+      previousRole: targetUserRole,
+      newRole: newRole,
+      reason
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleGetUserRoles(supabase: any) {
+  try {
+    const { data: superAdmins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'super_admin_users')
+      .single()
+
+    const { data: admins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'admin_users')
+      .single()
+
+    const { data: moderators } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'moderator_users')
+      .single()
+
+    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
+    const adminList = admins ? JSON.parse(admins.value) : []
+    const moderatorList = moderators ? JSON.parse(moderators.value) : []
+
+    return new Response(
+      JSON.stringify({
+        super_admins: superAdminList,
+        admins: adminList,
+        moderators: moderatorList,
+        total_users: superAdminList.length + adminList.length + moderatorList.length
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  } catch (error) {
+    console.error('Get user roles error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Failed to fetch user roles' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Helper functions for role management
+async function removeFromRoleList(supabase: any, userId: string, role: string) {
+  const roleKeyMap = {
+    'super_admin': 'super_admin_users',
+    'admin': 'admin_users',
+    'moderator': 'moderator_users'
+  }
+
+  const configKey = roleKeyMap[role]
+  if (!configKey) return
+
+  const { data: currentConfig } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', configKey)
+    .single()
+
+  if (currentConfig) {
+    const userList = JSON.parse(currentConfig.value)
+    const updatedList = userList.filter((id: string) => id !== userId)
+    
+    await supabase
+      .from('config')
+      .update({ value: JSON.stringify(updatedList) })
+      .eq('key', configKey)
+  }
+}
+
+async function addToRoleList(supabase: any, userId: string, role: string) {
+  const roleKeyMap = {
+    'super_admin': 'super_admin_users',
+    'admin': 'admin_users',
+    'moderator': 'moderator_users'
+  }
+
+  const configKey = roleKeyMap[role]
+  if (!configKey) return
+
+  const { data: currentConfig } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', configKey)
+    .single()
+
+  if (currentConfig) {
+    const userList = JSON.parse(currentConfig.value)
+    if (!userList.includes(userId)) {
+      userList.push(userId)
+      
+      await supabase
+        .from('config')
+        .update({ value: JSON.stringify(userList) })
+        .eq('key', configKey)
+    }
+  }
 }
