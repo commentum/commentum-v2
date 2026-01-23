@@ -67,26 +67,46 @@ serve(async (req) => {
       )
     }
 
-    // For admin actions (edit, delete), verify token
+      // For delete action, check if user owns the comment first
     let userRole = 'user'
-    if (action === 'edit' || action === 'delete') {
-      if (!token) {
+    if (action === 'delete') {
+      // First check if comment exists and get ownership info
+      const { data: comment } = await supabase
+        .from('comments')
+        .select('user_id, user_role')
+        .eq('id', comment_id)
+        .single()
+
+      if (!comment) {
         return new Response(
-          JSON.stringify({ error: 'Token required for admin actions' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ error: 'Comment not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
-      const tokenVerification = await verifyAdminAccess(supabase, client_type, user_id, token)
-      if (!tokenVerification.valid) {
-        return new Response(
-          JSON.stringify({ error: tokenVerification.reason || 'Authentication failed' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+      // If user owns the comment, no token needed
+      if (comment.user_id === user_id) {
+        userRole = await getUserRole(supabase, user_id)
+      } else {
+        // User is trying to delete someone else's comment - require token
+        if (!token) {
+          return new Response(
+            JSON.stringify({ error: 'Token required to delete other users comments' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const tokenVerification = await verifyAdminAccess(supabase, client_type, user_id, token)
+        if (!tokenVerification.valid) {
+          return new Response(
+            JSON.stringify({ error: tokenVerification.reason || 'Authentication failed' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        userRole = tokenVerification.role
       }
-      userRole = tokenVerification.role
     } else {
-      // For regular actions, just get user role without token verification
+      // For regular actions (create, edit), just get user role without token verification
       userRole = await getUserRole(supabase, user_id)
     }
 
@@ -300,10 +320,10 @@ async function handleEditComment(supabase: any, params: any) {
     )
   }
 
-  // Check permissions - user can edit own comment, moderators can edit any
-  if (comment.user_id !== user_id && !canModerate(userRole, comment.user_role)) {
+  // Check permissions - ONLY users can edit their own comments
+  if (comment.user_id !== user_id) {
     return new Response(
-      JSON.stringify({ error: 'Permission denied' }),
+      JSON.stringify({ error: 'You can only edit your own comments' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -341,6 +361,7 @@ async function handleEditComment(supabase: any, params: any) {
 async function handleDeleteComment(supabase: any, params: any) {
   const { comment_id, user_id, userRole, req } = params
 
+  // Get full comment data for validation
   const { data: comment } = await supabase
     .from('comments')
     .select('*')
@@ -361,12 +382,15 @@ async function handleDeleteComment(supabase: any, params: any) {
     )
   }
 
-  // Check permissions - user can delete own comment, moderators can delete any
-  if (comment.user_id !== user_id && !canModerate(userRole, comment.user_role)) {
-    return new Response(
-      JSON.stringify({ error: 'Permission denied' }),
-      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  // Check permissions - user can delete own comment, only admins and super admins can delete others
+  if (comment.user_id !== user_id) {
+    const isAdmin = userRole === 'admin' || userRole === 'super_admin'
+    if (!isAdmin) {
+      return new Response(
+        JSON.stringify({ error: 'Only admins and super admins can delete other users comments' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
   }
 
   // Soft delete
