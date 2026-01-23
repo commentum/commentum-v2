@@ -91,7 +91,7 @@ CREATE TABLE comments (
 
 -- Configuration table for system settings
 CREATE TABLE config (
-    id INTEGER PRIMARY KEY DEFAULT nextval('comment_id_seq'),
+    id INTEGER PRIMARY KEY,
     key TEXT UNIQUE NOT NULL,
     value TEXT NOT NULL, -- JSON value
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -99,9 +99,6 @@ CREATE TABLE config (
 
 -- Create separate sequence for config IDs
 CREATE SEQUENCE IF NOT EXISTS config_id_seq START 1000;
-
--- Reset config sequence to start from 1000
-ALTER SEQUENCE config_id_seq RESTART WITH 1000;
 
 -- Update config table to use config sequence
 ALTER TABLE config ALTER COLUMN id SET DEFAULT nextval('config_id_seq');
@@ -161,6 +158,17 @@ INSERT INTO config (key, value) VALUES
     ('myanimelist_client_id', ''),
     ('simkl_client_id', '');
 
+-- Helper function to check if user is in a role list
+CREATE OR REPLACE FUNCTION is_user_in_role(user_id_param TEXT, role_key TEXT)
+RETURNS BOOLEAN AS $$
+DECLARE
+    role_array JSONB;
+BEGIN
+    SELECT value::jsonb INTO role_array FROM config WHERE key = role_key;
+    RETURN role_array @> to_jsonb(user_id_param);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Row Level Security (RLS) Policies
 ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE config ENABLE ROW LEVEL SECURITY;
@@ -182,51 +190,37 @@ CREATE POLICY "Anyone can insert comments" ON comments
 CREATE POLICY "Users can update own comments" ON comments
     FOR UPDATE USING (
         auth.uid()::text = user_id OR
-        user_role = ANY(
-            SELECT COALESCE(
-                (SELECT value::jsonb FROM config WHERE key = 'moderator_users')::text[],
-                ARRAY[]::text[]
-            )
-        )
+        is_user_in_role(auth.uid()::text, 'moderator_users') OR
+        is_user_in_role(auth.uid()::text, 'admin_users') OR
+        is_user_in_role(auth.uid()::text, 'super_admin_users')
     );
 
 -- Users can delete their own comments, moderators can delete any
 CREATE POLICY "Users can delete own comments" ON comments
     FOR DELETE USING (
         auth.uid()::text = user_id OR
-        user_role = ANY(
-            SELECT COALESCE(
-                (SELECT value::jsonb FROM config WHERE key = 'moderator_users')::text[],
-                ARRAY[]::text[]
-            )
-        )
+        is_user_in_role(auth.uid()::text, 'moderator_users') OR
+        is_user_in_role(auth.uid()::text, 'admin_users') OR
+        is_user_in_role(auth.uid()::text, 'super_admin_users')
     );
 
 -- Config RLS Policies
--- Only authenticated users can read config
-CREATE POLICY "Authenticated users can read config" ON config
-    FOR SELECT USING (auth.role() = 'authenticated');
+-- Anyone can read config (needed for public comment system)
+CREATE POLICY "Anyone can read config" ON config
+    FOR SELECT USING (true);
 
 -- Only admins can update config
 CREATE POLICY "Admins can update config" ON config
     FOR UPDATE USING (
-        auth.uid()::text = ANY(
-            SELECT COALESCE(
-                (SELECT value::jsonb FROM config WHERE key = 'admin_users')::text[],
-                ARRAY[]::text[]
-            )
-        )
+        is_user_in_role(auth.uid()::text, 'admin_users') OR
+        is_user_in_role(auth.uid()::text, 'super_admin_users')
     );
 
 -- Only admins can insert config
 CREATE POLICY "Admins can insert config" ON config
     FOR INSERT WITH CHECK (
-        auth.uid()::text = ANY(
-            SELECT COALESCE(
-                (SELECT value::jsonb FROM config WHERE key = 'admin_users')::text[],
-                ARRAY[]::text[]
-            )
-        )
+        is_user_in_role(auth.uid()::text, 'admin_users') OR
+        is_user_in_role(auth.uid()::text, 'super_admin_users')
     );
 
 -- No one can delete config (use update instead)
