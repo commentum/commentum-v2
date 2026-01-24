@@ -1,9 +1,12 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
+// Import crypto for signature verification
+const nacl = await import('https://esm.sh/tweetnacl@1.0.3')
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
 }
 
 // Discord bot configuration
@@ -11,9 +14,40 @@ const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
 const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
 const DISCORD_GUILD_ID = Deno.env.get('DISCORD_GUILD_ID')
 const DISCORD_WEBHOOK_URL = Deno.env.get('DISCORD_WEBHOOK_URL')
+const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')
 
 // Discord API endpoints
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
+
+// Verify Discord request signature
+function verifyDiscordSignature(
+  signature: string,
+  timestamp: string,
+  body: string
+): boolean {
+  if (!DISCORD_PUBLIC_KEY) {
+    console.error('DISCORD_PUBLIC_KEY not set')
+    return false
+  }
+
+  try {
+    const isVerified = nacl.sign.detached.verify(
+      new TextEncoder().encode(timestamp + body),
+      hexToUint8Array(signature),
+      hexToUint8Array(DISCORD_PUBLIC_KEY)
+    )
+    return isVerified
+  } catch (error) {
+    console.error('Signature verification error:', error)
+    return false
+  }
+}
+
+function hexToUint8Array(hex: string): Uint8Array {
+  const matches = hex.match(/.{1,2}/g)
+  if (!matches) return new Uint8Array()
+  return new Uint8Array(matches.map(byte => parseInt(byte, 16)))
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -26,7 +60,27 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const body = await req.json()
+    // Get signature headers for Discord verification
+    const signature = req.headers.get('x-signature-ed25519')
+    const timestamp = req.headers.get('x-signature-timestamp')
+    const rawBody = await req.text()
+    
+    // Verify signature if headers are present (Discord interactions)
+    if (signature && timestamp) {
+      const isValid = verifyDiscordSignature(signature, timestamp, rawBody)
+      
+      if (!isValid) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid request signature' }),
+          { 
+            status: 401, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
+      }
+    }
+
+    const body = JSON.parse(rawBody)
     
     // Handle Discord PING verification
     if (body.type === 1) {
@@ -268,7 +322,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'platform',
           description: 'Choose your platform',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'AniList', value: 'anilist' },
@@ -279,13 +333,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Your platform user ID',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'token',
           description: 'Your platform access token',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
@@ -297,19 +351,19 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'shadow',
           description: 'Shadow ban (true/false)',
-          type: 5, // BOOLEAN
+          type: 5,
           required: false
         }
       ]
@@ -321,13 +375,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to unban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for unban',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -339,13 +393,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to promote',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'role',
           description: 'New role to assign',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'Moderator', value: 'moderator' },
@@ -356,7 +410,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'reason',
           description: 'Reason for promotion',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -368,13 +422,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to demote',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'role',
           description: 'New role to assign',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'User', value: 'user' },
@@ -385,7 +439,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'reason',
           description: 'Reason for demotion',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -397,41 +451,41 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to warn',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for warning',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
     },
     {
-  name: 'mute',
-  description: 'Mute a user (Mod+ only)',
-  options: [
-    {
-      name: 'user_id',
-      description: 'Platform user ID to mute',
-      type: 3, // STRING
-      required: true
+      name: 'mute',
+      description: 'Mute a user (Mod+ only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to mute',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for muting',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'duration',
+          description: 'Duration in hours (default: 24)',
+          type: 4,
+          required: false
+        }
+      ]
     },
-    {
-      name: 'reason',
-      description: 'Reason for muting',
-      type: 3, // STRING
-      required: true
-    },
-    {
-      name: 'duration',
-      description: 'Duration in hours (default: 24)',
-      type: 4, // INTEGER
-      required: false
-    }
-  ]
-},
     {
       name: 'shadowban',
       description: 'Shadow ban a user (Admin/Super Admin only)',
@@ -439,13 +493,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to shadow ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for shadow ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
@@ -457,13 +511,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to unshadow ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for removing shadow ban',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -475,13 +529,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID to pin',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for pinning',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -493,13 +547,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID to unpin',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for unpinning',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -511,13 +565,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID to lock',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for locking',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -529,13 +583,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID to unlock',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for unlocking',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -547,7 +601,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID to delete',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         }
       ]
@@ -559,13 +613,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID to report',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for report',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'Spam', value: 'spam' },
@@ -580,7 +634,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'notes',
           description: 'Additional notes',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -592,19 +646,19 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID with report',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reporter_id',
           description: 'Reporter user ID',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'resolution',
           description: 'Resolution type',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'Resolved', value: 'resolved' },
@@ -614,7 +668,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'notes',
           description: 'Review notes',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -630,7 +684,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID to lookup',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
@@ -642,7 +696,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'comment_id',
           description: 'Comment ID to lookup',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         }
       ]
@@ -654,7 +708,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'action',
           description: 'Action to perform',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'View Config', value: 'view' },
@@ -664,13 +718,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'key',
           description: 'Configuration key',
-          type: 3, // STRING
+          type: 3,
           required: false
         },
         {
           name: 'value',
           description: 'New configuration value',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -686,7 +740,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'action',
           description: 'Action to perform',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'Register', value: 'register' },
@@ -698,7 +752,7 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'platform',
           description: 'Platform (for registration)',
-          type: 3, // STRING
+          type: 3,
           required: false,
           choices: [
             { name: 'AniList', value: 'anilist' },
@@ -709,13 +763,13 @@ async function handleSyncCommands(supabase: any) {
         {
           name: 'user_id',
           description: 'Platform user ID (for registration)',
-          type: 3, // STRING
+          type: 3,
           required: false
         },
         {
           name: 'token',
           description: 'Platform access token (for registration)',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -777,7 +831,12 @@ async function handleDiscordInteraction(supabase: any, params: any) {
     )
   }
 
-  const { name: commandName, options, member, guild_id, channel_id } = command_data
+  // Extract data from Discord interaction payload
+  const commandName = command_data.data?.name
+  const options = command_data.data?.options || []
+  const member = command_data.member
+  const guild_id = command_data.guild_id
+  const channel_id = command_data.channel_id
   const discordUserId = member?.user?.id
 
   if (!discordUserId) {
@@ -787,7 +846,12 @@ async function handleDiscordInteraction(supabase: any, params: any) {
     )
   }
 
-  // Get user role and permissions
+  // Special handling for register command - doesn't require existing registration
+  if (commandName === 'register') {
+    return await handleRegisterCommand(supabase, options, member)
+  }
+
+  // For all other commands, check if user is registered
   const { data: registration } = await supabase
     .from('discord_users')
     .select('user_role, platform_user_id, platform_type')
@@ -801,7 +865,7 @@ async function handleDiscordInteraction(supabase: any, params: any) {
         type: 4,
         data: {
           content: '❌ You need to register first using `/register`',
-          flags: 64 // Ephemeral
+          flags: 64
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -811,9 +875,6 @@ async function handleDiscordInteraction(supabase: any, params: any) {
   // Handle different commands
   try {
     switch (commandName) {
-      case 'register':
-        return await handleRegisterCommand(supabase, options, member)
-      
       case 'ban':
         return await handleBanCommand(supabase, options, registration)
       
