@@ -391,47 +391,29 @@ async function handleSyncCommands(supabase: any) {
       ]
     },
     {
-      name: 'mute',
-      description: 'Mute a user (Mod+ only)',
-      options: [
-        {
-          name: 'user_id',
-          description: 'Platform user ID to mute',
-          type: 3, // STRING
-          required: true
-        },
-        {
-          name: 'duration',
-          description: 'Duration in hours (default: 24)',
-          type: 4, // INTEGER
-          required: false
-        },
-        {
-          name: 'reason',
-          description: 'Reason for muting',
-          type: 3, // STRING
-          required: true
-        }
-      ]
+  name: 'mute',
+  description: 'Mute a user (Mod+ only)',
+  options: [
+    {
+      name: 'user_id',
+      description: 'Platform user ID to mute',
+      type: 3, // STRING
+      required: true
     },
     {
-      name: 'unmute',
-      description: 'Unmute a user (Mod+ only)',
-      options: [
-        {
-          name: 'user_id',
-          description: 'Platform user ID to unmute',
-          type: 3, // STRING
-          required: true
-        },
-        {
-          name: 'reason',
-          description: 'Reason for unmuting',
-          type: 3, // STRING
-          required: false
-        }
-      ]
+      name: 'reason',
+      description: 'Reason for muting',
+      type: 3, // STRING
+      required: true
     },
+    {
+      name: 'duration',
+      description: 'Duration in hours (default: 24)',
+      type: 4, // INTEGER
+      required: false
+    }
+  ]
+},
     {
       name: 'shadowban',
       description: 'Shadow ban a user (Admin/Super Admin only)',
