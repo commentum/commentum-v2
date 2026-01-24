@@ -201,10 +201,42 @@ async function handleGetUserRole(supabase: any, params: any) {
   )
 }
 
-async function handleSyncCommands() {
+async function handleSyncCommands(supabase: any) {
+  // Fetch Discord config from database
+  const { data: botTokenConfig } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', 'discord_bot_token')
+    .single()
+
+  const { data: clientIdConfig } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', 'discord_client_id')
+    .single()
+
+  const { data: guildIdConfig } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', 'discord_guild_id')
+    .single()
+
+  // DON'T parse these - they're plain strings, not JSON
+  const DISCORD_BOT_TOKEN = botTokenConfig?.value || ''
+  const DISCORD_CLIENT_ID = clientIdConfig?.value || ''
+  const DISCORD_GUILD_ID = guildIdConfig?.value || ''
+
   if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) {
     return new Response(
-      JSON.stringify({ error: 'Discord configuration missing' }),
+      JSON.stringify({ 
+        error: 'Discord configuration missing in database',
+        details: {
+          bot_token: !!DISCORD_BOT_TOKEN,
+          client_id: !!DISCORD_CLIENT_ID,
+          guild_id: !!DISCORD_GUILD_ID
+        },
+        message: 'Please update config table with Discord credentials'
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -686,7 +718,7 @@ async function handleSyncCommands() {
           type: 3, // STRING
           required: false
         }
-        ]
+      ]
     },
     {
       name: 'help',
@@ -696,7 +728,7 @@ async function handleSyncCommands() {
 
   try {
     const response = await fetch(
-      `https://discord.com/api/v10/applications/${DISCORD_CLIENT_ID}/guilds/${DISCORD_GUILD_ID}/commands`,
+      `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${DISCORD_GUILD_ID}/commands`,
       {
         method: 'PUT',
         headers: {
@@ -708,7 +740,9 @@ async function handleSyncCommands() {
     )
 
     if (!response.ok) {
-      throw new Error(`Discord API error: ${response.statusText}`)
+      const errorText = await response.text()
+      console.error('Discord API error:', errorText)
+      throw new Error(`Discord API error: ${response.status} - ${errorText}`)
     }
 
     const result = await response.json()
@@ -717,14 +751,17 @@ async function handleSyncCommands() {
       JSON.stringify({
         success: true,
         commands: result,
-        message: `Synced ${result.length} commands to Discord`
+        message: `Synced ${result.length} commands to Discord guild ${DISCORD_GUILD_ID}`
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
     console.error('Error syncing Discord commands:', error)
     return new Response(
-      JSON.stringify({ error: 'Failed to sync Discord commands' }),
+      JSON.stringify({ 
+        error: 'Failed to sync Discord commands',
+        message: error.message 
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -2349,31 +2386,42 @@ async function removeFromAllRoles(supabase: any, userId: string) {
 async function handleCmdCommand(supabase: any, options: any, registration: any, member: any) {
   const action = options.find(opt => opt.name === 'action')?.value
 
-  switch (action) {
-    case 'register':
-      return await handleCmdRegister(supabase, options, member, registration)
-    
-    case 'list':
-      return await handleCmdList(registration)
-    
-    case 'quick':
-      return await handleCmdQuick(registration)
-    
-    case 'status':
-      return await handleCmdStatus(supabase, registration)
-    
-    default:
-      return new Response(
-        JSON.stringify({
-          type: 4,
-          data: {
-            content: '❌ Invalid action. Use: register, list, quick, or status',
-            flags: 64
-          }
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-  }
+switch (action) {
+  case 'register':
+    return await handleDiscordRegistration(supabase, {
+      discord_user_id,
+      discord_username,
+      platform_user_id,
+      platform_type,
+      token
+    })
+  
+  case 'verify':
+    return await handleDiscordVerification(supabase, {
+      discord_user_id,
+      platform_user_id,
+      platform_type,
+      token
+    })
+  
+  case 'get_user_role':
+    return await handleGetUserRole(supabase, {
+      discord_user_id
+    })
+  
+  case 'sync_commands':
+    return await handleSyncCommands(supabase)  // ← Pass supabase here
+  
+  case 'interact':
+    return await handleDiscordInteraction(supabase, {
+      command_data
+    })
+  
+  default:
+    return new Response(
+      JSON.stringify({ error: 'Invalid action' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
 }
 
 async function handleCmdRegister(supabase: any, options: any, member: any, registration: any) {
