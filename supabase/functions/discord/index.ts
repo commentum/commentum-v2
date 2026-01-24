@@ -52,7 +52,7 @@ serve(async (req) => {
         })
       
       case 'sync_commands':
-        return await handleSyncCommands()
+        return await handleSyncCommands(supabase)
       
       case 'interact':
         return await handleDiscordInteraction(supabase, {
