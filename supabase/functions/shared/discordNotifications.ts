@@ -31,7 +31,7 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
       .eq('key', 'discord_webhook_url')
       .single()
 
-    const webhookUrl = webhookConfig ? JSON.parse(webhookConfig.value) : null
+    const webhookUrl = webhookConfig?.value || null
     if (!webhookUrl) {
       return { success: false, reason: 'Discord webhook URL not configured' }
     }
