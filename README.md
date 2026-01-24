@@ -254,7 +254,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🔗 Related Links
 
-- **Live Demo**: https://lvyelpikusmxhobjragw.supabase.co
+- **Live Demo**: https://whzwmfxngelicmjyxwmr.supabase.co
 - **Supabase**: https://supabase.com
 - **AniList API**: https://anilist.gitbook.io/anilist-apiv2-docs/
 - **MyAnimeList API**: https://myanimelist.net/apiconfig/references/api/v2
