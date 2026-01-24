@@ -292,12 +292,15 @@ async function handleCreateComment(supabase: any, params: any) {
       comment: {
         id: comment.id,
         username: comment.username,
+        user_id: comment.user_id,
         content: comment.content,
         client_type: comment.client_type,
+        media_id: comment.media_id,
         parent_id: comment.parent_id
       },
       user: userInfo,
       media: {
+        id: mediaInfo.id || media_id,
         title: mediaInfo.title,
         year: mediaInfo.year,
         poster: mediaInfo.poster
@@ -383,8 +386,10 @@ async function handleEditComment(supabase: any, params: any) {
       comment: {
         id: updatedComment.id,
         username: updatedComment.username,
+        user_id: updatedComment.user_id,
         content: updatedComment.content,
-        client_type: updatedComment.client_type
+        client_type: updatedComment.client_type,
+        media_id: updatedComment.media_id
       }
     })
   } catch (notificationError) {
@@ -459,8 +464,10 @@ async function handleDeleteComment(supabase: any, params: any) {
       comment: {
         id: deletedComment.id,
         username: deletedComment.username,
+        user_id: deletedComment.user_id,
         content: comment.content, // Original content before deletion
-        client_type: deletedComment.client_type
+        client_type: deletedComment.client_type,
+        media_id: deletedComment.media_id
       },
       moderator
     })

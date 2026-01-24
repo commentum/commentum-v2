@@ -161,10 +161,13 @@ serve(async (req) => {
         comment: {
           id: comment.id,
           username: comment.username,
+          user_id: comment.user_id,
           content: comment.content,
-          client_type: comment.client_type
+          client_type: comment.client_type,
+          media_id: comment.media_id
         },
         media: {
+          id: comment.media_id,
           title: comment.media_title,
           year: comment.media_year,
           poster: comment.media_poster

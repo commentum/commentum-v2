@@ -1,7 +1,7 @@
 // Discord notification utilities for Commentum v2
 
 export interface DiscordNotificationData {
-  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'vote_cast' | 'report_filed';
+  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'vote_cast' | 'report_filed' | 'report_resolved' | 'report_dismissed';
   comment?: any;
   user?: any;
   media?: any;
@@ -135,7 +135,7 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
   switch (data.type) {
     case 'comment_created':
-      embed.title = '💬 New Comment Posted'
+      embed.title = 'New Comment Posted'
       embed.color = 0x00ff00 // Green
       embed.description = `**${data.comment.username}** posted a new comment`
       
@@ -148,10 +148,16 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
         }]
       }
 
+      embed.fields = embed.fields || []
+      embed.fields.push({
+        name: 'IDs (Click to Copy)',
+        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\``,
+        inline: false
+      })
+
       if (data.media) {
-        embed.fields = embed.fields || []
         embed.fields.push({
-          name: '📺 Media',
+          name: 'Media',
           value: `**${data.media.title}** (${data.media.year || 'Unknown Year'})`,
           inline: true
         })
@@ -163,16 +169,15 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
         }
       }
 
-      embed.fields = embed.fields || []
       embed.fields.push({
-        name: '👤 User',
+        name: 'User',
         value: `${data.comment.username} (${data.comment.client_type})`,
         inline: true
       })
 
       if (data.comment.parent_id) {
         embed.fields.push({
-          name: '🔗 Reply To',
+          name: 'Reply To',
           value: `Comment #${data.comment.parent_id}`,
           inline: true
         })
@@ -180,7 +185,7 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       break
 
     case 'comment_updated':
-      embed.title = '✏️ Comment Edited'
+      embed.title = 'Comment Edited'
       embed.color = 0xffff00 // Yellow
       embed.description = `**${data.comment.username}** edited their comment`
       
@@ -192,71 +197,103 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
             : data.comment.content
         }]
       }
+
+      embed.fields = embed.fields || []
+      embed.fields.push({
+        name: 'IDs (Click to Copy)',
+        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\``,
+        inline: false
+      })
       break
 
     case 'comment_deleted':
-      embed.title = '🗑️ Comment Deleted'
+      embed.title = 'Comment Deleted'
       embed.color = 0xff0000 // Red
       embed.description = `**${data.comment.username}** deleted their comment`
-      embed.fields = [{
-        name: 'Deleted By',
-        value: data.moderator ? `${data.moderator.username} (Mod)` : `${data.comment.username} (Self)`,
-        inline: true
-      }]
+      embed.fields = [
+        {
+          name: 'Deleted By',
+          value: data.moderator ? `${data.moderator.username} (Mod)` : `${data.comment.username} (Self)`,
+          inline: true
+        },
+        {
+          name: 'IDs (Click to Copy)',
+          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\``,
+          inline: false
+        }
+      ]
       break
 
     case 'user_banned':
-      embed.title = '🚫 User Banned'
+      embed.title = 'User Banned'
       embed.color = 0xff0000 // Red
       embed.description = `**${data.user?.username || data.user?.id}** has been banned`
       embed.fields = [
         {
-          name: '👤 Banned User',
-          value: data.user?.username || data.user?.id,
+          name: 'Banned User',
+          value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
           inline: true
         },
         {
-          name: '🔨 Banned By',
-          value: data.moderator?.username || 'System',
+          name: 'Banned By',
+          value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
           inline: true
+        },
+        {
+          name: 'IDs (Click to Copy)',
+          value: `**Banned User ID:** \`${data.user?.id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
+          inline: false
         }
       ]
 
       if (data.reason) {
         embed.fields.push({
-          name: '📝 Reason',
+          name: 'Reason',
           value: data.reason
         })
       }
       break
 
     case 'user_warned':
-      embed.title = '⚠️ User Warned'
+      embed.title = 'User Warned'
       embed.color = 0xffa500 // Orange
       embed.description = `**${data.user?.username || data.user?.id}** has been warned`
       embed.fields = [
         {
-          name: '⚠️ Warned User',
-          value: data.user?.username || data.user?.id,
+          name: 'Warned User',
+          value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
           inline: true
         },
         {
-          name: '🛡️ Warned By',
-          value: data.moderator?.username || 'System',
+          name: 'Warned By',
+          value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
           inline: true
+        },
+        {
+          name: 'IDs (Click to Copy)',
+          value: `**Warned User ID:** \`${data.user?.id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
+          inline: false
         }
       ]
 
       if (data.reason) {
         embed.fields.push({
-          name: '📝 Reason',
+          name: 'Reason',
           value: data.reason
+        })
+      }
+
+      if (data.severity && data.severity !== 'warning') {
+        embed.fields.push({
+          name: 'Action',
+          value: data.severity === 'mute' ? 'Muted' : data.severity === 'ban' ? 'Banned' : data.severity,
+          inline: true
         })
       }
       break
 
     case 'comment_pinned':
-      embed.title = '📌 Comment Pinned'
+      embed.title = 'Comment Pinned'
       embed.color = 0x00bfff // Deep Sky Blue
       embed.description = `**${data.moderator?.username}** pinned a comment by **${data.comment.username}**`
       
@@ -269,10 +306,16 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
         }]
       }
 
+      embed.fields = embed.fields || []
+      embed.fields.push({
+        name: 'IDs (Click to Copy)',
+        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
+        inline: false
+      })
+
       if (data.reason) {
-        embed.fields = embed.fields || []
         embed.fields.push({
-          name: '📝 Reason',
+          name: 'Reason',
           value: data.reason,
           inline: true
         })
@@ -280,20 +323,26 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       break
 
     case 'comment_locked':
-      embed.title = '🔒 Comment Thread Locked'
+      embed.title = 'Comment Thread Locked'
       embed.color = 0x808080 // Gray
       embed.description = `**${data.moderator?.username}** locked a comment thread by **${data.comment.username}**`
       
+      embed.fields = [{
+        name: 'IDs (Click to Copy)',
+        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
+        inline: false
+      }]
+
       if (data.reason) {
-        embed.fields = [{
-          name: '📝 Reason',
+        embed.fields.push({
+          name: 'Reason',
           value: data.reason
-        }]
+        })
       }
       break
 
     case 'vote_cast':
-      embed.title = data.voteType === 'upvote' ? '👍 Upvote Cast' : '👎 Downvote Cast'
+      embed.title = data.voteType === 'upvote' ? 'Upvote Cast' : 'Downvote Cast'
       embed.color = data.voteType === 'upvote' ? 0x00ff00 : 0xff0000
       embed.description = `Someone ${data.voteType}d a comment by **${data.comment.username}**`
       
@@ -305,28 +354,104 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
             : data.comment.content
         }]
       }
+
+      embed.fields = embed.fields || []
+      embed.fields.push({
+        name: 'IDs (Click to Copy)',
+        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\``,
+        inline: false
+      })
       break
 
     case 'report_filed':
-      embed.title = '🚨 Comment Reported'
+      embed.title = 'Comment Reported'
       embed.color = 0xff4500 // Orange Red
       embed.description = `A comment by **${data.comment.username}** was reported`
       embed.fields = [
         {
-          name: '🚨 Report Reason',
+          name: 'Report Reason',
           value: data.reportReason || 'Unknown',
           inline: true
         },
         {
-          name: '👤 Reported User',
+          name: 'Reported User',
           value: data.comment.username,
           inline: true
+        },
+        {
+          name: 'IDs (Click to Copy)',
+          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Reporter ID:** \`${data.user?.id}\``,
+          inline: false
         }
       ]
 
       if (data.comment.content) {
         embed.fields.push({
           name: 'Reported Comment',
+          value: data.comment.content.length > 200 
+            ? data.comment.content.substring(0, 200) + '...' 
+            : data.comment.content
+        })
+      }
+      break
+
+    case 'report_resolved':
+      embed.title = 'Report Resolved'
+      embed.color = 0x00ff00 // Green
+      embed.description = `**${data.moderator?.username}** resolved a report on a comment by **${data.comment.username}**`
+      embed.fields = [
+        {
+          name: 'Resolution',
+          value: data.reason || 'Report resolved',
+          inline: true
+        },
+        {
+          name: 'Resolved By',
+          value: data.moderator?.username || 'Unknown Moderator',
+          inline: true
+        },
+        {
+          name: 'IDs (Click to Copy)',
+          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
+          inline: false
+        }
+      ]
+
+      if (data.comment.content) {
+        embed.fields.push({
+          name: 'Comment',
+          value: data.comment.content.length > 200 
+            ? data.comment.content.substring(0, 200) + '...' 
+            : data.comment.content
+        })
+      }
+      break
+
+    case 'report_dismissed':
+      embed.title = 'Report Dismissed'
+      embed.color = 0x808080 // Gray
+      embed.description = `**${data.moderator?.username}** dismissed a report on a comment by **${data.comment.username}**`
+      embed.fields = [
+        {
+          name: 'Dismissal Reason',
+          value: data.reason || 'Report dismissed',
+          inline: true
+        },
+        {
+          name: 'Dismissed By',
+          value: data.moderator?.username || 'Unknown Moderator',
+          inline: true
+        },
+        {
+          name: 'IDs (Click to Copy)',
+          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
+          inline: false
+        }
+      ]
+
+      if (data.comment.content) {
+        embed.fields.push({
+          name: 'Comment',
           value: data.comment.content.length > 200 
             ? data.comment.content.substring(0, 200) + '...' 
             : data.comment.content
