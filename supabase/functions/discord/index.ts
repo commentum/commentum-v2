@@ -2388,8 +2388,8 @@ async function handleCmdRegister(supabase: any, options: any, member: any, regis
         data: {
           content: `📝 **Quick Registration**\n\n` +
             `To register, provide:\n` +
-            `• **Platform**: ${platform || 'required'}`\n` +
-            `• **User ID**: ${userId || 'required'}`\n` +
+            `• **Platform**: ${platform || 'required'}\n` +
+            `• **User ID**: ${userId || 'required'}\n` +
             `• **Token**: ${token ? '✅ Provided' : 'required'}\n\n` +
             `**Example:**\n` +
             `\`/cmd action:register platform:anilist user_id:123456 token:your_token\`\n\n` +
