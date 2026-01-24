@@ -2383,45 +2383,35 @@ async function removeFromAllRoles(supabase: any, userId: string) {
 }
 
 // Command palette handler
+// Command palette handler
 async function handleCmdCommand(supabase: any, options: any, registration: any, member: any) {
   const action = options.find(opt => opt.name === 'action')?.value
 
-switch (action) {
-  case 'register':
-    return await handleDiscordRegistration(supabase, {
-      discord_user_id,
-      discord_username,
-      platform_user_id,
-      platform_type,
-      token
-    })
-  
-  case 'verify':
-    return await handleDiscordVerification(supabase, {
-      discord_user_id,
-      platform_user_id,
-      platform_type,
-      token
-    })
-  
-  case 'get_user_role':
-    return await handleGetUserRole(supabase, {
-      discord_user_id
-    })
-  
-  case 'sync_commands':
-    return await handleSyncCommands(supabase)  // ← Pass supabase here
-  
-  case 'interact':
-    return await handleDiscordInteraction(supabase, {
-      command_data
-    })
-  
-  default:
-    return new Response(
-      JSON.stringify({ error: 'Invalid action' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  switch (action) {
+    case 'register':
+      return await handleCmdRegister(supabase, options, member, registration)
+    
+    case 'list':
+      return await handleCmdList(registration)
+    
+    case 'quick':
+      return await handleCmdQuick(registration)
+    
+    case 'status':
+      return await handleCmdStatus(supabase, registration)
+    
+    default:
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: '❌ Invalid action. Use: register, list, quick, or status',
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+  }
 }
 
 async function handleCmdRegister(supabase: any, options: any, member: any, registration: any) {
