@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { sendDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -151,16 +152,40 @@ serve(async (req) => {
 
     if (updateError) throw updateError
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        voteScore: newVoteScore,
-        upvotes: newUpvotes,
-        downvotes: newDownvotes,
-        userVote: userVotes[user_id] || null
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  // Send Discord notification for vote (only for new votes, not removals)
+  if (vote_type !== 'remove' && (!currentVote || currentVote !== vote_type)) {
+    try {
+      await sendDiscordNotification(supabase, {
+        type: 'vote_cast',
+        voteType: vote_type,
+        comment: {
+          id: comment.id,
+          username: comment.username,
+          content: comment.content,
+          client_type: comment.client_type
+        },
+        media: {
+          title: comment.media_title,
+          year: comment.media_year,
+          poster: comment.media_poster
+        }
+      })
+    } catch (notificationError) {
+      console.error('Failed to send Discord notification:', notificationError)
+      // Don't fail the request if notification fails
+    }
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      voteScore: newVoteScore,
+      upvotes: newUpvotes,
+      downvotes: newDownvotes,
+      userVote: userVotes[user_id] || null
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
 
   } catch (error) {
     console.error('Voting API error:', error)

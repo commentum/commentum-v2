@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { fetchUserInfo, fetchMediaInfo } from '../shared/clientAPIs.ts'
 import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
+import { sendDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -284,6 +285,29 @@ async function handleCreateComment(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Send Discord notification for new comment
+  try {
+    await sendDiscordNotification(supabase, {
+      type: 'comment_created',
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        parent_id: comment.parent_id
+      },
+      user: userInfo,
+      media: {
+        title: mediaInfo.title,
+        year: mediaInfo.year,
+        poster: mediaInfo.poster
+      }
+    })
+  } catch (notificationError) {
+    console.error('Failed to send Discord notification:', notificationError)
+    // Don't fail the request if notification fails
+  }
+
   return new Response(
     JSON.stringify({ success: true, comment }),
     { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -352,6 +376,22 @@ async function handleEditComment(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Send Discord notification for edited comment
+  try {
+    await sendDiscordNotification(supabase, {
+      type: 'comment_updated',
+      comment: {
+        id: updatedComment.id,
+        username: updatedComment.username,
+        content: updatedComment.content,
+        client_type: updatedComment.client_type
+      }
+    })
+  } catch (notificationError) {
+    console.error('Failed to send Discord notification:', notificationError)
+    // Don't fail the request if notification fails
+  }
+
   return new Response(
     JSON.stringify({ success: true, comment: updatedComment }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -406,6 +446,28 @@ async function handleDeleteComment(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Send Discord notification for deleted comment
+  try {
+    const moderator = comment.user_id !== user_id ? {
+      username: user_id,
+      id: user_id
+    } : null
+
+    await sendDiscordNotification(supabase, {
+      type: 'comment_deleted',
+      comment: {
+        id: deletedComment.id,
+        username: deletedComment.username,
+        content: comment.content, // Original content before deletion
+        client_type: deletedComment.client_type
+      },
+      moderator
+    })
+  } catch (notificationError) {
+    console.error('Failed to send Discord notification:', notificationError)
+    // Don't fail the request if notification fails
+  }
 
   return new Response(
     JSON.stringify({ success: true, comment: deletedComment }),
