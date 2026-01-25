@@ -1360,7 +1360,7 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
 async function handleDeleteCommand(supabase: any, options: any, registration: any) {
   const commentId = options.find(opt => opt.name === 'comment_id')?.value
 
-  // Call comments API
+  // Call comments API with only necessary parameters
   const response = await fetch(
     `${Deno.env.get('SUPABASE_URL')}/functions/v1/comments`,
     {
@@ -1372,9 +1372,9 @@ async function handleDeleteCommand(supabase: any, options: any, registration: an
       body: JSON.stringify({
         action: 'delete',
         comment_id: commentId,
-        client_type: registration.platform_type,
         user_id: registration.platform_user_id,
-        token: 'bypass'
+        client_type: registration.platform_type,
+        token: 'admin_bypass' // Discord admins can delete any comment
       })
     }
   )

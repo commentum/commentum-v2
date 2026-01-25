@@ -111,13 +111,72 @@ UPDATE config SET value = '["spam", "offensive"]' WHERE key = 'banned_keywords';
 
 ## 📚 API Documentation
 
-### Base URL
-```
-https://your-project.supabase.co/functions/v1/
+### 🚀 Complete API Reference
+
+**Base URL**: `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/`
+
+**Project URL**: `https://whzwmfxngelicmjyxwmr.supabase.co`
+
+**🔑 NO API KEYS REQUIRED** - All endpoints are open and use platform-specific tokens for user verification only.
+
+#### 📋 Quick Links
+
+- **[📖 Complete API Reference](./docs/COMPLETE_API_REFERENCE.md)** - Comprehensive documentation for all endpoints
+- **[🔧 API Reference](./docs/API.md)** - Original API documentation
+- **[🤖 Discord Setup](./docs/DISCORD_SETUP.md)** - Discord bot integration guide
+- **[🚀 Deployment](./docs/DEPLOYMENT.md)** - Production deployment guide
+
+#### 🎯 Core Endpoints Overview
+
+| Endpoint | Purpose | Auth Required |
+|----------|---------|---------------|
+| **`/comments`** | Create, edit, delete comments | Token for edit/delete only |
+| **`/votes`** | Upvote/downvote comments | ❌ No auth required |
+| **`/reports`** | Report and manage content | Admin only for resolution |
+| **`/moderation`** | Pin, lock, ban, warn users | ✅ Admin required |
+| **`/media`** | Get comments for media | ❌ No auth required |
+| **`/discord`** | Discord bot integration | ✅ Bot token required |
+
+#### 🚀 Quick Start Examples
+
+```bash
+# Create a comment (no auth needed)
+curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "create",
+    "client_type": "anilist",
+    "user_id": "12345",
+    "media_id": "6789",
+    "content": "Great episode!"
+  }'
+
+# Get media comments (no auth needed)
+curl "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=6789&client_type=anilist&limit=10"
+
+# Vote on comment (no auth needed)
+curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/votes" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "comment_id": 1,
+    "user_id": "12345",
+    "vote_type": "upvote"
+  }'
+
+# Delete own comment (no auth needed)
+curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "delete",
+    "comment_id": 1,
+    "user_id": "12345"
+  }'
 ```
 
-### Authentication
-Most endpoints require platform-specific authentication:
+#### 🔐 Authentication
+
+Most endpoints use platform-specific token verification:
+
 ```json
 {
   "client_type": "anilist|myanimelist|simkl|other",
@@ -126,63 +185,57 @@ Most endpoints require platform-specific authentication:
 }
 ```
 
-### Core Endpoints
+**When Authentication is Required:**
+- ✅ **Edit/Delete Comments**: Users editing their own comments
+- ✅ **Admin Actions**: All moderation and admin operations  
+- ✅ **Report Resolution**: Admins resolving reports
+- ❌ **Create Comments**: Open system - no auth needed
+- ❌ **Vote/Get Comments**: Open system - no auth needed
 
-#### Comments API
-**Endpoint**: `/comments`
+#### 📊 Supported Platforms
 
-**Actions**:
-- `create`: Create new comment
-- `edit`: Edit existing comment  
-- `delete`: Soft delete comment
+| Platform | Token Type | Verification |
+|----------|------------|-------------|
+| **AniList** | Bearer Token | GraphQL `/viewer` |
+| **MyAnimeList** | Bearer Token | REST `/users/me` |
+| **SIMKL** | API Key | REST `/users/settings` |
+| **Other** | Custom | Custom verification |
 
-**Example Request**:
-```json
-{
-  "action": "create",
-  "client_type": "anilist",
-  "user_id": "12345",
-  "media_id": "6789",
-  "content": "Great episode!",
-  "parent_id": null
-}
+---
+
+## 🔧 Configuration
+
+### System Configuration
+All configuration is stored in the `config` table:
+
+```sql
+-- Example configuration updates
+UPDATE config SET value = '50' WHERE key = 'max_comment_length';
+UPDATE config SET value = '[123, 456]' WHERE key = 'moderator_users';
+UPDATE config SET value = '["spam", "offensive"]' WHERE key = 'banned_keywords';
 ```
 
-#### Votes API
-**Endpoint**: `/votes`
+### Key Configuration Options
+- `max_comment_length`: Maximum comment character limit (default: 10000)
+- `max_nesting_level`: Maximum reply nesting depth (default: 10)
+- `rate_limit_*`: Rate limits per hour for various actions
+- `*_users`: JSON arrays of user IDs for each role
+- `system_enabled`: Master toggle for the entire system
+- `voting_enabled`: Toggle for voting system
+- `reporting_enabled`: Toggle for reporting system
 
-**Parameters**:
-- `comment_id`: Integer ID of comment
-- `user_id`: User's platform ID
-- `vote_type`: "upvote", "downvote", or "remove"
+### 🔑 No API Keys Configuration
 
-#### Reports API
-**Endpoint**: `/reports`
+**IMPORTANT**: This system does NOT require any Supabase API keys:
 
-**Actions**:
-- `create`: Report a comment
-- `resolve`: Resolve a report (admin only)
-- `get_queue`: Get moderation queue (admin only)
+- ❌ **No ANON_KEY needed**
+- ❌ **No SERVICE_ROLE_KEY needed**  
+- ❌ **No authentication setup required**
 
-#### Moderation API
-**Endpoint**: `/moderation`
-
-**Actions**:
-- `pin_comment`/`unpin_comment`
-- `lock_thread`/`unlock_thread`
-- `warn_user`
-- `ban_user`/`unban_user`
-- `get_queue`
-
-#### Media API
-**Endpoint**: `/media`
-
-**Parameters**:
-- `media_id`: Media identifier
-- `client_type`: Platform type
-- `page`: Page number (default: 1)
-- `limit`: Results per page (default: 50)
-- `sort`: "newest", "oldest", "top", "controversial"
+The system uses:
+- ✅ **Platform-specific tokens** (AniList, MAL, SIMKL)
+- ✅ **Open comment system** design
+- ✅ **Row Level Security** for data protection
 
 ## 🔒 Security Features
 
@@ -254,7 +307,17 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🔗 Related Links
 
-- **Live Demo**: https://lvyelpikusmxhobjragw.supabase.co
+- **🚀 Live Project**: https://whzwmfxngelicmjyxwmr.supabase.co
+- **📖 Complete API Reference**: [./docs/COMPLETE_API_REFERENCE.md](./docs/COMPLETE_API_REFERENCE.md)
+- **🔧 Original API Docs**: [./docs/API.md](./docs/API.md)
+- **🤖 Discord Setup**: [./docs/DISCORD_SETUP.md](./docs/DISCORD_SETUP.md)
+- **🚀 Deployment Guide**: [./docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)
+- **⚙️ Database Schema**: [./docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md)
+- **🛠️ Discord Commands**: [./docs/DISCORD_COMMANDS.md](./docs/DISCORD_COMMANDS.md)
+- **📋 CMD Commands**: [./docs/CMD_COMMAND.md](./docs/CMD_COMMAND.md)
+- **🔄 Actions Guide**: [./docs/ACTIONS.md](./docs/ACTIONS.md)
+
+### External Platform APIs
 - **Supabase**: https://supabase.com
 - **AniList API**: https://anilist.gitbook.io/anilist-apiv2-docs/
 - **MyAnimeList API**: https://myanimelist.net/apiconfig/references/api/v2

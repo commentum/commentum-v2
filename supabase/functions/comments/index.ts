@@ -22,12 +22,40 @@ serve(async (req) => {
 
     const { action, client_type, user_id, media_id, content, comment_id, parent_id, token } = await req.json()
 
-    // Validate required fields
-    if (!client_type || !user_id || !media_id || !content) {
-      return new Response(
-        JSON.stringify({ error: 'client_type, user_id, media_id, and content are required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    // Validate action-specific required fields
+    switch (action) {
+      case 'create':
+        if (!client_type || !user_id || !media_id || !content) {
+          return new Response(
+            JSON.stringify({ error: 'client_type, user_id, media_id, and content are required for create action' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        break
+        
+      case 'edit':
+        if (!comment_id || !user_id || !content) {
+          return new Response(
+            JSON.stringify({ error: 'comment_id, user_id, and content are required for edit action' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        break
+        
+      case 'delete':
+        if (!comment_id || !user_id) {
+          return new Response(
+            JSON.stringify({ error: 'comment_id and user_id are required for delete action' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        break
+        
+      default:
+        return new Response(
+          JSON.stringify({ error: 'Invalid action. Must be create, edit, or delete' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
     }
 
     // Validate comment_id if provided (must be integer)
@@ -46,8 +74,8 @@ serve(async (req) => {
       )
     }
 
-    // Validate content length
-    if (content.length < 1 || content.length > 10000) {
+    // Validate content length only if content is provided
+    if (content && (content.length < 1 || content.length > 10000)) {
       return new Response(
         JSON.stringify({ error: 'Content must be between 1 and 10000 characters' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -68,13 +96,13 @@ serve(async (req) => {
       )
     }
 
-      // For delete action, check if user owns the comment first
+    // For delete action, check if user owns the comment first
     let userRole = 'user'
     if (action === 'delete') {
       // First check if comment exists and get ownership info
       const { data: comment } = await supabase
         .from('comments')
-        .select('user_id, user_role')
+        .select('user_id, user_role, client_type')
         .eq('id', comment_id)
         .single()
 
@@ -89,10 +117,10 @@ serve(async (req) => {
       if (comment.user_id === user_id) {
         userRole = await getUserRole(supabase, user_id)
       } else {
-        // User is trying to delete someone else's comment - require token
-        if (!token) {
+        // User is trying to delete someone else's comment - require token and client_type
+        if (!token || !client_type) {
           return new Response(
-            JSON.stringify({ error: 'Token required to delete other users comments' }),
+            JSON.stringify({ error: 'Token and client_type required to delete other users comments' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
@@ -111,24 +139,29 @@ serve(async (req) => {
       userRole = await getUserRole(supabase, user_id)
     }
 
-    // Fetch user and media information
-    const [userInfo, mediaInfo] = await Promise.all([
-      fetchUserInfo(client_type, user_id),
-      fetchMediaInfo(client_type, media_id)
-    ])
+    // Fetch user and media information only for actions that need them
+    let userInfo = null
+    let mediaInfo = null
+    
+    if (action === 'create') {
+      [userInfo, mediaInfo] = await Promise.all([
+        fetchUserInfo(client_type, user_id),
+        fetchMediaInfo(client_type, media_id)
+      ])
 
-    if (!userInfo) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to fetch user information' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+      if (!userInfo) {
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch user information' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
-    if (!mediaInfo) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to fetch media information' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      if (!mediaInfo) {
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch media information' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     // Check user status

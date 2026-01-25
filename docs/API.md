@@ -5,8 +5,12 @@ Complete API reference for all Commentum v2 endpoints.
 ## Base URL
 
 ```
-https://your-project.supabase.co/functions/v1/
+https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/
 ```
+
+**Project URL**: `https://whzwmfxngelicmjyxwmr.supabase.co`
+
+**🔑 NO API KEYS REQUIRED** - All endpoints are open and use platform-specific tokens for user verification only.
 
 ## Authentication
 
@@ -155,22 +159,36 @@ Handles all comment-related operations.
 
 #### 3. Delete Comment
 
-**Method**: `POST`
+**Method**: `POST`  
+**Authentication**: Conditional (token verification for non-owners)
 
-**Authentication**: Required (token verification)
+#### Request Body
 
-**Request Body**:
 ```json
 {
   "action": "delete",
   "comment_id": 1,
-  "client_type": "anilist",
-  "user_id": "12345",
-  "token": "user_auth_token"
+  "user_id": "12345"
 }
 ```
 
-**Response**:
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | ✅ | Must be `"delete"` |
+| `comment_id` | integer | ✅ | ID of comment to delete |
+| `user_id` | string | ✅ | User's platform ID |
+| `client_type` | string | ❌ | Platform identifier (only for admin actions) |
+| `token` | string | ❌ | Required only if deleting others' comments |
+
+#### Authentication Rules
+
+- **Own Comment**: No token required
+- **Others' Comment**: Token required (admin/super_admin only)
+
+#### Response
+
 ```json
 {
   "success": true,
@@ -182,6 +200,15 @@ Handles all comment-related operations.
   }
 }
 ```
+
+#### Error Responses
+
+| Status | Error | Description |
+|--------|-------|-------------|
+| 400 | Comment not found | Invalid comment_id |
+| 400 | Comment already deleted | Comment is already deleted |
+| 401 | Token required | Token needed to delete others' comments |
+| 403 | Insufficient permissions | Only admins can delete others' comments |
 
 ---
 
@@ -693,7 +720,25 @@ Access-Control-Allow-Headers: content-type
 
 Use the provided project URL for testing:
 ```
-https://lvyelpikusmxhobjragw.supabase.co
+https://whzwmfxngelicmjyxwmr.supabase.co
+```
+
+**🚀 Quick Test Examples**:
+
+```bash
+# Test creating a comment (no auth needed)
+curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "create",
+    "client_type": "anilist",
+    "user_id": "12345",
+    "media_id": "6789",
+    "content": "Test comment from API docs"
+  }'
+
+# Test getting media comments (no auth needed)
+curl "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=6789&client_type=anilist&limit=5"
 ```
 
 Replace `your-project` in the base URL with the actual project name for production use.
