@@ -105,6 +105,7 @@ CREATE POLICY "System can manage discord notifications" ON discord_notifications
 -- Add Discord configuration to config table
 INSERT INTO config (key, value) VALUES 
     ('discord_webhook_url', ''),
+    ('discord_webhook_urls', '[]'), -- JSON array for multiple webhook URLs
     ('discord_bot_token', ''),
     ('discord_client_id', ''),
     ('discord_guild_id', ''),

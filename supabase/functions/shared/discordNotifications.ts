@@ -28,16 +28,38 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
       return { success: false, reason: 'Discord notifications disabled' }
     }
 
-    // Get webhook URL
+    // Get webhook configurations
     const { data: webhookConfig } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'discord_webhook_urls')
+      .single()
+
+    const { data: singleWebhookConfig } = await supabase
       .from('config')
       .select('value')
       .eq('key', 'discord_webhook_url')
       .single()
 
-    const webhookUrl = webhookConfig?.value || null
-    if (!webhookUrl) {
-      return { success: false, reason: 'Discord webhook URL not configured' }
+    let webhookUrls: string[] = []
+    
+    // Try to get multiple webhooks first
+    if (webhookConfig?.value) {
+      try {
+        webhookUrls = JSON.parse(webhookConfig.value)
+      } catch {
+        // Fallback to comma-separated
+        webhookUrls = webhookConfig.value.split(',').map(url => url.trim()).filter(url => url)
+      }
+    }
+    
+    // Fallback to single webhook if no multiple configured
+    if (webhookUrls.length === 0 && singleWebhookConfig?.value) {
+      webhookUrls = [singleWebhookConfig.value]
+    }
+
+    if (webhookUrls.length === 0) {
+      return { success: false, reason: 'Discord webhook URLs not configured' }
     }
 
     // Check if this notification type is enabled
@@ -94,69 +116,93 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
           comment_data: data.comment ? JSON.stringify(data.comment) : null,
           user_data: data.user ? JSON.stringify(data.user) : null,
           media_data: data.media ? JSON.stringify(data.media) : null,
-          webhook_url: webhookUrl,
+          webhook_url: JSON.stringify(webhookUrls), // Store all webhook URLs
           delivery_status: 'pending'
         }, {
           onConflict: 'id'
         })
     }
 
-    // Send to Discord
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        username: 'Commentum Bot',
-        avatar_url: 'https://i.imgur.com/3Z1jw3T.png', // Commentum logo
-        embeds: [embed]
-      })
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Discord webhook error:', errorText)
-      
-      // Update notification record with error if we have an ID
-      if (notificationId) {
-        await supabase
-          .from('discord_notifications')
-          .update({
-            delivery_status: 'failed',
-            delivery_error: errorText
-          })
-          .eq('id', notificationId)
-      }
-      
-      return { success: false, reason: `Discord API error: ${errorText}` }
-    }
-
-    // Parse Discord response (webhooks might return empty response on success)
-    let result = { id: null }
-    try {
-      const responseText = await response.text()
-      if (responseText && responseText.trim()) {
-        result = JSON.parse(responseText)
-      }
-    } catch (parseError) {
-      console.log('Discord webhook response parsing (this is normal for empty responses):', parseError.message)
-      // Use empty result object for empty responses
-    }
+    // Send to all configured webhooks
+    const sendResults = []
     
-    // Update notification record with success if we have an ID
+    for (const webhookUrl of webhookUrls) {
+      try {
+        const response = await fetch(webhookUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username: 'Commentum Bot',
+            avatar_url: 'https://i.imgur.com/3Z1jw3T.png', // Commentum logo
+            embeds: [embed]
+          })
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error(`Discord webhook error for ${webhookUrl}:`, errorText)
+          sendResults.push({
+            webhookUrl,
+            success: false,
+            error: errorText
+          })
+          continue
+        }
+
+        // Parse Discord response (webhooks might return empty response on success)
+        let result = { id: null }
+        try {
+          const responseText = await response.text()
+          if (responseText && responseText.trim()) {
+            result = JSON.parse(responseText)
+          }
+        } catch (parseError) {
+          console.log('Discord webhook response parsing (this is normal for empty responses):', parseError.message)
+          // Use empty result object for empty responses
+        }
+
+        sendResults.push({
+          webhookUrl,
+          success: true,
+          messageId: result.id
+        })
+
+      } catch (error) {
+        console.error(`Failed to send to webhook ${webhookUrl}:`, error)
+        sendResults.push({
+          webhookUrl,
+          success: false,
+          error: error.message
+        })
+      }
+    }
+
+    const successfulSends = sendResults.filter(r => r.success)
+    const failedSends = sendResults.filter(r => !r.success)
+
+    // Update notification record with results if we have an ID
     if (notificationId) {
       await supabase
         .from('discord_notifications')
         .update({
-          delivery_status: 'sent',
-          message_id: result.id || null,
-          delivered_at: new Date().toISOString()
+          delivery_status: failedSends.length === 0 ? 'sent' : 'partial',
+          delivery_error: failedSends.length > 0 ? JSON.stringify(failedSends.map(f => f.error)) : null,
+          webhook_url: JSON.stringify(webhookUrls), // Store all webhook URLs
+          delivered_at: failedSends.length === 0 ? new Date().toISOString() : null
         })
         .eq('id', notificationId)
     }
 
-    return { success: true, messageId: result.id || null, notificationId }
+    return { 
+      success: failedSends.length === 0, 
+      totalWebhooks: webhookUrls.length,
+      successful: successfulSends.length,
+      failed: failedSends.length,
+      results: sendResults,
+      notificationId 
+    }
 
   } catch (error) {
     console.error('Error sending Discord notification:', error)

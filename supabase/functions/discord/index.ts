@@ -150,6 +150,255 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
   return await handleLockCommand_impl(supabase, options, registration)
 }
 
+async function handleWebhooksCommand(supabase: any, options: any, registration: any) {
+  if (registration.user_role !== 'super_admin') {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can manage webhooks',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const action = options.find(opt => opt.name === 'action')?.value
+  const webhookUrl = options.find(opt => opt.name === 'webhook_url')?.value
+
+  try {
+    switch (action) {
+      case 'list':
+        const { data: webhookConfig } = await supabase
+          .from('config')
+          .select('value')
+          .eq('key', 'discord_webhook_urls')
+          .single()
+
+        const { data: singleWebhookConfig } = await supabase
+          .from('config')
+          .select('value')
+          .eq('key', 'discord_webhook_url')
+          .single()
+
+        let webhookUrls: string[] = []
+        
+        if (webhookConfig?.value) {
+          try {
+            webhookUrls = JSON.parse(webhookConfig.value)
+          } catch {
+            webhookUrls = webhookConfig.value.split(',').map(url => url.trim()).filter(url => url)
+          }
+        }
+        
+        if (webhookUrls.length === 0 && singleWebhookConfig?.value) {
+          webhookUrls = [singleWebhookConfig.value]
+        }
+
+        const webhookList = webhookUrls.map((url, index) => {
+          const shortUrl = url.length > 50 ? url.substring(0, 47) + '...' : url
+          return `${index + 1}. ${shortUrl}`
+        }).join('\n')
+
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              content: `📡 **Configured Webhooks (${webhookUrls.length})**\n\n${webhookList || 'No webhooks configured'}`,
+              flags: 64
+            }
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+
+      case 'add':
+        if (!webhookUrl) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: '❌ Webhook URL is required for add action',
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Get current webhooks
+        const { data: currentWebhooks } = await supabase
+          .from('config')
+          .select('value')
+          .eq('key', 'discord_webhook_urls')
+          .single()
+
+        let currentUrls: string[] = []
+        if (currentWebhooks?.value) {
+          try {
+            currentUrls = JSON.parse(currentWebhooks.value)
+          } catch {
+            currentUrls = currentWebhooks.value.split(',').map(url => url.trim()).filter(url => url)
+          }
+        }
+
+        // Add new webhook if not already exists
+        if (!currentUrls.includes(webhookUrl)) {
+          currentUrls.push(webhookUrl)
+          
+          await supabase
+            .from('config')
+            .update({ value: JSON.stringify(currentUrls) })
+            .eq('key', 'discord_webhook_urls')
+
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: `✅ Webhook added successfully\nTotal webhooks: ${currentUrls.length}`,
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        } else {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: '⚠️ This webhook is already configured',
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+
+      case 'remove':
+        if (!webhookUrl) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: '❌ Webhook URL is required for remove action',
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Get current webhooks
+        const { data: webhooksToRemove } = await supabase
+          .from('config')
+          .select('value')
+          .eq('key', 'discord_webhook_urls')
+          .single()
+
+        let urlsToRemove: string[] = []
+        if (webhooksToRemove?.value) {
+          try {
+            urlsToRemove = JSON.parse(webhooksToRemove.value)
+          } catch {
+            urlsToRemove = webhooksToRemove.value.split(',').map(url => url.trim()).filter(url => url)
+          }
+        }
+
+        // Remove webhook
+        const initialLength = urlsToRemove.length
+        urlsToRemove = urlsToRemove.filter(url => url !== webhookUrl)
+
+        if (urlsToRemove.length < initialLength) {
+          await supabase
+            .from('config')
+            .update({ value: JSON.stringify(urlsToRemove) })
+            .eq('key', 'discord_webhook_urls')
+
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: `✅ Webhook removed successfully\nRemaining webhooks: ${urlsToRemove.length}`,
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        } else {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: '❌ Webhook not found in configuration',
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+
+      case 'test':
+        // Test notification to all configured webhooks
+        const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+        const testResult = await sendDiscordNotification(supabase, {
+          type: 'moderation_action',
+          user: { id: 'test', username: 'Test User' },
+          moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+          reason: 'Test notification',
+          metadata: { action: 'webhook test' }
+        })
+
+        if (testResult.success) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: `✅ Test notification sent successfully\nSent to: ${testResult.successful}/${testResult.totalWebhooks} webhooks`,
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        } else {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: `❌ Test notification failed\nSent to: ${testResult.successful}/${testResult.totalWebhooks} webhooks\nErrors: ${testResult.failed} failed`,
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        }
+
+      default:
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              content: '❌ Unknown action. Use: list, add, remove, or test',
+              flags: 64
+            }
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+    }
+  } catch (error) {
+    console.error('Webhooks command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to manage webhooks: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
@@ -1033,6 +1282,30 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
           required: false
         }
       ]
+    },
+    {
+      name: 'webhooks',
+      description: 'Manage Discord notification webhooks (Super Admin only)',
+      options: [
+        {
+          name: 'action',
+          description: 'Action to perform',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'list', value: 'list' },
+            { name: 'add', value: 'add' },
+            { name: 'remove', value: 'remove' },
+            { name: 'test', value: 'test' }
+          ]
+        },
+        {
+          name: 'webhook_url',
+          description: 'Webhook URL to add/remove',
+          type: 3,
+          required: false
+        }
+      ]
     }
   ]
 
@@ -1236,6 +1509,9 @@ async function handleDiscordInteraction(supabase: any, params: any) {
         const guildIdsStr = options.find(opt => opt.name === 'guild_ids')?.value
         const guildIds = guildIdsStr ? guildIdsStr.split(',').map(id => id.trim()) : undefined
         return await handleSyncCommands(supabase, guildIds)
+      
+      case 'webhooks':
+        return await handleWebhooksCommand(supabase, options, registration)
       
       case 'cmd':
         return await handleCmdCommand(supabase, options, registration, member)
