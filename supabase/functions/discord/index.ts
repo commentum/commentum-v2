@@ -1116,30 +1116,51 @@ async function handleBanCommand(supabase: any, options: any, registration: any) 
   const reason = options.find(opt => opt.name === 'reason')?.value
   const shadow = options.find(opt => opt.name === 'shadow')?.value || false
 
-  // Call moderation API
-  const response = await fetch(
-    `${Deno.env.get('SUPABASE_URL')}/functions/v1/moderation`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
-      },
-      body: JSON.stringify({
-        action: 'ban_user',
-        client_type: registration.platform_type,
-        moderator_id: registration.platform_user_id,
-        target_user_id: targetUserId,
-        reason: reason,
-        shadow_ban: shadow,
-        token: 'bypass' // Admin actions bypass token verification
-      })
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-  )
 
-  const result = await response.json()
+    // Update all comments by the target user to ban them
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_banned: true,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: shadow ? 'shadow_ban' : 'ban'
+      })
+      .eq('user_id', targetUserId)
 
-  if (result.success) {
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: shadow ? 'user_shadow_banned' : 'user_banned',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason
+    })
+
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1150,12 +1171,14 @@ async function handleBanCommand(supabase: any, options: any, registration: any) 
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
-  } else {
+
+  } catch (error) {
+    console.error('Ban command error:', error)
     return new Response(
       JSON.stringify({
         type: 4,
         data: {
-          content: `❌ Failed to ban user: ${result.error}`,
+          content: `❌ Failed to ban user: ${error.message}`,
           flags: 64
         }
       }),
@@ -1181,46 +1204,71 @@ async function handleWarnCommand(supabase: any, options: any, registration: any)
   const targetUserId = options.find(opt => opt.name === 'user_id')?.value
   const reason = options.find(opt => opt.name === 'reason')?.value
 
-  // Call moderation API
-  const response = await fetch(
-    `${Deno.env.get('SUPABASE_URL')}/functions/v1/moderation`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
-      },
-      body: JSON.stringify({
-        action: 'warn_user',
-        client_type: registration.platform_type,
-        moderator_id: registration.platform_user_id,
-        target_user_id: targetUserId,
-        reason: reason,
-        severity: 'warning',
-        token: 'bypass'
-      })
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, user_warnings')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-  )
 
-  const result = await response.json()
+    // Increment warning count for the user
+    const newWarningCount = (targetUserComments[0].user_warnings || 0) + 1
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_warnings: newWarningCount,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: 'warning'
+      })
+      .eq('user_id', targetUserId)
 
-  if (result.success) {
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'user_warned',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { warningCount: newWarningCount }
+    })
+
     return new Response(
       JSON.stringify({
         type: 4,
         data: {
-          content: `✅ Successfully warned user **${targetUserId}**\nReason: ${reason}`,
+          content: `✅ Successfully warned user **${targetUserId}** (Warning #${newWarningCount})\nReason: ${reason}`,
           flags: 64
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
-  } else {
+
+  } catch (error) {
+    console.error('Warn command error:', error)
     return new Response(
       JSON.stringify({
         type: 4,
         data: {
-          content: `❌ Failed to warn user: ${result.error}`,
+          content: `❌ Failed to warn user: ${error.message}`,
           flags: 64
         }
       }),
@@ -1246,29 +1294,48 @@ async function handlePinCommand(supabase: any, options: any, registration: any) 
   const commentId = options.find(opt => opt.name === 'comment_id')?.value
   const reason = options.find(opt => opt.name === 'reason')?.value || 'Pinned by moderator'
 
-  // Call moderation API
-  const response = await fetch(
-    `${Deno.env.get('SUPABASE_URL')}/functions/v1/moderation`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
-      },
-      body: JSON.stringify({
-        action: 'pin_comment',
-        client_type: registration.platform_type,
-        moderator_id: registration.platform_user_id,
-        comment_id: commentId,
-        reason: reason,
-        token: 'bypass'
-      })
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-  )
 
-  const result = await response.json()
+    // Pin the comment
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        pinned: true,
+        pinned_at: new Date().toISOString(),
+        pinned_by: registration.platform_user_id
+      })
+      .eq('id', commentId)
 
-  if (result.success) {
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'comment_pinned',
+      comment: comment,
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason
+    })
+
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1279,12 +1346,14 @@ async function handlePinCommand(supabase: any, options: any, registration: any) 
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
-  } else {
+
+  } catch (error) {
+    console.error('Pin command error:', error)
     return new Response(
       JSON.stringify({
         type: 4,
         data: {
-          content: `❌ Failed to pin comment: ${result.error}`,
+          content: `❌ Failed to pin comment: ${error.message}`,
           flags: 64
         }
       }),
@@ -1310,29 +1379,48 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
   const commentId = options.find(opt => opt.name === 'comment_id')?.value
   const reason = options.find(opt => opt.name === 'reason')?.value || 'Thread locked by moderator'
 
-  // Call moderation API
-  const response = await fetch(
-    `${Deno.env.get('SUPABASE_URL')}/functions/v1/moderation`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
-      },
-      body: JSON.stringify({
-        action: 'lock_thread',
-        client_type: registration.platform_type,
-        moderator_id: registration.platform_user_id,
-        comment_id: commentId,
-        reason: reason,
-        token: 'bypass'
-      })
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-  )
 
-  const result = await response.json()
+    // Lock the comment thread
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        locked: true,
+        locked_at: new Date().toISOString(),
+        locked_by: registration.platform_user_id
+      })
+      .eq('id', commentId)
 
-  if (result.success) {
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'comment_locked',
+      comment: comment,
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason
+    })
+
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1343,45 +1431,78 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
-  } else {
+
+  } catch (error) {
+    console.error('Lock command error:', error)
     return new Response(
       JSON.stringify({
         type: 4,
         data: {
-          content: `❌ Failed to lock comment: ${result.error}`,
+          content: `❌ Failed to lock comment: ${error.message}`,
           flags: 64
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
-}
 
 async function handleDeleteCommand(supabase: any, options: any, registration: any) {
   const commentId = options.find(opt => opt.name === 'comment_id')?.value
 
-  // Call comments API with only necessary parameters
-  const response = await fetch(
-    `${Deno.env.get('SUPABASE_URL')}/functions/v1/comments`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
-      },
-      body: JSON.stringify({
-        action: 'delete',
-        comment_id: commentId,
-        user_id: registration.platform_user_id,
-        client_type: registration.platform_type,
-        token: 'admin_bypass' // Discord admins can delete any comment
-      })
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id, deleted')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-  )
 
-  const result = await response.json()
+    if (comment.deleted) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** is already deleted`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
-  if (result.success) {
+    // Soft delete the comment
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        deleted: true,
+        deleted_at: new Date().toISOString(),
+        deleted_by: registration.platform_user_id
+      })
+      .eq('id', commentId)
+
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'comment_deleted',
+      comment: { ...comment, deleted: true },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id }
+    })
+
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1392,12 +1513,14 @@ async function handleDeleteCommand(supabase: any, options: any, registration: an
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
-  } else {
+
+  } catch (error) {
+    console.error('Delete command error:', error)
     return new Response(
       JSON.stringify({
         type: 4,
         data: {
-          content: `❌ Failed to delete comment: ${result.error}`,
+          content: `❌ Failed to delete comment: ${error.message}`,
           flags: 64
         }
       }),

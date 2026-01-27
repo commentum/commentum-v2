@@ -2,9 +2,12 @@
 -- DISCORD INTEGRATION MIGRATION
 -- ====================================
 
+-- Create separate sequence for Discord users
+CREATE SEQUENCE IF NOT EXISTS discord_users_seq START 1;
+
 -- Create Discord users table for bot integration
 CREATE TABLE discord_users (
-    id INTEGER PRIMARY KEY DEFAULT nextval('config_id_seq'),
+    id INTEGER PRIMARY KEY DEFAULT nextval('discord_users_seq'),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     
@@ -36,13 +39,16 @@ CREATE TABLE discord_users (
     CONSTRAINT discord_username_length CHECK (length(discord_username) >= 2 AND length(discord_username) <= 32)
 );
 
+-- Create separate sequence for Discord notifications (only used for non-comment notifications)
+CREATE SEQUENCE IF NOT EXISTS discord_notifications_seq START 1000;
+
 -- Create Discord notifications log table
 CREATE TABLE discord_notifications (
-    id INTEGER PRIMARY KEY DEFAULT nextval('comment_id_seq'),
+    id INTEGER PRIMARY KEY DEFAULT nextval('discord_notifications_seq'),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     
     -- Notification type and target
-    notification_type TEXT NOT NULL CHECK (notification_type IN ('comment_created', 'comment_updated', 'comment_deleted', 'user_banned', 'user_warned', 'comment_pinned', 'comment_locked', 'vote_cast', 'report_filed')),
+    notification_type TEXT NOT NULL CHECK (notification_type IN ('comment_created', 'comment_updated', 'comment_deleted', 'user_banned', 'user_warned', 'comment_pinned', 'comment_locked', 'vote_cast', 'report_filed', 'vote_removed', 'user_muted', 'user_shadow_banned', 'user_unbanned', 'comment_unlocked', 'moderation_action', 'config_updated', 'system_enabled', 'system_disabled', 'bulk_action')),
     target_id TEXT, -- Can be comment_id, user_id, etc.
     target_type TEXT, -- 'comment', 'user', 'media'
     
@@ -103,4 +109,4 @@ INSERT INTO config (key, value) VALUES
     ('discord_client_id', ''),
     ('discord_guild_id', ''),
     ('discord_notifications_enabled', 'true'),
-    ('discord_notification_types', '["comment_created", "comment_updated", "comment_deleted", "user_banned", "user_warned", "comment_pinned", "comment_locked"]');
+    ('discord_notification_types', '["comment_created", "comment_updated", "comment_deleted", "user_banned", "user_warned", "comment_pinned", "comment_locked", "vote_cast", "vote_removed", "user_muted", "user_shadow_banned", "user_unbanned", "comment_unlocked", "moderation_action", "config_updated", "system_enabled", "system_disabled", "bulk_action", "report_filed", "report_resolved", "report_dismissed"]');
