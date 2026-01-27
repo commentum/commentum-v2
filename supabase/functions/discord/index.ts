@@ -1939,6 +1939,7 @@ async function handleLockCommand_impl(supabase: any, options: any, registration:
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
+ }
 
 // Helper functions
 async function verifyPlatformToken(platformType: string, userId: string, token: string) {
