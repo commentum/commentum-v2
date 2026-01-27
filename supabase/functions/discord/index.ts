@@ -1273,15 +1273,7 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
     },
     {
       name: 'sync-multi',
-      description: 'Sync Discord commands to multiple servers (Super Admin only)',
-      options: [
-        {
-          name: 'guild_ids',
-          description: 'Comma-separated list of guild IDs to sync to',
-          type: 3,
-          required: false
-        }
-      ]
+      description: 'Sync Discord commands to multiple servers (Super Admin only)'
     },
     {
       name: 'webhooks',
@@ -1506,9 +1498,7 @@ async function handleDiscordInteraction(supabase: any, params: any) {
         return await handleSyncCommand(supabase, registration)
       
       case 'sync-multi':
-        const guildIdsStr = options.find(opt => opt.name === 'guild_ids')?.value
-        const guildIds = guildIdsStr ? guildIdsStr.split(',').map(id => id.trim()) : undefined
-        return await handleSyncCommands(supabase, guildIds)
+        return await handleSyncCommands(supabase) // Will use configured guild IDs
       
       case 'webhooks':
         return await handleWebhooksCommand(supabase, options, registration)

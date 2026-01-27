@@ -135,7 +135,7 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
           },
           body: JSON.stringify({
             username: 'Commentum Bot',
-            avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png', // Commentum logo
+            avatar_url: 'https://i.imgur.com/3Z1jw3T.png', // Commentum logo
             embeds: [embed]
           })
         })
