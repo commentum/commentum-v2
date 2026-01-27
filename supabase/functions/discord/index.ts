@@ -3064,3 +3064,38 @@ async function verifySIMKLToken(userId: string, token: string) {
     return false
   }
 }
+
+// Get user role from platform configuration
+async function getUserRoleFromPlatform(supabase: any, userId: string) {
+  try {
+    const { data: superAdmins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'super_admin_users')
+      .single()
+
+    const { data: admins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'admin_users')
+      .single()
+
+    const { data: moderators } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'moderator_users')
+      .single()
+
+    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
+    const adminList = admins ? JSON.parse(admins.value) : []
+    const moderatorList = moderators ? JSON.parse(moderators.value) : []
+
+    if (superAdminList.includes(userId)) return 'super_admin'
+    if (adminList.includes(userId)) return 'admin'
+    if (moderatorList.includes(userId)) return 'moderator'
+    return 'user'
+  } catch (error) {
+    console.error('Get user role from platform error:', error)
+    return 'user'
+  }
+}
