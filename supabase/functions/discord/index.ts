@@ -1363,6 +1363,7 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
     }),
     { status: failedSyncs.length === 0 ? 200 : 207, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
+}
 
   } catch (error) {
     console.error('Error syncing Discord commands:', error)
@@ -1374,7 +1375,6 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
-}
 
 async function handleDiscordInteraction(supabase: any, params: any) {
   const { command_data } = params
