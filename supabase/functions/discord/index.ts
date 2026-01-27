@@ -847,6 +847,10 @@ async function handleSyncCommands(supabase: any) {
     {
       name: 'help',
       description: 'Show help information'
+    },
+    {
+      name: 'sync',
+      description: 'Sync Discord commands (Super Admin only)'
     }
   ]
 
@@ -1010,6 +1014,9 @@ async function handleDiscordInteraction(supabase: any, params: any) {
       
       case 'help':
         return await handleHelpCommand(registration)
+      
+      case 'sync':
+        return await handleSyncCommand(supabase, registration)
       
       case 'cmd':
         return await handleCmdCommand(supabase, options, registration, member)
@@ -2554,6 +2561,39 @@ async function handleConfigCommand(supabase: any, options: any, registration: an
   }
 }
 
+async function handleSyncCommand(supabase: any, registration: any) {
+  // Only Super Admins can sync commands
+  if (registration.user_role !== 'super_admin') {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can sync Discord commands',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Call the existing sync commands function
+    return await handleSyncCommands(supabase)
+  } catch (error) {
+    console.error('Sync command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to sync commands: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
 async function handleHelpCommand(registration: any) {
   const userRole = registration?.user_role || 'user'
   
@@ -2916,4 +2956,111 @@ async function handleCmdStatus(supabase: any, registration: any) {
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
+}
+
+// Verify platform token function
+async function verifyPlatformToken(platformType: string, userId: string, token: string) {
+  try {
+    switch (platformType) {
+      case 'anilist':
+        return await verifyAniListToken(userId, token)
+      case 'myanimelist':
+        return await verifyMyAnimeListToken(userId, token)
+      case 'simkl':
+        return await verifySIMKLToken(userId, token)
+      default:
+        return false
+    }
+  } catch (error) {
+    console.error(`Token verification error for ${platformType}:`, error)
+    return false
+  }
+}
+
+// AniList token verification
+async function verifyAniListToken(userId: string, token: string) {
+  try {
+    const query = `
+      query {
+        Viewer {
+          id
+          name
+          avatar {
+            large
+            medium
+          }
+        }
+      }
+    `
+
+    const response = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query })
+    })
+
+    if (!response.ok) return false
+
+    const data = await response.json()
+    if (data.errors) return false
+
+    const user = data.data.Viewer
+    return user.id.toString() === userId
+  } catch (error) {
+    console.error('AniList token verification error:', error)
+    return false
+  }
+}
+
+// MyAnimeList token verification
+async function verifyMyAnimeListToken(userId: string, token: string) {
+  try {
+    const clientId = Deno.env.get('MYANIMELIST_CLIENT_ID')
+    if (!clientId) {
+      console.warn('MYANIMELIST_CLIENT_ID not configured')
+      return false
+    }
+
+    const response = await fetch('https://api.myanimelist.net/v2/users/me', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      }
+    })
+
+    if (!response.ok) return false
+
+    const data = await response.json()
+    return data.id.toString() === userId
+  } catch (error) {
+    console.error('MyAnimeList token verification error:', error)
+    return false
+  }
+}
+
+// SIMKL token verification
+async function verifySIMKLToken(userId: string, token: string) {
+  try {
+    const clientId = Deno.env.get('SIMKL_CLIENT_ID')
+    if (!clientId) {
+      console.warn('SIMKL_CLIENT_ID not configured')
+      return false
+    }
+
+    const response = await fetch('https://api.simkl.com/users/settings', {
+      headers: {
+        'simkl-api-key': token,
+      }
+    })
+
+    if (!response.ok) return false
+
+    const data = await response.json()
+    return data.account?.id?.toString() === userId
+  } catch (error) {
+    console.error('SIMKL token verification error:', error)
+    return false
+  }
 }
