@@ -1364,7 +1364,7 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
     { status: failedSyncs.length === 0 ? 200 : 207, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 
-} catch (error) {
+  } catch (error) {
     console.error('Error syncing Discord commands:', error)
     return new Response(
       JSON.stringify({ 
@@ -1914,7 +1914,7 @@ async function handleLockCommand_impl(supabase: any, options: any, registration:
       reason: reason
     })
 
-return new Response(
+    return new Response(
       JSON.stringify({
         type: 4,
         data: {
@@ -1938,7 +1938,6 @@ return new Response(
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
-}
 
 // Helper functions
 async function verifyPlatformToken(platformType: string, userId: string, token: string) {
