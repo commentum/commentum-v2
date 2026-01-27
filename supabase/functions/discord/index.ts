@@ -1,6 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
+// All command handlers are defined in this file
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
@@ -3097,5 +3099,1296 @@ async function getUserRoleFromPlatform(supabase: any, userId: string) {
   } catch (error) {
     console.error('Get user role from platform error:', error)
     return 'user'
+  }
+}
+
+// Unban command handler
+async function handleUnbanCommand(supabase: any, options: any, registration: any) {
+  if (!['admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Admins and Super Admins can unban users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Ban lifted'
+
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Unban the user
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_banned: false,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: 'unban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'user_unbanned',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully unbanned user **${targetUserId}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Unban command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to unban user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Promote command handler
+async function handlePromoteCommand(supabase: any, options: any, registration: any) {
+  if (registration.user_role !== 'super_admin') {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can promote users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const newRole = options.find(opt => opt.name === 'role')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Promotion'
+
+  if (!['moderator', 'admin', 'super_admin'].includes(newRole)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Invalid role. Must be: moderator, admin, or super_admin',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Get current role lists
+    const { data: superAdmins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'super_admin_users')
+      .single()
+
+    const { data: admins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'admin_users')
+      .single()
+
+    const { data: moderators } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'moderator_users')
+      .single()
+
+    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
+    const adminList = admins ? JSON.parse(admins.value) : []
+    const moderatorList = moderators ? JSON.parse(moderators.value) : []
+
+    // Remove from all roles first
+    const cleanSuperAdmins = superAdminList.filter((id: string) => id !== targetUserId)
+    const cleanAdmins = adminList.filter((id: string) => id !== targetUserId)
+    const cleanModerators = moderatorList.filter((id: string) => id !== targetUserId)
+
+    // Add to new role
+    let newSuperAdmins = cleanSuperAdmins
+    let newAdmins = cleanAdmins
+    let newModerators = cleanModerators
+
+    switch (newRole) {
+      case 'super_admin':
+        newSuperAdmins = [...cleanSuperAdmins, targetUserId]
+        break
+      case 'admin':
+        newAdmins = [...cleanAdmins, targetUserId]
+        break
+      case 'moderator':
+        newModerators = [...cleanModerators, targetUserId]
+        break
+    }
+
+    // Update all role configurations
+    await Promise.all([
+      supabase.from('config').update({ value: JSON.stringify(newSuperAdmins) }).eq('key', 'super_admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newAdmins) }).eq('key', 'admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newModerators) }).eq('key', 'moderator_users')
+    ])
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { action: `promoted to ${newRole}` }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully promoted **${targetUserId}** to **${newRole}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Promote command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to promote user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Demote command handler
+async function handleDemoteCommand(supabase: any, options: any, registration: any) {
+  if (registration.user_role !== 'super_admin') {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can demote users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const newRole = options.find(opt => opt.name === 'role')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Demotion'
+
+  if (!['user', 'moderator', 'admin'].includes(newRole)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Invalid role. Must be: user, moderator, or admin',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Get current role lists
+    const { data: superAdmins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'super_admin_users')
+      .single()
+
+    const { data: admins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'admin_users')
+      .single()
+
+    const { data: moderators } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'moderator_users')
+      .single()
+
+    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
+    const adminList = admins ? JSON.parse(admins.value) : []
+    const moderatorList = moderators ? JSON.parse(moderators.value) : []
+
+    // Remove from all roles first
+    const cleanSuperAdmins = superAdminList.filter((id: string) => id !== targetUserId)
+    const cleanAdmins = adminList.filter((id: string) => id !== targetUserId)
+    const cleanModerators = moderatorList.filter((id: string) => id !== targetUserId)
+
+    // Add to new role
+    let newSuperAdmins = cleanSuperAdmins
+    let newAdmins = cleanAdmins
+    let newModerators = cleanModerators
+
+    switch (newRole) {
+      case 'admin':
+        newAdmins = [...cleanAdmins, targetUserId]
+        break
+      case 'moderator':
+        newModerators = [...cleanModerators, targetUserId]
+        break
+      // user role - don't add to any list
+    }
+
+    // Update all role configurations
+    await Promise.all([
+      supabase.from('config').update({ value: JSON.stringify(newSuperAdmins) }).eq('key', 'super_admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newAdmins) }).eq('key', 'admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newModerators) }).eq('key', 'moderator_users')
+    ])
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { action: `demoted to ${newRole}` }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully demoted **${targetUserId}** to **${newRole}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Demote command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to demote user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Mute command handler
+async function handleMuteCommand(supabase: any, options: any, registration: any) {
+  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Moderators and above can mute users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Muted by moderator'
+  const duration = options.find(opt => opt.name === 'duration')?.value || 24
+
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Calculate mute end time
+    const muteEndTime = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString()
+
+    // Mute the user
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_muted_until: muteEndTime,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: 'mute'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'user_muted',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { duration: `${duration} hours` }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully muted **${targetUserId}** for ${duration} hours\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Mute command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to mute user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Unmute command handler
+async function handleUnmuteCommand(supabase: any, options: any, registration: any) {
+  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Moderators and above can unmute users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Mute lifted'
+
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Unmute the user
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_muted_until: null,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: 'unmute'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { action: 'unmuted' }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully unmuted **${targetUserId}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Unmute command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to unmute user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Shadowban command handler
+async function handleShadowbanCommand(supabase: any, options: any, registration: any) {
+  if (!['admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Admins and Super Admins can shadow ban users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Shadow banned'
+
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Shadow ban the user
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_shadow_banned: true,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: 'shadow_ban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'user_shadow_banned',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully shadow banned **${targetUserId}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Shadowban command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to shadow ban user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Unshadowban command handler
+async function handleUnshadowbanCommand(supabase: any, options: any, registration: any) {
+  if (!['admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Admins and Super Admins can remove shadow bans',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Shadow ban lifted'
+
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Remove shadow ban
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_shadow_banned: false,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: 'unshadow_ban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { action: 'shadow ban removed' }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully removed shadow ban from **${targetUserId}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Unshadowban command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to remove shadow ban: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Unpin command handler
+async function handleUnpinCommand(supabase: any, options: any, registration: any) {
+  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Moderators and above can unpin comments',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const commentId = options.find(opt => opt.name === 'comment_id')?.value
+
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Unpin the comment
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        pinned: false,
+        pinned_at: null,
+        pinned_by: null
+      })
+      .eq('id', commentId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'comment_unlocked',
+      comment: comment,
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully unpinned comment **${commentId}**`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Unpin command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to unpin comment: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Unlock command handler
+async function handleUnlockCommand(supabase: any, options: any, registration: any) {
+  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Moderators and above can unlock comment threads',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const commentId = options.find(opt => opt.name === 'comment_id')?.value
+
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Unlock the comment thread
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        locked: false,
+        locked_at: null,
+        locked_by: null
+      })
+      .eq('id', commentId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'comment_unlocked',
+      comment: comment,
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully unlocked comment thread **${commentId}**`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Unlock command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to unlock comment thread: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Report command handler
+async function handleReportCommand(supabase: any, options: any, registration: any) {
+  const commentId = options.find(opt => opt.name === 'comment_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Reported via Discord'
+
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id, report_count')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Increment report count
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        report_count: comment.report_count + 1,
+        reported_at: new Date().toISOString()
+      })
+      .eq('id', commentId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'comment_reported',
+      comment: { ...comment, report_count: comment.report_count + 1 },
+      user: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully reported comment **${commentId}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Report command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to report comment: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Resolve command handler
+async function handleResolveCommand(supabase: any, options: any, registration: any) {
+  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Moderators and above can resolve reports',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const commentId = options.find(opt => opt.name === 'comment_id')?.value
+  const action = options.find(opt => opt.name === 'action')?.value || 'resolve'
+
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id, report_count')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Resolve the report
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        report_count: 0,
+        reported_at: null,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: `Report resolved: ${action}`,
+        moderation_action: 'resolve_report'
+      })
+      .eq('id', commentId)
+
+    if (error) throw error
+
+    // Send Discord notification
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      comment: comment,
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: `Report resolved: ${action}`,
+      metadata: { action: 'report_resolved' }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully resolved report for comment **${commentId}**\nAction: ${action}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Resolve command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to resolve report: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Queue command handler
+async function handleQueueCommand(supabase: any) {
+  try {
+    // Get reported comments
+    const { data: reportedComments } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id, report_count, created_at')
+      .gt('report_count', 0)
+      .order('report_count', { ascending: false })
+      .limit(10)
+
+    if (!reportedComments || reportedComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: '✅ No reported comments in queue',
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const queueList = reportedComments.map(comment => 
+      `**${comment.id}** - ${comment.report_count} reports - ${comment.username}`
+    ).join('\n')
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `🚨 **Report Queue (Top 10)**\n\n${queueList}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Queue command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to fetch report queue: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// User command handler
+async function handleUserCommand(supabase: any, options: any) {
+  const userId = options.find(opt => opt.name === 'user_id')?.value
+
+  try {
+    // Get user information
+    const { data: userComments } = await supabase
+      .from('comments')
+      .select('id, content, upvotes, downvotes, report_count, created_at, moderated, user_muted_until, user_shadow_banned')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    if (!userComments || userComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${userId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const totalComments = userComments.length
+    const totalUpvotes = userComments.reduce((sum, comment) => sum + comment.upvotes, 0)
+    const totalDownvotes = userComments.reduce((sum, comment) => sum + comment.downvotes, 0)
+    const totalReports = userComments.reduce((sum, comment) => sum + comment.report_count, 0)
+    const moderatedComments = userComments.filter(comment => comment.moderated).length
+    const isMuted = userComments.some(comment => comment.user_muted_until && new Date(comment.user_muted_until) > new Date())
+    const isShadowBanned = userComments.some(comment => comment.user_shadow_banned)
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `👤 **User Information for ${userId}**\n\n` +
+            `💬 **Total Comments:** ${totalComments}\n` +
+            `👍 **Total Upvotes:** ${totalUpvotes}\n` +
+            `👎 **Total Downvotes:** ${totalDownvotes}\n` +
+            `🚨 **Total Reports:** ${totalReports}\n` +
+            `🛡️ **Moderated Comments:** ${moderatedComments}\n` +
+            `🔇 **Muted:** ${isMuted ? 'Yes' : 'No'}\n` +
+            `👻 **Shadow Banned:** ${isShadowBanned ? 'Yes' : 'No'}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('User command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to fetch user information: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Comment command handler
+async function handleCommentCommand(supabase: any, options: any) {
+  const commentId = options.find(opt => opt.name === 'comment_id')?.value
+
+  try {
+    // Get comment information
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id, upvotes, downvotes, report_count, created_at, moderated, pinned, locked, user_muted_until, user_shadow_banned')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const status = [
+      comment.moderated ? '🛡️ Moderated' : '',
+      comment.pinned ? '📌 Pinned' : '',
+      comment.locked ? '🔒 Locked' : '',
+      comment.user_muted_until && new Date(comment.user_muted_until) > new Date() ? '🔇 User Muted' : '',
+      comment.user_shadow_banned ? '👻 Shadow Banned' : ''
+    ].filter(Boolean).join(' ') || '✅ Normal'
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `💬 **Comment Information for ${commentId}**\n\n` +
+            `👤 **User:** ${comment.username} (${comment.user_id})\n` +
+            `📺 **Media ID:** ${comment.media_id}\n` +
+            `👍 **Upvotes:** ${comment.upvotes}\n` +
+            `👎 **Downvotes:** ${comment.downvotes}\n` +
+            `🚨 **Reports:** ${comment.report_count}\n` +
+            `📅 **Created:** ${new Date(comment.created_at).toLocaleString()}\n` +
+            `🏷️ **Status:** ${status}\n\n` +
+            `📝 **Content:**\n${comment.content.substring(0, 200)}${comment.content.length > 200 ? '...' : ''}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Comment command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to fetch comment information: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Config command handler
+async function handleConfigCommand(supabase: any, options: any, registration: any) {
+  if (registration.user_role !== 'super_admin') {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can view configuration',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Get all configuration
+    const { data: config } = await supabase
+      .from('config')
+      .select('key, value')
+      .in('key', [
+        'super_admin_users',
+        'admin_users',
+        'moderator_users',
+        'discord_bot_token',
+        'discord_client_id',
+        'discord_guild_id',
+        'discord_webhook_url'
+      ])
+
+    if (!config) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: '❌ No configuration found',
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const configList = config.map(item => {
+      if (item.key.includes('_users')) {
+        const users = JSON.parse(item.value)
+        return `**${item.key}:** ${users.length > 0 ? users.join(', ') : 'None'}`
+      } else if (item.key.includes('token') || item.key.includes('webhook')) {
+        return `**${item.key}:** ${item.value ? '✅ Set' : '❌ Not set'}`
+      } else {
+        return `**${item.key}:** ${item.value || 'Not set'}`
+      }
+    }).join('\n')
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `⚙️ **Commentum Configuration**\n\n${configList}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Config command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to fetch configuration: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
   }
 }
