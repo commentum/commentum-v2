@@ -2916,3 +2916,4 @@ async function handleCmdStatus(supabase: any, registration: any) {
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
+}
