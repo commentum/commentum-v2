@@ -1304,8 +1304,9 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
   // Sync commands to all target guilds
   const syncResults = []
   
-  for (const guildId of targetGuildIds) {
-    try {
+  try {
+    for (const guildId of targetGuildIds) {
+      try {
       const response = await fetch(
         `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
         {
@@ -1344,6 +1345,7 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
         success: false,
         error: error.message
       })
+    }
     }
   }
 
