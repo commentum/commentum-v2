@@ -1915,7 +1915,7 @@ async function handleLockCommand_impl(supabase: any, options: any, registration:
       reason: reason
     })
 
-    return new Response(
+return new Response(
       JSON.stringify({
         type: 4,
         data: {
