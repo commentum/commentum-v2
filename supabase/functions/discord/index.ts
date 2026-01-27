@@ -1,7 +1,154 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
-// All command handlers are defined in this file
+// All command handlers are defined in this file v2
+
+// Pre-define critical functions to avoid scoping issues
+async function handleStatsCommand(supabase: any) {
+  // Get comment statistics
+  const { data: stats } = await supabase
+    .from('comments')
+    .select('id, upvotes, downvotes, report_count, created_at')
+
+  const totalComments = stats?.length || 0
+  const totalUpvotes = stats?.reduce((sum, comment) => sum + comment.upvotes, 0) || 0
+  const totalDownvotes = stats?.reduce((sum, comment) => sum + comment.downvotes, 0) || 0
+  const totalReports = stats?.reduce((sum, comment) => sum + comment.report_count, 0) || 0
+
+  // Get registered Discord users
+  const { data: discordUsers } = await supabase
+    .from('discord_users')
+    .select('user_role, is_active')
+
+  const activeUsers = discordUsers?.filter(user => user.is_active).length || 0
+  const mods = discordUsers?.filter(user => user.is_active && user.user_role === 'moderator').length || 0
+  const admins = discordUsers?.filter(user => user.is_active && user.user_role === 'admin').length || 0
+  const superAdmins = discordUsers?.filter(user => user.is_active && user.user_role === 'super_admin').length || 0
+
+  return new Response(
+    JSON.stringify({
+      type: 4,
+      data: {
+        content: `📊 **Commentum Statistics**\n\n` +
+          `💬 **Comments:** ${totalComments}\n` +
+          `👍 **Upvotes:** ${totalUpvotes}\n` +
+          `👎 **Downvotes:** ${totalDownvotes}\n` +
+          `🚨 **Reports:** ${totalReports}\n\n` +
+          `👥 **Discord Users:** ${activeUsers}\n` +
+          `🛡️ **Mods:** ${mods}\n` +
+          `👑 **Admins:** ${admins}\n` +
+          `⚡ **Super Admins:** ${superAdmins}`,
+        flags: 64
+      }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleDeleteCommand(supabase: any, options: any, registration: any) {
+  console.log('handleDeleteCommand called')
+  const commentId = options.find(opt => opt.name === 'comment_id')?.value
+
+  try {
+    // Direct database operation using service role key
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id, deleted')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (comment.deleted) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** is already deleted`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Soft delete the comment
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        deleted: true,
+        deleted_at: new Date().toISOString(),
+        deleted_by: registration.platform_user_id
+      })
+      .eq('id', commentId)
+
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'comment_deleted',
+      comment: { ...comment, deleted: true },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully deleted comment **${commentId}**`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Delete command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to delete comment: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
+// Add stubs for other critical functions to ensure they're defined
+async function handleBanCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleBanCommand_impl(supabase, options, registration)
+}
+
+async function handleWarnCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleWarnCommand_impl(supabase, options, registration)
+}
+
+async function handlePinCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handlePinCommand_impl(supabase, options, registration)
+}
+
+async function handleLockCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleLockCommand_impl(supabase, options, registration)
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1107,7 +1254,7 @@ async function handleRegisterCommand(supabase: any, options: any, member: any) {
   )
 }
 
-async function handleBanCommand(supabase: any, options: any, registration: any) {
+async function handleBanCommand_impl(supabase: any, options: any, registration: any) {
   if (!['admin', 'super_admin'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -1196,7 +1343,7 @@ async function handleBanCommand(supabase: any, options: any, registration: any) 
   }
 }
 
-async function handleWarnCommand(supabase: any, options: any, registration: any) {
+async function handleWarnCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -1286,7 +1433,7 @@ async function handleWarnCommand(supabase: any, options: any, registration: any)
   }
 }
 
-async function handlePinCommand(supabase: any, options: any, registration: any) {
+async function handlePinCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -1371,7 +1518,7 @@ async function handlePinCommand(supabase: any, options: any, registration: any) 
   }
 }
 
-async function handleLockCommand(supabase: any, options: any, registration: any) {
+async function handleLockCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -1454,130 +1601,6 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
-
-async function handleDeleteCommand(supabase: any, options: any, registration: any) {
-  const commentId = options.find(opt => opt.name === 'comment_id')?.value
-
-  try {
-    // Direct database operation using service role key
-    const { data: comment } = await supabase
-      .from('comments')
-      .select('id, username, content, user_id, media_id, deleted')
-      .eq('id', commentId)
-      .single()
-
-    if (!comment) {
-      return new Response(
-        JSON.stringify({
-          type: 4,
-          data: {
-            content: `❌ Comment **${commentId}** not found`,
-            flags: 64
-          }
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (comment.deleted) {
-      return new Response(
-        JSON.stringify({
-          type: 4,
-          data: {
-            content: `❌ Comment **${commentId}** is already deleted`,
-            flags: 64
-          }
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Soft delete the comment
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        deleted: true,
-        deleted_at: new Date().toISOString(),
-        deleted_by: registration.platform_user_id
-      })
-      .eq('id', commentId)
-
-    if (error) throw error
-
-    // Send Discord notification for ALL actions
-    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
-    await sendDiscordNotification(supabase, {
-      type: 'comment_deleted',
-      comment: { ...comment, deleted: true },
-      moderator: { id: registration.platform_user_id, username: registration.platform_user_id }
-    })
-
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `✅ Successfully deleted comment **${commentId}**`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-
-  } catch (error) {
-    console.error('Delete command error:', error)
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `❌ Failed to delete comment: ${error.message}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-}
-
-async function handleStatsCommand(supabase: any) {
-  // Get comment statistics
-  const { data: stats } = await supabase
-    .from('comments')
-    .select('id, upvotes, downvotes, report_count, created_at')
-
-  const totalComments = stats?.length || 0
-  const totalUpvotes = stats?.reduce((sum, comment) => sum + comment.upvotes, 0) || 0
-  const totalDownvotes = stats?.reduce((sum, comment) => sum + comment.downvotes, 0) || 0
-  const totalReports = stats?.reduce((sum, comment) => sum + comment.report_count, 0) || 0
-
-  // Get registered Discord users
-  const { data: discordUsers } = await supabase
-    .from('discord_users')
-    .select('user_role, is_active')
-
-  const activeUsers = discordUsers?.filter(user => user.is_active).length || 0
-  const mods = discordUsers?.filter(user => user.is_active && user.user_role === 'moderator').length || 0
-  const admins = discordUsers?.filter(user => user.is_active && user.user_role === 'admin').length || 0
-  const superAdmins = discordUsers?.filter(user => user.is_active && user.user_role === 'super_admin').length || 0
-
-  return new Response(
-    JSON.stringify({
-      type: 4,
-      data: {
-        content: `📊 **Commentum Statistics**\n\n` +
-          `💬 **Comments:** ${totalComments}\n` +
-          `👍 **Upvotes:** ${totalUpvotes}\n` +
-          `👎 **Downvotes:** ${totalDownvotes}\n` +
-          `🚨 **Reports:** ${totalReports}\n\n` +
-          `👥 **Discord Users:** ${activeUsers}\n` +
-          `🛡️ **Mods:** ${mods}\n` +
-          `👑 **Admins:** ${admins}\n` +
-          `⚡ **Super Admins:** ${superAdmins}`,
-        flags: 64
-      }
-    }),
-    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
-}
 
 // Helper functions
 async function verifyPlatformToken(platformType: string, userId: string, token: string) {
