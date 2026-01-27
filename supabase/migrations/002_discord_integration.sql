@@ -108,5 +108,6 @@ INSERT INTO config (key, value) VALUES
     ('discord_bot_token', ''),
     ('discord_client_id', ''),
     ('discord_guild_id', ''),
+    ('discord_guild_ids', '[]'), -- JSON array for multiple guild IDs
     ('discord_notifications_enabled', 'true'),
     ('discord_notification_types', '["comment_created", "comment_updated", "comment_deleted", "user_banned", "user_warned", "comment_pinned", "comment_locked", "vote_cast", "vote_removed", "user_muted", "user_shadow_banned", "user_unbanned", "comment_unlocked", "moderation_action", "config_updated", "system_enabled", "system_disabled", "bulk_action", "report_filed", "report_resolved", "report_dismissed"]');

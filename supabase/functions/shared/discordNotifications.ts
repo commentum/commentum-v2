@@ -132,7 +132,17 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
       return { success: false, reason: `Discord API error: ${errorText}` }
     }
 
-    const result = await response.json()
+    // Parse Discord response (webhooks might return empty response on success)
+    let result = { id: null }
+    try {
+      const responseText = await response.text()
+      if (responseText && responseText.trim()) {
+        result = JSON.parse(responseText)
+      }
+    } catch (parseError) {
+      console.log('Discord webhook response parsing (this is normal for empty responses):', parseError.message)
+      // Use empty result object for empty responses
+    }
     
     // Update notification record with success if we have an ID
     if (notificationId) {
@@ -140,13 +150,13 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
         .from('discord_notifications')
         .update({
           delivery_status: 'sent',
-          message_id: result.id,
+          message_id: result.id || null,
           delivered_at: new Date().toISOString()
         })
         .eq('id', notificationId)
     }
 
-    return { success: true, messageId: result.id, notificationId }
+    return { success: true, messageId: result.id || null, notificationId }
 
   } catch (error) {
     console.error('Error sending Discord notification:', error)

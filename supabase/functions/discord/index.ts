@@ -492,7 +492,7 @@ async function handleGetUserRole(supabase: any, params: any) {
   )
 }
 
-async function handleSyncCommands(supabase: any) {
+async function handleSyncCommands(supabase: any, guildIds?: string[]) {
   // Fetch Discord config from database
   const { data: botTokenConfig } = await supabase
     .from('config')
@@ -506,25 +506,46 @@ async function handleSyncCommands(supabase: any) {
     .eq('key', 'discord_client_id')
     .single()
 
-  const { data: guildIdConfig } = await supabase
+  const { data: guildIdsConfig } = await supabase
     .from('config')
     .select('value')
-    .eq('key', 'discord_guild_id')
+    .eq('key', 'discord_guild_ids')
     .single()
 
   // DON'T parse these - they're plain strings, not JSON
   const DISCORD_BOT_TOKEN = botTokenConfig?.value || ''
   const DISCORD_CLIENT_ID = clientIdConfig?.value || ''
-  const DISCORD_GUILD_ID = guildIdConfig?.value || ''
 
-  if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID) {
+  // Get guild IDs - use provided ones, or from config, or fallback to single guild_id
+  let targetGuildIds: string[] = []
+  if (guildIds && guildIds.length > 0) {
+    targetGuildIds = guildIds
+  } else if (guildIdsConfig?.value) {
+    try {
+      targetGuildIds = JSON.parse(guildIdsConfig.value)
+    } catch {
+      targetGuildIds = guildIdsConfig.value.split(',').map(id => id.trim())
+    }
+  } else {
+    // Fallback to single guild_id config
+    const { data: guildIdConfig } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'discord_guild_id')
+      .single()
+    if (guildIdConfig?.value) {
+      targetGuildIds = [guildIdConfig.value]
+    }
+  }
+
+  if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !targetGuildIds.length) {
     return new Response(
       JSON.stringify({ 
         error: 'Discord configuration missing in database',
         details: {
           bot_token: !!DISCORD_BOT_TOKEN,
           client_id: !!DISCORD_CLIENT_ID,
-          guild_id: !!DISCORD_GUILD_ID
+          guild_ids: targetGuildIds
         },
         message: 'Please update config table with Discord credentials'
       }),
@@ -1000,38 +1021,82 @@ async function handleSyncCommands(supabase: any) {
     {
       name: 'sync',
       description: 'Sync Discord commands (Super Admin only)'
+    },
+    {
+      name: 'sync-multi',
+      description: 'Sync Discord commands to multiple servers (Super Admin only)',
+      options: [
+        {
+          name: 'guild_ids',
+          description: 'Comma-separated list of guild IDs to sync to',
+          type: 3,
+          required: false
+        }
+      ]
     }
   ]
 
-  try {
-    const response = await fetch(
-      `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${DISCORD_GUILD_ID}/commands`,
-      {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(commands)
+  // Sync commands to all target guilds
+  const syncResults = []
+  
+  for (const guildId of targetGuildIds) {
+    try {
+      const response = await fetch(
+        `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(commands)
+        }
+      )
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`Discord API error for guild ${guildId}:`, errorText)
+        syncResults.push({
+          guildId,
+          success: false,
+          error: `${response.status} - ${errorText}`
+        })
+        continue
       }
-    )
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Discord API error:', errorText)
-      throw new Error(`Discord API error: ${response.status} - ${errorText}`)
-    }
-
-    const result = await response.json()
-
-    return new Response(
-      JSON.stringify({
+      const result = await response.json()
+      syncResults.push({
+        guildId,
         success: true,
         commands: result,
-        message: `Synced ${result.length} commands to Discord guild ${DISCORD_GUILD_ID}`
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+        message: `Synced ${result.length} commands`
+      })
+      
+    } catch (error) {
+      console.error(`Failed to sync to guild ${guildId}:`, error)
+      syncResults.push({
+        guildId,
+        success: false,
+        error: error.message
+      })
+    }
+  }
+
+  const successfulSyncs = syncResults.filter(r => r.success)
+  const failedSyncs = syncResults.filter(r => !r.success)
+
+  return new Response(
+    JSON.stringify({
+      success: failedSyncs.length === 0,
+      totalGuilds: targetGuildIds.length,
+      successful: successfulSyncs.length,
+      failed: failedSyncs.length,
+      results: syncResults,
+      message: `Synced commands to ${successfulSyncs.length}/${targetGuildIds.length} guilds${failedSyncs.length > 0 ? ` (${failedSyncs.length} failed)` : ''}`
+    }),
+    { status: failedSyncs.length === 0 ? 200 : 207, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+
   } catch (error) {
     console.error('Error syncing Discord commands:', error)
     return new Response(
@@ -1166,6 +1231,11 @@ async function handleDiscordInteraction(supabase: any, params: any) {
       
       case 'sync':
         return await handleSyncCommand(supabase, registration)
+      
+      case 'sync-multi':
+        const guildIdsStr = options.find(opt => opt.name === 'guild_ids')?.value
+        const guildIds = guildIdsStr ? guildIdsStr.split(',').map(id => id.trim()) : undefined
+        return await handleSyncCommands(supabase, guildIds)
       
       case 'cmd':
         return await handleCmdCommand(supabase, options, registration, member)
