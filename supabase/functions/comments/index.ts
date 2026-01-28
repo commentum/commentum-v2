@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { validateUserInfo, validateMediaInfo, UserInfo, MediaInfo } from '../shared/clientAPIs.ts'
-import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
+import { verifyAdminAccess, getUserRole, canModerate, getDisplayRole } from '../shared/auth.ts'
 import { sendDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
@@ -332,7 +332,7 @@ async function handleCreateComment(supabase: any, params: any) {
       tags: tag !== undefined ? JSON.stringify([tag]) : null,
       username: userInfo.username,
       user_avatar: userInfo.avatar,
-      user_role: userRole,
+      user_role: getDisplayRole(userRole), // Store as super_admin to hide owner role
       media_type: mediaInfo.type,
       media_title: mediaInfo.title,
       media_year: mediaInfo.year,
