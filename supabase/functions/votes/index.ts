@@ -79,13 +79,6 @@ serve(async (req) => {
       )
     }
 
-    // Prevent self-voting
-    if (comment.user_id === user_id) {
-      return new Response(
-        JSON.stringify({ error: 'Cannot vote on your own comment' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
 
     // Parse current votes
     const userVotes = comment.user_votes ? JSON.parse(comment.user_votes) : {}
