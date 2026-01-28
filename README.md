@@ -1,146 +1,142 @@
-# Commentum v2 - Advanced Comment System
+# Commentum v2 - Comment Backend API Service
 
-A powerful, feature-rich comment system built on Supabase Edge Functions with support for multiple media platforms, advanced moderation, voting, and reporting capabilities.
+**🎯 IMPORTANT: This is a BACKEND API SERVICE for apps to integrate with, NOT a standalone application to deploy or fork.**
 
-## 🚀 Features
+---
 
-### Core Functionality
-- **Multi-Platform Support**: AniList, MyAnimeList, SIMKL, and custom platforms
-- **Nested Comments**: Configurable nesting levels for threaded discussions
-- **Real-time Voting**: Upvote/downvote system with vote tracking
-- **Advanced Moderation**: Pin, lock, warn, ban, and shadow-ban capabilities
-- **Reporting System**: User-driven content reporting with moderation queue
-- **Rich Media Integration**: Automatic fetching of user and media information
-- **Role-Based Access**: User, Moderator, Admin, and Super Admin roles
+## What is Commentum v2?
 
-### Security & Moderation
-- **Token Authentication**: Secure API token verification for all platforms
-- **Content Filtering**: Banned keyword detection and filtering
-- **User Status Management**: Ban, mute, shadow-ban, and warning system
-- **Edit History**: Complete audit trail for comment modifications
-- **IP & User Agent Tracking**: Enhanced security monitoring
+Commentum v2 is a **production-ready comment system backend** that provides API endpoints for apps to integrate comment functionality. It's built on Supabase Edge Functions and designed for applications using AniList, MyAnimeList (MAL), SIMKL, or custom platforms.
 
-### Performance & Scalability
-- **Optimized Database**: Efficient indexing and query optimization
-- **Pagination**: Configurable page sizes for large comment threads
-- **Caching**: Built-in caching for frequently accessed data
-- **Rate Limiting**: Configurable rate limits for all actions
+**Use this backend service to add comprehensive comment features to your existing apps.**
 
-## 🏗️ Architecture
+---
 
-### Database Schema
-- **comments**: Main table storing all comment data and metadata
-- **config**: System configuration and settings storage
+## 🚀 Core Purpose
 
-### Edge Functions
-- **comments**: Comment CRUD operations (create, edit, delete)
-- **votes**: Voting system management
-- **reports**: Reporting and moderation queue
-- **moderation**: Advanced moderation actions
-- **media**: Media comment retrieval and pagination
-- **shared**: Common utilities and authentication
+Commentum v2 serves as a **centralized comment infrastructure** that multiple applications can consume via REST API:
 
-### Supported Platforms
+- ✅ Your anime/manga apps can use it for comments
+- ✅ Your movie/TV apps can use it for discussions
+- ✅ Any app can integrate comment functionality without building it from scratch
+
+**This is NOT:**
+- ❌ A standalone comment website
+- ❌ A frontend application
+- ❌ Something you "fork and deploy"
+- ❌ A user-facing service
+
+**This IS:**
+- ✅ A backend API service
+- ✅ For apps to integrate with via API calls
+- ✅ A reusable comment infrastructure
+- ✅ Centralized moderation and content management
+
+---
+
+## 🎯 How It Works
+
+### For App Developers
+
+1. **Your App** makes API calls to Commentum v2 endpoints
+2. **Commentum v2** processes and stores comment data
+3. **Your App** displays comments to users
+4. **Commentum v2** handles moderation, voting, reporting, etc.
+
+```
+┌─────────────┐           API           ┌──────────────┐
+│   Your App  │ ◄──────────────────────► │ Commentum v2 │
+│ (Frontend)  │                       │ (Backend API)  │
+└─────────────┘                       └──────────────┘
+      │                                       │
+      │ Displays                               │ Stores &
+      │ Comments                              │ Moderates
+      ▼                                       ▼
+   Users                                PostgreSQL DB
+```
+
+### Integration Example
+
+Your app makes simple HTTP requests:
+
+```javascript
+// Create a comment from your app
+const response = await fetch('https://your-project.supabase.co/functions/v1/comments', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    action: 'create',
+    client_type: 'anilist',  // Your platform
+    user_id: currentUser.id,
+    media_id: animeId,
+    content: userComment
+  })
+});
+
+// Get comments for a media
+const comments = await fetch(
+  `https://your-project.supabase.co/functions/v1/media?media_id=${animeId}&client_type=anilist`
+).then(r => r.json());
+```
+
+---
+
+## ✨ Features Provided by This Backend
+
+### Core Comment Features
+- **Nested Comments**: Threaded discussions with configurable depth
+- **Real-time Voting**: Upvote/downvote system
+- **User Reports**: Content reporting and moderation queue
+- **Edit & Delete**: Full comment lifecycle management
+- **Auto-fetched Metadata**: User & media info from platform APIs
+
+### Advanced Moderation
+- **Pin Comments**: Highlight important discussions
+- **Lock Threads**: Freeze comment threads when needed
+- **User Warnings**: Multi-level warning system
+- **User Muting**: Temporary comment restrictions
+- **User Banning**: Permanent comment blocking
+- **Shadow Banning**: Hidden comment restrictions
+
+### Platform Support
 - **AniList**: GraphQL API integration
-- **MyAnimeList**: REST API integration  
+- **MyAnimeList**: REST API integration
 - **SIMKL**: REST API integration
 - **Other**: Custom platform support
 
-## 📦 Installation
+### Security & Reliability
+- **Rate Limiting**: Configurable limits per user
+- **Content Filtering**: Banned keyword detection
+- **Row Level Security**: Database-level access control
+- **Audit Logging**: Complete action history
+- **Discord Notifications**: Optional moderation alerts
 
-### Prerequisites
-- Supabase account and project
-- Node.js 16+ (for local development)
-- API credentials for supported platforms
-
-### Setup Steps
-
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/commentum/commentum-v2.git
-   cd commentum-v2
-   ```
-
-2. **Set up Supabase**
-   ```bash
-   # Apply database migrations
-   supabase db push
-   
-   # Deploy edge functions
-   supabase functions deploy .
-   ```
-
-3. **Configure Environment Variables**
-   ```bash
-   # In Supabase Dashboard > Settings > Edge Functions
-   SUPABASE_URL=your_supabase_url
-   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-   
-   # Optional: Platform API keys
-   MYANIMELIST_CLIENT_ID=your_mal_client_id
-   SIMKL_CLIENT_ID=your_simkl_client_id
-   ```
-
-4. **Configure System Settings**
-   The system automatically populates default configuration in the `config` table. Update as needed:
-   - Rate limits
-   - User roles
-   - Banned keywords
-   - System toggles
-
-## 🔧 Configuration
-
-### System Configuration
-All configuration is stored in the `config` table:
-
-```sql
--- Example configuration updates
-UPDATE config SET value = '50' WHERE key = 'max_comment_length';
-UPDATE config SET value = '[123, 456]' WHERE key = 'moderator_users';
-UPDATE config SET value = '["spam", "offensive"]' WHERE key = 'banned_keywords';
-```
-
-### Key Configuration Options
-- `max_comment_length`: Maximum comment character limit (default: 10000)
-- `max_nesting_level`: Maximum reply nesting depth (default: 10)
-- `rate_limit_*`: Rate limits per hour for various actions
-- `*_users`: JSON arrays of user IDs for each role
-- `system_enabled`: Master toggle for the entire system
-- `voting_enabled`: Toggle for voting system
-- `reporting_enabled`: Toggle for reporting system
+---
 
 ## 📚 API Documentation
 
-### 🚀 Complete API Reference
+### Quick Start
 
 **Base URL**: `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/`
 
-**Project URL**: `https://whzwmfxngelicmjyxwmr.supabase.co`
+**🔑 NO API KEYS REQUIRED** - Open system design
 
-**🔑 NO API KEYS REQUIRED** - All endpoints are open and use platform-specific tokens for user verification only.
-
-#### 📋 Quick Links
-
-- **[📖 Complete API Reference](./docs/COMPLETE_API_REFERENCE.md)** - Comprehensive documentation for all endpoints
-- **[🔧 API Reference](./docs/API.md)** - Original API documentation
-- **[🤖 Discord Setup](./docs/DISCORD_SETUP.md)** - Discord bot integration guide
-- **[🚀 Deployment](./docs/DEPLOYMENT.md)** - Production deployment guide
-
-#### 🎯 Core Endpoints Overview
+**Core Endpoints**:
 
 | Endpoint | Purpose | Auth Required |
 |----------|---------|---------------|
-| **`/comments`** | Create, edit, delete comments | Token for edit/delete only |
-| **`/votes`** | Upvote/downvote comments | ❌ No auth required |
-| **`/reports`** | Report and manage content | Admin only for resolution |
-| **`/moderation`** | Pin, lock, ban, warn users | ✅ Admin required |
-| **`/media`** | Get comments for media | ❌ No auth required |
-| **`/discord`** | Discord bot integration | ✅ Bot token required |
+| `/comments` | Create, edit, delete comments | Edit/delete only |
+| `/votes` | Upvote/downvote comments | ❌ No |
+| `/media` | Get comments for media | ❌ No |
+| `/reports` | Report and manage content | Admin only |
+| `/moderation` | Admin moderation actions | ✅ Yes |
+| `/users` | Get user roles | Token for admin |
+| `/discord` | Discord bot integration | ✅ Yes |
 
-#### 🚀 Quick Start Examples
+**Quick Examples**:
 
 ```bash
-# Create a comment (no auth needed)
+# Create comment (no auth needed)
 curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
   -H "Content-Type: application/json" \
   -d '{
@@ -151,178 +147,413 @@ curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
     "content": "Great episode!"
   }'
 
-# Get media comments (no auth needed)
+# Get comments (no auth needed)
 curl "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=6789&client_type=anilist&limit=10"
-
-# Vote on comment (no auth needed)
-curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/votes" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "comment_id": 1,
-    "user_id": "12345",
-    "vote_type": "upvote"
-  }'
-
-# Delete own comment (no auth needed)
-curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "delete",
-    "comment_id": 1,
-    "user_id": "12345"
-  }'
 ```
 
-#### 🔐 Authentication
+### Full Documentation
 
-Most endpoints use platform-specific token verification:
+📖 **[Complete API Reference](./docs/COMPLETE_API_REFERENCE.md)** - Comprehensive documentation for all endpoints
+
+📖 **[Quick Start Guide](./docs/QUICK_START.md)** - 5-minute integration guide
+
+📖 **[Database Schema](./docs/DATABASE_SCHEMA.md)** - Database structure reference
+
+---
+
+## 🛠️ For Backend Developers
+
+### Deploy Your Own Instance
+
+If you want to deploy Commentum v2 for your own apps:
+
+**Prerequisites**:
+- Supabase account and project
+- Optional: Platform API credentials (for user/media info fetching)
+
+**Setup Steps**:
+
+1. **Clone this repository**
+   ```bash
+   git clone https://github.com/commentum/commentum-v2.git
+   cd commentum-v2
+   ```
+
+2. **Apply database migrations**
+   ```bash
+   supabase db push
+   ```
+
+3. **Deploy Edge Functions**
+   ```bash
+   supabase functions deploy .
+   ```
+
+4. **Configure environment variables** (in Supabase Dashboard):
+   ```
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+   ```
+
+5. **Optional: Configure platform API keys**
+   ```
+   MYANIMELIST_CLIENT_ID=your_mal_client_id
+   SIMKL_CLIENT_ID=your_simkl_client_id
+   ```
+
+**That's it!** Your backend is now ready for apps to integrate.
+
+### Configuration
+
+All settings are stored in the database `config` table and can be updated without code changes:
+
+```sql
+-- Update comment length limit
+UPDATE config SET value = '5000' WHERE key = 'max_comment_length';
+
+-- Add moderators
+UPDATE config SET value = '[123, 456, 789]' WHERE key = 'moderator_users';
+
+-- Enable/disable features
+UPDATE config SET value = 'true' WHERE key = 'voting_enabled';
+UPDATE config SET value = 'true' WHERE key = 'reporting_enabled';
+```
+
+---
+
+## 🎯 Usage Scenarios
+
+### 1. AniList App Integration
+
+Your AniList-based app can add comments:
+
+```javascript
+// User creates a comment on anime page
+await createComment({
+  client_type: 'anilist',
+  user_id: currentUser.id,
+  media_id: animeId,
+  content: commentText
+});
+
+// Display comments on anime page
+const comments = await getComments(animeId, 'anilist');
+renderComments(comments);
+```
+
+### 2. Multi-Platform App
+
+One backend serves multiple platforms:
+
+```javascript
+// Platform-specific comment retrieval
+const anilistComments = await getComments(animeId, 'anilist');
+const malComments = await getComments(animeId, 'myanimelist');
+const simklComments = await getComments(animeId, 'simkl');
+```
+
+### 3. Content Aggregator
+
+Use Commentum v2 as a unified comment backend:
+
+```javascript
+// Your aggregator app shows comments from different sources
+const unifiedComments = await Promise.all([
+  getComments(item.anilistId, 'anilist'),
+  getComments(item.malId, 'myanimelist')
+]);
+```
+
+---
+
+## 🔧 Moderation & Management
+
+### Admin Actions
+
+Admins can moderate content via API:
+
+```javascript
+// Pin important comment
+await moderateComment({
+  action: 'pin_comment',
+  comment_id: 123,
+  moderator_id: adminId,
+  token: adminToken,
+  client_type: 'anilist',
+  reason: 'Official announcement'
+});
+
+// Lock problematic thread
+await moderateComment({
+  action: 'lock_thread',
+  comment_id: 456,
+  moderator_id: adminId,
+  token: adminToken,
+  client_type: 'anilist',
+  reason: 'Flame war'
+});
+
+// Ban spammer
+await moderateUser({
+  action: 'ban_user',
+  target_user_id: 789,
+  moderator_id: adminId,
+  token: adminToken,
+  client_type: 'anilist',
+  reason: 'Repeated spam',
+  shadow_ban: true
+});
+```
+
+### Discord Bot Integration
+
+Optional Discord bot for real-time moderation:
+
+📖 **[Discord Setup Guide](./docs/DISCORD_SETUP.md)**
+
+Features:
+- Real-time comment notifications
+- Moderation commands in Discord
+- Report alerts
+- Statistics dashboard
+
+---
+
+## 📊 Architecture
+
+### Backend Stack
+
+- **Platform**: Supabase (PostgreSQL + Edge Functions)
+- **Language**: TypeScript / Deno
+- **Database**: PostgreSQL with RLS
+- **Caching**: Database-level optimization
+- **API**: RESTful endpoints
+
+### Database Schema
+
+Two-table design for simplicity and performance:
+
+- **`comments`**: All comment data and metadata
+- **`config`**: System configuration and settings
+- **`discord_users`**: Discord bot integration
+- **`discord_notifications`**: Notification tracking
+
+📖 **[Database Schema Documentation](./docs/DATABASE_SCHEMA.md)**
+
+### Edge Functions
+
+- `/comments` - Comment CRUD operations
+- `/votes` - Voting system
+- `/reports` - Reporting and moderation queue
+- `/moderation` - Advanced moderation actions
+- `/media` - Comment retrieval and pagination
+- `/users` - User role management
+- `/discord` - Discord bot integration
+- `/shared` - Common utilities and auth
+
+---
+
+## 🔐 Authentication Model
+
+### Open System Design
+
+**Key Principle**: Most operations don't require authentication
+
+**No Auth Required**:
+- ✅ Creating comments
+- ✅ Reading comments
+- ✅ Voting
+- ✅ Deleting own comments (user_id match only)
+
+**Auth Required**:
+- 🔑 Editing comments (token verification)
+- 🔑 Admin actions (token + role verification)
+- 🔑 Report resolution (admin only)
+
+### Platform Token Verification
+
+When authentication is required, it uses platform-specific tokens:
 
 ```json
 {
-  "client_type": "anilist|myanimelist|simkl|other",
-  "user_id": "platform_user_id",
+  "client_type": "anilist",
+  "user_id": "12345",
   "token": "platform_auth_token"
 }
 ```
 
-**When Authentication is Required:**
-- ✅ **Edit/Delete Comments**: Users editing their own comments
-- ✅ **Admin Actions**: All moderation and admin operations  
-- ✅ **Report Resolution**: Admins resolving reports
-- ❌ **Create Comments**: Open system - no auth needed
-- ❌ **Vote/Get Comments**: Open system - no auth needed
-
-#### 📊 Supported Platforms
-
-| Platform | Token Type | Verification |
-|----------|------------|-------------|
-| **AniList** | Bearer Token | GraphQL `/viewer` |
-| **MyAnimeList** | Bearer Token | REST `/users/me` |
-| **SIMKL** | API Key | REST `/users/settings` |
-| **Other** | Custom | Custom verification |
+Token verification:
+- **AniList**: GraphQL query to verify user
+- **MyAnimeList**: REST API call to verify user
+- **SIMKL**: API key verification
 
 ---
 
-## 🔧 Configuration
+## ⚙️ Configuration Options
 
-### System Configuration
-All configuration is stored in the `config` table:
+All settings stored in database `config` table:
 
-```sql
--- Example configuration updates
-UPDATE config SET value = '50' WHERE key = 'max_comment_length';
-UPDATE config SET value = '[123, 456]' WHERE key = 'moderator_users';
-UPDATE config SET value = '["spam", "offensive"]' WHERE key = 'banned_keywords';
-```
+| Key | Type | Default | Description |
+|-----|------|----------|-------------|
+| `max_comment_length` | INTEGER | 10000 | Maximum comment characters |
+| `max_nesting_level` | INTEGER | 10 | Maximum reply depth |
+| `system_enabled` | BOOLEAN | true | Master system toggle |
+| `voting_enabled` | BOOLEAN | true | Enable voting system |
+| `reporting_enabled` | BOOLEAN | true | Enable reporting |
+| `rate_limit_comments_per_hour` | INTEGER | 30 | Comment rate limit |
+| `rate_limit_votes_per_hour` | INTEGER | 100 | Vote rate limit |
+| `banned_keywords` | JSON | [] | Prohibited keywords |
+| `super_admin_users` | JSON | [] | Super admin IDs |
+| `moderator_users` | JSON | [] | Moderator IDs |
+| `admin_users` | JSON | [] | Admin IDs |
 
-### Key Configuration Options
-- `max_comment_length`: Maximum comment character limit (default: 10000)
-- `max_nesting_level`: Maximum reply nesting depth (default: 10)
-- `rate_limit_*`: Rate limits per hour for various actions
-- `*_users`: JSON arrays of user IDs for each role
-- `system_enabled`: Master toggle for the entire system
-- `voting_enabled`: Toggle for voting system
-- `reporting_enabled`: Toggle for reporting system
+---
 
-### 🔑 No API Keys Configuration
+## 🚦 Rate Limiting
 
-**IMPORTANT**: This system does NOT require any Supabase API keys:
+Per-user rate limits (configurable):
 
-- ❌ **No ANON_KEY needed**
-- ❌ **No SERVICE_ROLE_KEY needed**  
-- ❌ **No authentication setup required**
+- **Comments**: 30 per hour
+- **Votes**: 100 per hour
+- **Reports**: 10 per hour
 
-The system uses:
-- ✅ **Platform-specific tokens** (AniList, MAL, SIMKL)
-- ✅ **Open comment system** design
-- ✅ **Row Level Security** for data protection
+When rate limited: Returns `429 Too Many Requests`
+
+---
+
+## 📈 Performance
+
+### Optimizations
+
+- **Database Indexes**: All major query paths indexed
+- **Pagination**: Efficient result limiting
+- **JSON Operations**: JSONB for performance
+- **RLS Policies**: Security at database level
+- **Connection Pooling**: Supabase built-in pooling
+
+### Scalability
+
+- **Edge Functions**: Auto-scaling infrastructure
+- **Database**: PostgreSQL with connection pooling
+- **Caching**: Database query optimization
+- **Horizontal Scaling**: Multiple Supabase projects possible
+
+---
 
 ## 🔒 Security Features
 
-### Authentication & Authorization
-- Platform-specific token verification
-- Role-based access control
-- Permission hierarchy enforcement
+- **Row Level Security**: Database-level access control
+- **Token Verification**: Platform API validation
+- **Rate Limiting**: Abuse prevention
+- **Content Filtering**: Banned keyword detection
+- **IP Tracking**: Optional IP logging
+- **Audit Logging**: Complete action history
+- **Shadow Banning**: Hidden content restrictions
 
-### Content Protection
-- Banned keyword filtering
-- Rate limiting per user
-- Self-action prevention (no self-voting, self-reporting)
+---
 
-### User Management
-- Warning system with thresholds
-- Temporary muting
-- Permanent and shadow banning
-- Audit logging for all actions
+## 🌐 Multi-Tenancy
 
-## 🎯 Use Cases
+### Using This Backend for Multiple Apps
 
-### Media Discussion Platforms
-- Anime/manga review sites
-- Movie discussion forums
-- TV show episode comments
+Commentum v2 supports multiple apps via `client_type`:
 
-### Community Features
-- Blog comment sections
-- Product review systems
-- Social media platforms
+```javascript
+// App A uses anilist client type
+await createComment({ client_type: 'anilist', ... });
 
-### Moderation Workflows
-- Community management
-- Content moderation
-- User behavior management
+// App B uses myanimelist client type
+await createComment({ client_type: 'myanimelist', ... });
 
-## 🚀 Deployment
+// App C uses custom client type
+await createComment({ client_type: 'other', ... });
+```
 
-### Production Deployment
-1. Configure all environment variables
-2. Apply database migrations
-3. Deploy edge functions
-4. Test all API endpoints
-5. Configure monitoring
+Each `client_type` has isolated comment spaces.
 
-### Monitoring & Maintenance
-- Monitor function logs in Supabase Dashboard
-- Track database performance
-- Regular backup of configuration
-- Update banned keywords as needed
+---
 
-## 🤝 Contributing
+## 📱 Client Integration
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+### Recommended Client Libraries
 
-## 📄 License
+You can use any HTTP client to integrate:
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+- **JavaScript**: `fetch` API, axios
+- **React**: Custom hooks using fetch
+- **Vue**: Axios or fetch wrappers
+- **Mobile**: HTTP libraries (AFNetworking, Retrofit, etc.)
+- **Backend**: Any HTTP client library
 
-## 🆘 Support
+### Example: React Hook
 
-- **Documentation**: See `/docs` folder for detailed API documentation
-- **Issues**: Report bugs via GitHub Issues
-- **Community**: Join our Discord server for discussions
+```javascript
+import { useState, useEffect } from 'react';
 
-## 🔗 Related Links
+function useComments(mediaId, clientType) {
+  const [comments, setComments] = useState([]);
 
-- **🚀 Live Project**: https://whzwmfxngelicmjyxwmr.supabase.co
-- **📖 Complete API Reference**: [./docs/COMPLETE_API_REFERENCE.md](./docs/COMPLETE_API_REFERENCE.md)
-- **🔧 Original API Docs**: [./docs/API.md](./docs/API.md)
-- **🤖 Discord Setup**: [./docs/DISCORD_SETUP.md](./docs/DISCORD_SETUP.md)
-- **🚀 Deployment Guide**: [./docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)
-- **⚙️ Database Schema**: [./docs/DATABASE_SCHEMA.md](./docs/DATABASE_SCHEMA.md)
-- **🛠️ Discord Commands**: [./docs/DISCORD_COMMANDS.md](./docs/DISCORD_COMMANDS.md)
-- **📋 CMD Commands**: [./docs/CMD_COMMAND.md](./docs/CMD_COMMAND.md)
-- **🔄 Actions Guide**: [./docs/ACTIONS.md](./docs/ACTIONS.md)
+  useEffect(() => {
+    fetch(
+      `https://your-project.supabase.co/functions/v1/media?media_id=${mediaId}&client_type=${clientType}`
+    )
+      .then(r => r.json())
+      .then(data => setComments(data.comments));
+  }, [mediaId, clientType]);
 
-### External Platform APIs
+  return comments;
+}
+```
+
+---
+
+## 🆘 Support & Resources
+
+### Documentation
+
+- 📖 **[Complete API Reference](./docs/COMPLETE_API_REFERENCE.md)**
+- 📖 **[Quick Start Guide](./docs/QUICK_START.md)**
+- 📖 **[Database Schema](./docs/DATABASE_SCHEMA.md)**
+- 📖 **[Discord Setup](./docs/DISCORD_SETUP.md)**
+- 📖 **[Deployment Guide](./docs/DEPLOYMENT.md)**
+
+### External APIs
+
 - **Supabase**: https://supabase.com
 - **AniList API**: https://anilist.gitbook.io/anilist-apiv2-docs/
 - **MyAnimeList API**: https://myanimelist.net/apiconfig/references/api/v2
 - **SIMKL API**: https://simkl.docs.apiary.io/
 
+### Getting Help
+
+- **GitHub Issues**: Report bugs and feature requests
+- **Documentation**: Check docs folder first
+- **API Testing**: Use the provided Supabase project
+
 ---
 
-**Commentum v2** - Building better communities, one comment at a time.
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+## 🎉 Summary
+
+**Commentum v2 is a backend API service that:**
+
+✅ Provides comment functionality via REST API
+✅ Integrates with AniList, MAL, SIMKL platforms
+✅ Handles moderation, voting, reporting
+✅ Requires minimal setup to deploy
+✅ Can serve multiple applications
+✅ Offers Discord bot integration
+✅ No API keys required for basic use
+
+**Apps integrate with Commentum v2, users interact with apps.**
+
+**Commentum v2 handles all the backend complexity.**
+
+---
+
+**Ready to integrate?** Start with the [Quick Start Guide](./docs/QUICK_START.md) 🚀
