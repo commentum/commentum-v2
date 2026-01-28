@@ -22,7 +22,6 @@ serve(async (req) => {
 
     const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info } = await req.json()
 
-    // Validate action-specific required fields
     switch (action) {
       case 'create':
         if (!client_type || !content || !user_info || !media_info) {
@@ -58,7 +57,6 @@ serve(async (req) => {
         )
     }
 
-    // Validate comment_id if provided (must be integer)
     if (comment_id && (!Number.isInteger(comment_id) || comment_id <= 0)) {
       return new Response(
         JSON.stringify({ error: 'comment_id must be a positive integer' }),
@@ -66,7 +64,6 @@ serve(async (req) => {
       )
     }
 
-    // Validate parent_id if provided (must be integer)
     if (parent_id && (!Number.isInteger(parent_id) || parent_id <= 0)) {
       return new Response(
         JSON.stringify({ error: 'parent_id must be a positive integer' }),
@@ -74,7 +71,6 @@ serve(async (req) => {
       )
     }
 
-    // Validate content length only if content is provided
     if (content && (content.length < 1 || content.length > 10000)) {
       return new Response(
         JSON.stringify({ error: 'Content must be between 1 and 10000 characters' }),
@@ -82,9 +78,7 @@ serve(async (req) => {
       )
     }
 
-    // Validate tag (episode identifier) if provided
     if (tag !== undefined) {
-      // Tag can be string or number (episode identifier)
       if (typeof tag !== 'string' && typeof tag !== 'number') {
         return new Response(
           JSON.stringify({ error: 'Tag must be a string or number (episode identifier)' }),
@@ -92,7 +86,6 @@ serve(async (req) => {
         )
       }
       
-      // If number, ensure it's non-negative
       if (typeof tag === 'number' && tag < 0) {
         return new Response(
           JSON.stringify({ error: 'Tag number must be non-negative' }),
@@ -100,7 +93,6 @@ serve(async (req) => {
         )
       }
       
-      // If string, ensure it's not empty
       if (typeof tag === 'string' && tag.trim().length === 0) {
         return new Response(
           JSON.stringify({ error: 'Tag string cannot be empty' }),
@@ -109,7 +101,6 @@ serve(async (req) => {
       }
     }
 
-    // Check if system is enabled
     const { data: systemConfig } = await supabase
       .from('config')
       .select('value')
@@ -123,11 +114,38 @@ serve(async (req) => {
       )
     }
 
-    // Extract user_id and media_id from info objects
-    const user_id = user_info?.user_id
-    const media_id = media_info?.media_id
+    let userInfo: UserInfo | null = null
+    let mediaInfo: MediaInfo | null = null
+    
+    if (action === 'create') {
+      if (!validateUserInfo(user_info)) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      userInfo = user_info
 
-    // Validate extracted IDs
+      if (!validateMediaInfo(media_info)) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid media_info format. Required: media_id, type (any string), title (1-200 chars), optional: year, poster' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      mediaInfo = media_info
+    } else if (action === 'edit' || action === 'delete') {
+      if (!validateUserInfo(user_info)) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      userInfo = user_info
+    }
+
+    const user_id = userInfo?.user_id
+    const media_id = mediaInfo?.media_id
+
     if (!user_id) {
       return new Response(
         JSON.stringify({ error: 'user_info.user_id is required' }),
@@ -142,10 +160,8 @@ serve(async (req) => {
       )
     }
 
-    // For delete action, check if user owns the comment first
     let userRole = 'user'
     if (action === 'delete') {
-      // First check if comment exists and get ownership info
       const { data: comment } = await supabase
         .from('comments')
         .select('user_id, user_role, client_type')
@@ -159,11 +175,9 @@ serve(async (req) => {
         )
       }
 
-      // If user owns the comment, no admin check needed
       if (comment.user_id === user_id) {
         userRole = await getUserRole(supabase, user_id)
       } else {
-        // User is trying to delete someone else's comment - check admin permissions
         const adminVerification = await verifyAdminAccess(supabase, user_id)
         if (!adminVerification.valid) {
           return new Response(
@@ -174,59 +188,27 @@ serve(async (req) => {
         userRole = adminVerification.role
       }
     } else {
-      // For regular actions (create, edit), just get user role without token verification
       userRole = await getUserRole(supabase, user_id)
     }
 
-    // Validate user and media information only for create action
-    let userInfo: UserInfo | null = null
-    let mediaInfo: MediaInfo | null = null
-    
-    if (action === 'create') {
-      // Validate user info provided by frontend
-      if (!validateUserInfo(user_info)) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      userInfo = user_info
-
-      // Validate media info provided by frontend
-      if (!validateMediaInfo(media_info)) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid media_info format. Required: media_id, type (any string), title (1-200 chars), optional: year, poster' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      mediaInfo = media_info
-    } else if (action === 'edit' || action === 'delete') {
-      // For edit and delete, just validate user_info structure
-      if (!validateUserInfo(user_info)) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      userInfo = user_info
-    }
-
-    // Check user status
     const { data: existingUserComments } = await supabase
       .from('comments')
       .select('user_banned, user_muted_until, user_shadow_banned, user_warnings')
       .eq('user_id', user_id)
       .eq('client_type', client_type)
-      .single()
+      .order('created_at', { ascending: false })
+      .limit(1)
 
-    if (existingUserComments?.user_banned) {
+    const userStatus = existingUserComments?.[0]
+
+    if (userStatus?.user_banned) {
       return new Response(
         JSON.stringify({ error: 'User is banned' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    if (existingUserComments?.user_muted_until && new Date(existingUserComments.user_muted_until) > new Date()) {
+    if (userStatus?.user_muted_until && new Date(userStatus.user_muted_until) > new Date()) {
       return new Response(
         JSON.stringify({ error: 'User is muted' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -284,7 +266,6 @@ serve(async (req) => {
 async function handleCreateComment(supabase: any, params: any) {
   const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req } = params
 
-  // Validate nesting level if parent_id is provided
   if (parent_id) {
     const { data: parentComment } = await supabase
       .from('comments')
@@ -306,7 +287,6 @@ async function handleCreateComment(supabase: any, params: any) {
       )
     }
 
-    // Check nesting level
     const nestingLevel = await getNestingLevel(supabase, parent_id)
     const { data: maxNestingConfig } = await supabase
       .from('config')
@@ -323,7 +303,6 @@ async function handleCreateComment(supabase: any, params: any) {
     }
   }
 
-  // Check for banned keywords
   const { data: bannedKeywordsConfig } = await supabase
     .from('config')
     .select('value')
@@ -342,7 +321,6 @@ async function handleCreateComment(supabase: any, params: any) {
     )
   }
 
-  // Create comment (ID will be auto-generated as integer)
   const { data: comment, error } = await supabase
     .from('comments')
     .insert({
@@ -367,7 +345,6 @@ async function handleCreateComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for new comment
   try {
     await sendDiscordNotification(supabase, {
       type: 'comment_created',
@@ -390,7 +367,6 @@ async function handleCreateComment(supabase: any, params: any) {
     })
   } catch (notificationError) {
     console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
   }
 
   return new Response(
@@ -429,7 +405,6 @@ async function handleEditComment(supabase: any, params: any) {
     )
   }
 
-  // Check permissions - ONLY users can edit their own comments
   if (comment.user_id !== user_id) {
     return new Response(
       JSON.stringify({ error: 'You can only edit your own comments' }),
@@ -437,7 +412,6 @@ async function handleEditComment(supabase: any, params: any) {
     )
   }
 
-  // Update comment with edit history
   const editHistory = comment.edit_history ? JSON.parse(comment.edit_history) : []
   editHistory.push({
     oldContent: comment.content,
@@ -461,7 +435,6 @@ async function handleEditComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for edited comment
   try {
     await sendDiscordNotification(supabase, {
       type: 'comment_updated',
@@ -476,7 +449,6 @@ async function handleEditComment(supabase: any, params: any) {
     })
   } catch (notificationError) {
     console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
   }
 
   return new Response(
@@ -488,7 +460,6 @@ async function handleEditComment(supabase: any, params: any) {
 async function handleDeleteComment(supabase: any, params: any) {
   const { comment_id, user_id, userRole, req } = params
 
-  // Get full comment data for validation
   const { data: comment } = await supabase
     .from('comments')
     .select('*')
@@ -509,7 +480,6 @@ async function handleDeleteComment(supabase: any, params: any) {
     )
   }
 
-  // Check permissions - user can delete own comment, only admins and super admins can delete others
   if (comment.user_id !== user_id) {
     const isAdmin = userRole === 'admin' || userRole === 'super_admin' || userRole === 'owner'
     if (!isAdmin) {
@@ -520,7 +490,6 @@ async function handleDeleteComment(supabase: any, params: any) {
     }
   }
 
-  // Soft delete
   const { data: deletedComment, error } = await supabase
     .from('comments')
     .update({
@@ -534,7 +503,6 @@ async function handleDeleteComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for deleted comment
   try {
     const moderator = comment.user_id !== user_id ? {
       username: user_id,
@@ -547,7 +515,7 @@ async function handleDeleteComment(supabase: any, params: any) {
         id: deletedComment.id,
         username: deletedComment.username,
         user_id: deletedComment.user_id,
-        content: comment.content, // Original content before deletion
+        content: comment.content,
         client_type: deletedComment.client_type,
         media_id: deletedComment.media_id
       },
@@ -555,7 +523,6 @@ async function handleDeleteComment(supabase: any, params: any) {
     })
   } catch (notificationError) {
     console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
   }
 
   return new Response(
