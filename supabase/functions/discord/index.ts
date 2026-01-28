@@ -928,8 +928,8 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
     // Sync commands to all target guilds
     const syncResults = []
     
-    try {
-      for (const guildId of targetGuildIds) {
+    for (const guildId of targetGuildIds) {
+      try {
         const response = await fetch(
           `https://discord.com/api/v10/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
           {
@@ -968,7 +968,7 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
           error: error.message
         })
       }
-    };
+    }
 
     const successfulSyncs = syncResults.filter(r => r.success);
     const failedSyncs = syncResults.filter(r => !r.success);
