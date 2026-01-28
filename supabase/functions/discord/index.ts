@@ -968,7 +968,7 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
           error: error.message
         })
       }
-    }
+    };
 
     const successfulSyncs = syncResults.filter(r => r.success);
     const failedSyncs = syncResults.filter(r => !r.success);
