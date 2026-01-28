@@ -1401,6 +1401,9 @@ async function handleDiscordInteraction(supabase: any, params: any) {
   // Handle different commands
   try {
     switch (commandName) {
+      case 'register':
+        return await handleRegisterCommand(supabase, options, member)
+      
       case 'ban':
         return await handleBanCommand(supabase, options, registration)
       
@@ -1475,9 +1478,6 @@ async function handleDiscordInteraction(supabase: any, params: any) {
       
       case 'webhooks':
         return await handleWebhooksCommand(supabase, options, registration)
-      
-      case 'help':
-        return await handleHelpCommand(registration)
       
       default:
         return new Response(
