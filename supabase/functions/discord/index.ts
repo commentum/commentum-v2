@@ -3489,5 +3489,4 @@ async function handleConfigCommand(supabase: any, options: any, registration: an
     )
   }
 }
-
-}) // Close main serve function
+}
