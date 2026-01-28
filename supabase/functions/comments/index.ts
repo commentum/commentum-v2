@@ -82,12 +82,28 @@ serve(async (req) => {
       )
     }
 
-    // Validate tag (episode number) if provided
+    // Validate tag (episode identifier) if provided
     if (tag !== undefined) {
-      // Tag should be an integer (episode number)
-      if (!Number.isInteger(tag) || tag < 0) {
+      // Tag can be string or number (episode identifier)
+      if (typeof tag !== 'string' && typeof tag !== 'number') {
         return new Response(
-          JSON.stringify({ error: 'Tag must be a non-negative integer (episode number)' }),
+          JSON.stringify({ error: 'Tag must be a string or number (episode identifier)' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // If number, ensure it's non-negative
+      if (typeof tag === 'number' && tag < 0) {
+        return new Response(
+          JSON.stringify({ error: 'Tag number must be non-negative' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      
+      // If string, ensure it's not empty
+      if (typeof tag === 'string' && tag.trim().length === 0) {
+        return new Response(
+          JSON.stringify({ error: 'Tag string cannot be empty' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
