@@ -61,22 +61,46 @@ Your app makes simple HTTP requests:
 
 ```javascript
 // Create a comment from your app
-const response = await fetch('https://your-project.supabase.co/functions/v1/comments', {
+const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
     action: 'create',
     client_type: 'anilist',  // Your platform
-    user_id: currentUser.id,
-    media_id: animeId,
+    user_info: {
+      user_id: currentUser.id,
+      username: currentUser.name,
+      avatar: currentUser.avatar
+    },
+    media_info: {
+      media_id: animeId,
+      type: 'anime',
+      title: animeTitle,
+      year: animeYear,
+      poster: animePoster
+    },
     content: userComment
   })
 });
 
 // Get comments for a media
 const comments = await fetch(
-  `https://your-project.supabase.co/functions/v1/media?media_id=${animeId}&client_type=anilist`
+  `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=${animeId}&client_type=anilist`
 ).then(r => r.json());
+
+// Vote on a comment
+const voteResponse = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/votes', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    comment_id: commentId,
+    user_info: {
+      user_id: currentUser.id,
+      username: currentUser.name
+    },
+    vote_type: 'upvote'
+  })
+});
 ```
 
 ---
@@ -130,25 +154,47 @@ const comments = await fetch(
 | `/media` | Get comments for media | ❌ No |
 | `/reports` | Report and manage content | Admin only |
 | `/moderation` | Admin moderation actions | ✅ Yes |
-| `/users` | Get user roles | Token for admin |
+| `/users` | Get user roles | ❌ No |
 | `/discord` | Discord bot integration | ✅ Yes |
 
 **Quick Examples**:
 
 ```bash
 # Create comment (no auth needed)
-curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
+curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
   -H "Content-Type: application/json" \
   -d '{
     "action": "create",
     "client_type": "anilist",
-    "user_id": "12345",
-    "media_id": "6789",
+    "user_info": {
+      "user_id": "12345",
+      "username": "TestUser",
+      "avatar": "https://example.com/avatar.jpg"
+    },
+    "media_info": {
+      "media_id": "6789",
+      "type": "anime",
+      "title": "Attack on Titan",
+      "year": 2013,
+      "poster": "https://example.com/poster.jpg"
+    },
     "content": "Great episode!"
   }'
 
 # Get comments (no auth needed)
-curl "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=6789&client_type=anilist&limit=10"
+curl "https://your-project.supabase.co/functions/v1/media?media_id=6789&client_type=anilist&limit=10"
+
+# Vote on comment (no auth needed)
+curl -X POST "https://your-project.supabase.co/functions/v1/votes" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "comment_id": 123,
+    "user_info": {
+      "user_id": "12345",
+      "username": "TestUser"
+    },
+    "vote_type": "upvote"
+  }'
 ```
 
 ### Full Documentation
@@ -277,9 +323,10 @@ Admins can moderate content via API:
 await moderateComment({
   action: 'pin_comment',
   comment_id: 123,
-  moderator_id: adminId,
-  token: adminToken,
-  client_type: 'anilist',
+  moderator_info: {
+    user_id: adminId,
+    username: 'AdminUser'
+  },
   reason: 'Official announcement'
 });
 
@@ -287,9 +334,10 @@ await moderateComment({
 await moderateComment({
   action: 'lock_thread',
   comment_id: 456,
-  moderator_id: adminId,
-  token: adminToken,
-  client_type: 'anilist',
+  moderator_info: {
+    user_id: adminId,
+    username: 'AdminUser'
+  },
   reason: 'Flame war'
 });
 
@@ -297,11 +345,24 @@ await moderateComment({
 await moderateUser({
   action: 'ban_user',
   target_user_id: 789,
-  moderator_id: adminId,
-  token: adminToken,
-  client_type: 'anilist',
+  moderator_info: {
+    user_id: adminId,
+    username: 'AdminUser'
+  },
   reason: 'Repeated spam',
   shadow_ban: true
+});
+
+// Report a comment
+await reportComment({
+  action: 'create',
+  comment_id: 123,
+  reporter_info: {
+    user_id: reporterId,
+    username: 'ReporterUser'
+  },
+  reason: 'spam',
+  notes: 'This is spam content'
 });
 ```
 
@@ -364,28 +425,41 @@ Two-table design for simplicity and performance:
 - ✅ Reading comments
 - ✅ Voting
 - ✅ Deleting own comments (user_id match only)
+- ✅ Getting user roles
 
 **Auth Required**:
-- 🔑 Editing comments (token verification)
-- 🔑 Admin actions (token + role verification)
+- 🔑 Editing comments (user_id match only)
+- 🔑 Admin actions (role verification only)
 - 🔑 Report resolution (admin only)
 
-### Platform Token Verification
+### User Information Provided by Frontend
 
-When authentication is required, it uses platform-specific tokens:
+The system trusts the frontend to provide user information:
 
 ```json
 {
-  "client_type": "anilist",
-  "user_id": "12345",
-  "token": "platform_auth_token"
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser",
+    "avatar": "https://example.com/avatar.jpg"
+  }
 }
 ```
 
-Token verification:
-- **AniList**: GraphQL query to verify user
-- **MyAnimeList**: REST API call to verify user
-- **SIMKL**: API key verification
+### Admin/Moderator Verification
+
+Admin and moderator actions are verified against database-stored role lists:
+
+```json
+{
+  "moderator_info": {
+    "user_id": "12345",
+    "username": "ModeratorUser"
+  }
+}
+```
+
+The system checks if the user_id is in the moderator_users, admin_users, or super_admin_users config lists.
 
 ---
 

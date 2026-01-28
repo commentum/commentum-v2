@@ -4,9 +4,7 @@
 
 **Base URL**: `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/`
 
-**Project URL**: `https://whzwmfxngelicmjyxwmr.supabase.co`
-
-**🔑 NO API KEYS REQUIRED** - All endpoints are open and use platform-specific tokens for user verification only.
+**🔑 NO API KEYS REQUIRED** - All endpoints are open and use user_info for identification only.
 
 ---
 
@@ -41,7 +39,7 @@ Commentum v2 is a **comment backend API service** that provides:
 ### Key Design Principles
 
 - **Open System**: Most operations don't require authentication
-- **Platform-Specific Auth**: Uses AniList/MAL/SIMKL tokens when needed
+- **Frontend-Provided Info**: Uses user_info and media_info from frontend
 - **RESTful API**: Simple HTTP endpoints with JSON responses
 - **Multi-Tenancy**: Supports multiple apps via `client_type`
 - **Server-Side Logic**: All business logic handled by backend
@@ -65,47 +63,51 @@ Commentum v2 is a **comment backend API service** that provides:
 
 ## 🔐 Authentication
 
-### Platform Token Authentication
+### Frontend-Provided User Information
 
 **Most endpoints are OPEN** - no authentication required!
 
-Authentication is only needed for:
-- Editing own comments (token verification)
-- Admin/moderation actions (token + role verification)
-
-### Authentication Format
+User identification is provided by the frontend in `user_info` objects:
 
 ```json
 {
-  "client_type": "anilist|myanimelist|simkl|other",
-  "user_id": "platform_user_id",
-  "token": "platform_auth_token"
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser",
+    "avatar": "https://example.com/avatar.jpg"
+  }
 }
 ```
 
-### Platform-Specific Verification
+### Admin/Moderator Verification
 
-| Platform | Token Type | Verification Method | API Endpoint |
-|----------|------------|-------------------|--------------|
-| **AniList** | Bearer Token | GraphQL query to `/viewer` | `https://graphql.anilist.co` |
-| **MyAnimeList** | Bearer Token | REST call to `/users/me` | `https://api.myanimelist.net/v2` |
-| **SIMKL** | API Key | REST call to `/users/settings` | `https://api.simkl.com` |
-| **Other** | Custom | Custom verification | Custom |
+Admin and moderator actions use `moderator_info` objects:
+
+```json
+{
+  "moderator_info": {
+    "user_id": "12345",
+    "username": "AdminUser"
+  }
+}
+```
+
+The system checks if the user_id is in the database-stored role lists.
 
 ### When Authentication is Required
 
 | Endpoint | Operation | Auth Required |
 |----------|-----------|---------------|
 | `/comments` | Create | ❌ No |
-| `/comments` | Edit | ✅ Token (owner only) |
-| `/comments` | Delete (own) | ❌ No (user_id match) |
-| `/comments` | Delete (others) | ✅ Token (admin only) |
+| `/comments` | Edit | ❌ No (user_id match only) |
+| `/comments` | Delete (own) | ❌ No (user_id match only) |
+| `/comments` | Delete (others) | ✅ Admin only |
 | `/votes` | Vote | ❌ No |
 | `/media` | Get comments | ❌ No |
 | `/reports` | Create report | ❌ No |
 | `/reports` | Resolve report | ✅ Admin only |
 | `/moderation` | All actions | ✅ Admin only |
-| `/users` | Get role | Token (optional) |
+| `/users` | Get role | ❌ No |
 | `/discord` | Bot commands | ✅ Discord bot |
 
 ---
@@ -132,10 +134,21 @@ Handles all comment-related operations (create, edit, delete).
 {
   "action": "create",
   "client_type": "anilist",
-  "user_id": "12345",
-  "media_id": "6789",
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser",
+    "avatar": "https://example.com/avatar.jpg"
+  },
+  "media_info": {
+    "media_id": "6789",
+    "type": "anime",
+    "title": "Attack on Titan",
+    "year": 2013,
+    "poster": "https://example.com/poster.jpg"
+  },
   "content": "This was an amazing episode!",
-  "parent_id": null
+  "parent_id": null,
+  "tag": "1"
 }
 ```
 
@@ -145,10 +158,19 @@ Handles all comment-related operations (create, edit, delete).
 |-----------|------|----------|-------------|
 | `action` | string | ✅ | Must be `"create"` |
 | `client_type` | string | ✅ | Platform: `"anilist"`, `"myanimelist"`, `"simkl"`, `"other"` |
-| `user_id` | string | ✅ | User's platform ID |
-| `media_id` | string | ✅ | Media identifier |
+| `user_info` | object | ✅ | User information object |
+| `user_info.user_id` | string | ✅ | User's platform ID |
+| `user_info.username` | string | ✅ | User's display name (1-50 chars) |
+| `user_info.avatar` | string | ❌ | User's avatar URL |
+| `media_info` | object | ✅ | Media information object |
+| `media_info.media_id` | string | ✅ | Media identifier |
+| `media_info.type` | string | ✅ | Media type (any string) |
+| `media_info.title` | string | ✅ | Media title (1-200 chars) |
+| `media_info.year` | integer | ❌ | Media year |
+| `media_info.poster` | string | ❌ | Media poster URL |
 | `content` | string | ✅ | Comment text (1-10,000 characters) |
 | `parent_id` | integer | ❌ | Parent comment ID for replies |
+| `tag` | string/number | ❌ | Episode or content identifier |
 
 #### Response (201 Created)
 
@@ -199,27 +221,38 @@ Handles all comment-related operations (create, edit, delete).
 
 | Status | Error | Description |
 |--------|-------|-------------|
-| 400 | Missing required fields | `client_type`, `user_id`, `media_id`, `content` required |
+| 400 | Missing required fields | `client_type`, `user_info`, `media_info`, `content` required |
+| 400 | Invalid user_info format | `user_info.user_id` and `user_info.username` required |
+| 400 | Invalid media_info format | `media_info.media_id`, `media_info.type`, `media_info.title` required |
 | 400 | Invalid content length | Content must be 1-10,000 characters |
 | 400 | Maximum nesting level exceeded | Reply depth exceeds configured limit |
 | 400 | Comment contains prohibited content | Banned keyword detected |
 | 403 | User is banned | User account is banned |
 | 403 | User is muted | User account is temporarily muted |
 | 403 | Comment thread is locked | Parent comment is locked |
-| 404 | Failed to fetch user information | Invalid user_id or platform API error |
-| 404 | Failed to fetch media information | Invalid media_id or platform API error |
+| 404 | Comment not found | Invalid parent_id |
 | 503 | Comment system is disabled | System disabled in configuration |
 
 #### Example Request
 
 ```bash
-curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
+curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
   -H "Content-Type: application/json" \
   -d '{
     "action": "create",
     "client_type": "anilist",
-    "user_id": "12345",
-    "media_id": "6789",
+    "user_info": {
+      "user_id": "12345",
+      "username": "TestUser",
+      "avatar": "https://example.com/avatar.jpg"
+    },
+    "media_info": {
+      "media_id": "6789",
+      "type": "anime",
+      "title": "Attack on Titan",
+      "year": 2013,
+      "poster": "https://example.com/poster.jpg"
+    },
     "content": "Great episode!"
   }'
 ```
@@ -228,7 +261,7 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 
 ### 2. Edit Comment
 
-**Authentication**: Required (token verification)
+**Authentication**: Not required (user_id match only)
 
 #### Request Body
 
@@ -236,9 +269,11 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 {
   "action": "edit",
   "comment_id": 1,
-  "client_type": "anilist",
-  "user_id": "12345",
-  "token": "user_auth_token",
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser",
+    "avatar": "https://example.com/avatar.jpg"
+  },
   "content": "Updated comment text"
 }
 ```
@@ -249,9 +284,10 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 |-----------|------|----------|-------------|
 | `action` | string | ✅ | Must be `"edit"` |
 | `comment_id` | integer | ✅ | ID of comment to edit |
-| `client_type` | string | ✅ | Platform identifier |
-| `user_id` | string | ✅ | User's platform ID |
-| `token` | string | ✅ | User's auth token from platform |
+| `user_info` | object | ✅ | User information object |
+| `user_info.user_id` | string | ✅ | User's platform ID |
+| `user_info.username` | string | ✅ | User's display name |
+| `user_info.avatar` | string | ❌ | User's avatar URL |
 | `content` | string | ✅ | New comment content |
 
 #### Response (200 OK)
@@ -278,7 +314,6 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 | 400 | Cannot edit deleted comment | Comment is already deleted |
 | 403 | Comment thread is locked | Comment is locked |
 | 403 | You can only edit your own comments | User doesn't own comment |
-| 401 | Authentication failed | Invalid token or user_id mismatch |
 
 ---
 
@@ -286,8 +321,8 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 
 **Authentication**: Conditional
 
-- **Own comment**: No token required (user_id match only)
-- **Others' comment**: Token required (admin only)
+- **Own comment**: No authentication required (user_id match only)
+- **Others' comment**: Admin verification required
 
 #### Request Body
 
@@ -295,7 +330,10 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 {
   "action": "delete",
   "comment_id": 1,
-  "user_id": "12345"
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser"
+  }
 }
 ```
 
@@ -305,14 +343,14 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 |-----------|------|----------|-------------|
 | `action` | string | ✅ | Must be `"delete"` |
 | `comment_id` | integer | ✅ | ID of comment to delete |
-| `user_id` | string | ✅ | User's platform ID |
-| `client_type` | string | ❌ | Platform identifier (only for admin actions) |
-| `token` | string | ❌ | Required only if deleting others' comments (admin only) |
+| `user_info` | object | ✅ | User information object |
+| `user_info.user_id` | string | ✅ | User's platform ID |
+| `user_info.username` | string | ✅ | User's display name |
 
 #### Authentication Rules
 
-- **Own Comment**: Only `comment_id` and `user_id` required (no token)
-- **Others' Comment**: `client_type` and `token` required (admin/super_admin only)
+- **Own Comment**: Only `comment_id` and `user_info` required (no admin verification)
+- **Others' Comment**: `user_info.user_id` must be in admin/moderator lists
 
 #### Request Examples
 
@@ -321,7 +359,10 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 {
   "action": "delete",
   "comment_id": 1,
-  "user_id": "12345"
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser"
+  }
 }
 ```
 
@@ -330,9 +371,10 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 {
   "action": "delete",
   "comment_id": 1,
-  "user_id": "67890",
-  "client_type": "anilist",
-  "token": "admin_auth_token"
+  "user_info": {
+    "user_id": "67890",
+    "username": "AdminUser"
+  }
 }
 ```
 
@@ -356,8 +398,7 @@ curl -X POST "https://your-project.supabase.co/functions/v1/comments" \
 |--------|-------|-------------|
 | 400 | Comment not found | Invalid comment_id |
 | 400 | Comment already deleted | Comment is already deleted |
-| 401 | Token required | Token needed to delete others' comments |
-| 403 | Insufficient permissions | Only admins can delete others' comments |
+| 401 | Insufficient permissions | Only admins can delete others' comments |
 
 ---
 
@@ -380,7 +421,10 @@ Handles comment voting operations (upvote, downvote, remove).
 ```json
 {
   "comment_id": 1,
-  "user_id": "12345",
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser"
+  },
   "vote_type": "upvote"
 }
 ```
@@ -390,7 +434,9 @@ Handles comment voting operations (upvote, downvote, remove).
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `comment_id` | integer | ✅ | ID of comment to vote on |
-| `user_id` | string | ✅ | User's platform ID |
+| `user_info` | object | ✅ | User information object |
+| `user_info.user_id` | string | ✅ | User's platform ID |
+| `user_info.username` | string | ✅ | User's display name |
 | `vote_type` | string | ✅ | `"upvote"`, `"downvote"`, or `"remove"` |
 
 #### Vote Logic
@@ -431,11 +477,14 @@ Handles comment voting operations (upvote, downvote, remove).
 #### Example Request
 
 ```bash
-curl -X POST "https://your-project.supabase.co/functions/v1/votes" \
+curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/votes" \
   -H "Content-Type: application/json" \
   -d '{
     "comment_id": 1,
-    "user_id": "12345",
+    "user_info": {
+      "user_id": "12345",
+      "username": "TestUser"
+    },
     "vote_type": "upvote"
   }'
 ```
@@ -462,7 +511,10 @@ Handles comment reporting and moderation queue management.
 {
   "action": "create",
   "comment_id": 1,
-  "reporter_id": "12345",
+  "reporter_info": {
+    "user_id": "12345",
+    "username": "TestUser"
+  },
   "reason": "spam",
   "notes": "This looks like automated spam"
 }
@@ -474,7 +526,9 @@ Handles comment reporting and moderation queue management.
 |-----------|------|----------|-------------|
 | `action` | string | ✅ | Must be `"create"` |
 | `comment_id` | integer | ✅ | ID of comment to report |
-| `reporter_id` | string | ✅ | Reporter's user ID |
+| `reporter_info` | object | ✅ | Reporter information object |
+| `reporter_info.user_id` | string | ✅ | Reporter's user ID |
+| `reporter_info.username` | string | ✅ | Reporter's display name |
 | `reason` | string | ✅ | Report reason |
 | `notes` | string | ❌ | Additional context |
 
@@ -527,10 +581,14 @@ Handles comment reporting and moderation queue management.
 {
   "action": "resolve",
   "comment_id": 1,
-  "reporter_id": "12345",
-  "client_type": "anilist",
-  "moderator_id": "67890",
-  "token": "admin_auth_token",
+  "reporter_info": {
+    "user_id": "12345",
+    "username": "TestUser"
+  },
+  "moderator_info": {
+    "user_id": "67890",
+    "username": "AdminUser"
+  },
   "resolution": "resolved",
   "review_notes": "Confirmed spam, removed"
 }
@@ -542,10 +600,11 @@ Handles comment reporting and moderation queue management.
 |-----------|------|----------|-------------|
 | `action` | string | ✅ | Must be `"resolve"` |
 | `comment_id` | integer | ✅ | ID of reported comment |
-| `reporter_id` | string | ✅ | Original reporter's ID |
-| `client_type` | string | ✅ | Platform identifier |
-| `moderator_id` | string | ✅ | Moderator's user ID |
-| `token` | string | ✅ | Moderator's auth token |
+| `reporter_info` | object | ✅ | Original reporter information object |
+| `reporter_info.user_id` | string | ✅ | Original reporter's ID |
+| `moderator_info` | object | ✅ | Moderator information object |
+| `moderator_info.user_id` | string | ✅ | Moderator's user ID |
+| `moderator_info.username` | string | ✅ | Moderator's display name |
 | `resolution` | string | ✅ | `"resolved"` or `"dismissed"` |
 | `review_notes` | string | ❌ | Moderator notes |
 
@@ -577,11 +636,21 @@ Handles comment reporting and moderation queue management.
 ```json
 {
   "action": "get_queue",
-  "client_type": "anilist",
-  "moderator_id": "67890",
-  "token": "admin_auth_token"
+  "moderator_info": {
+    "user_id": "67890",
+    "username": "AdminUser"
+  }
 }
 ```
+
+#### Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | ✅ | Must be `"get_queue"` |
+| `moderator_info` | object | ✅ | Moderator information object |
+| `moderator_info.user_id` | string | ✅ | Moderator's user ID |
+| `moderator_info.username` | string | ✅ | Moderator's display name |
 
 #### Response (200 OK)
 

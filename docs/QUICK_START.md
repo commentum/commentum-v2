@@ -66,8 +66,18 @@ curl -X POST "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments" \
   -d '{
     "action": "create",
     "client_type": "anilist",
-    "user_id": "12345",
-    "media_id": "6789",
+    "user_info": {
+      "user_id": "12345",
+      "username": "TestUser",
+      "avatar": "https://example.com/avatar.jpg"
+    },
+    "media_info": {
+      "media_id": "6789",
+      "type": "anime",
+      "title": "Attack on Titan",
+      "year": 2013,
+      "poster": "https://example.com/poster.jpg"
+    },
     "content": "Test comment from API docs"
   }'
 
@@ -83,15 +93,25 @@ curl "https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=6789&
 
 ```javascript
 // Create a comment
-async function createComment(userId, mediaId, content) {
-  const response = await fetch('https://your-project.supabase.co/functions/v1/comments', {
+async function createComment(userId, mediaId, content, user = {}) {
+  const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'create',
       client_type: 'anilist',
-      user_id: userId,
-      media_id: mediaId,
+      user_info: {
+        user_id: userId,
+        username: user.username || 'Anonymous',
+        avatar: user.avatar
+      },
+      media_info: {
+        media_id: mediaId,
+        type: 'anime',
+        title: 'Media Title',
+        year: 2023,
+        poster: 'https://example.com/poster.jpg'
+      },
       content: content
     })
   });
@@ -104,20 +124,23 @@ async function createComment(userId, mediaId, content) {
 // Get comments for media
 async function getComments(mediaId, clientType = 'anilist', page = 1) {
   const response = await fetch(
-    `https://your-project.supabase.co/functions/v1/media?media_id=${mediaId}&client_type=${clientType}&page=${page}&limit=20`
+    `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=${mediaId}&client_type=${clientType}&page=${page}&limit=20`
   );
   const data = await response.json();
   return data.comments;
 }
 
 // Vote on comment
-async function voteOnComment(commentId, userId, voteType) {
-  const response = await fetch('https://your-project.supabase.co/functions/v1/votes', {
+async function voteOnComment(commentId, userId, voteType, user = {}) {
+  const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/votes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       comment_id: commentId,
-      user_id: userId,
+      user_info: {
+        user_id: userId,
+        username: user.username || 'Anonymous'
+      },
       vote_type: voteType // 'upvote', 'downvote', 'remove'
     })
   });
@@ -127,14 +150,17 @@ async function voteOnComment(commentId, userId, voteType) {
 }
 
 // Delete own comment (no auth needed)
-async function deleteComment(commentId, userId) {
-  const response = await fetch('https://your-project.supabase.co/functions/v1/comments', {
+async function deleteComment(commentId, userId, user = {}) {
+  const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'delete',
       comment_id: commentId,
-      user_id: userId
+      user_info: {
+        user_id: userId,
+        username: user.username || 'Anonymous'
+      }
     })
   });
 
@@ -156,7 +182,7 @@ function useComments(mediaId, clientType = 'anilist') {
     async function fetchComments() {
       setLoading(true);
       const response = await fetch(
-        `https://your-project.supabase.co/functions/v1/media?media_id=${mediaId}&client_type=${clientType}&limit=50`
+        `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=${mediaId}&client_type=${clientType}&limit=50`
       );
       const data = await response.json();
       setComments(data.comments);
@@ -166,15 +192,25 @@ function useComments(mediaId, clientType = 'anilist') {
     fetchComments();
   }, [mediaId, clientType]);
 
-  const createComment = async (content, userId) => {
-    const response = await fetch('https://your-project.supabase.co/functions/v1/comments', {
+  const createComment = async (content, currentUser) => {
+    const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'create',
         client_type: clientType,
-        user_id: userId,
-        media_id: mediaId,
+        user_info: {
+          user_id: currentUser.id,
+          username: currentUser.username,
+          avatar: currentUser.avatar
+        },
+        media_info: {
+          media_id: mediaId,
+          type: 'anime',
+          title: 'Media Title',
+          year: 2023,
+          poster: 'https://example.com/poster.jpg'
+        },
         content: content
       })
     });
@@ -194,7 +230,7 @@ function CommentSection({ mediaId, currentUser }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const content = e.target.content.value;
-    await createComment(content, currentUser.id);
+    await createComment(content, currentUser);
     e.target.content.value = '';
   };
 
@@ -246,21 +282,31 @@ export default {
   methods: {
     async loadComments() {
       const response = await fetch(
-        `https://your-project.supabase.co/functions/v1/media?media_id=${this.mediaId}&client_type=anilist`
+        `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=${this.mediaId}&client_type=anilist`
       );
       const data = await response.json();
       this.comments = data.comments;
       this.loading = false;
     },
     async submitComment() {
-      await fetch('https://your-project.supabase.co/functions/v1/comments', {
+      await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'create',
           client_type: 'anilist',
-          user_id: this.currentUser.id,
-          media_id: this.mediaId,
+          user_info: {
+            user_id: this.currentUser.id,
+            username: this.currentUser.username,
+            avatar: this.currentUser.avatar
+          },
+          media_info: {
+            media_id: this.mediaId,
+            type: 'anime',
+            title: 'Media Title',
+            year: 2023,
+            poster: 'https://example.com/poster.jpg'
+          },
           content: this.newComment
         })
       });
@@ -423,13 +469,13 @@ Only required for:
 - ✅ Voting
 - ✅ Deleting own comments (user_id match)
 - ✅ Reporting content
+- ✅ Getting user roles
 
 ### Authentication Required
 
-- 🔑 Editing own comments (token verification)
-- 🔑 Admin moderation actions (token + role)
+- 🔑 Editing own comments (user_id match only)
+- 🔑 Admin moderation actions (role verification only)
 - 🔑 Report resolution (admin only)
-- 🔑 User role checks (optional token)
 
 ---
 
@@ -528,19 +574,21 @@ function CommentCard({ comment, currentUser, onVote, onDelete }) {
 
 ## 🚀 Advanced Usage
 
-### Edit Comment (with Token)
+### Edit Comment (User ID Match Only)
 
 ```javascript
-async function editComment(commentId, userId, token, newContent) {
-  const response = await fetch('https://your-project.supabase.co/functions/v1/comments', {
+async function editComment(commentId, userId, newContent, user = {}) {
+  const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'edit',
       comment_id: commentId,
-      client_type: 'anilist',
-      user_id: userId,
-      token: token,  // User's platform token
+      user_info: {
+        user_id: userId,
+        username: user.username || 'Anonymous',
+        avatar: user.avatar
+      },
       content: newContent
     })
   });
@@ -552,14 +600,17 @@ async function editComment(commentId, userId, token, newContent) {
 ### Report Comment
 
 ```javascript
-async function reportComment(commentId, reporterId, reason, notes) {
-  const response = await fetch('https://your-project.supabase.co/functions/v1/reports', {
+async function reportComment(commentId, reporterId, reason, notes, reporter = {}) {
+  const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/reports', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'create',
       comment_id: commentId,
-      reporter_id: reporterId,
+      reporter_info: {
+        user_id: reporterId,
+        username: reporter.username || 'Anonymous'
+      },
       reason: reason,  // 'spam', 'offensive', 'harassment', etc.
       notes: notes
     })
@@ -572,16 +623,17 @@ async function reportComment(commentId, reporterId, reason, notes) {
 ### Moderation (Admin Only)
 
 ```javascript
-async function pinComment(commentId, moderatorId, token, reason) {
-  const response = await fetch('https://your-project.supabase.co/functions/v1/moderation', {
+async function pinComment(commentId, moderatorId, reason, moderator = {}) {
+  const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/moderation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'pin_comment',
       comment_id: commentId,
-      client_type: 'anilist',
-      moderator_id: moderatorId,
-      token: token,  // Moderator's platform token
+      moderator_info: {
+        user_id: moderatorId,
+        username: moderator.username || 'Moderator'
+      },
       reason: reason
     })
   });
