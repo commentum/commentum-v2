@@ -511,7 +511,7 @@ async function handleDeleteComment(supabase: any, params: any) {
 
   // Check permissions - user can delete own comment, only admins and super admins can delete others
   if (comment.user_id !== user_id) {
-    const isAdmin = userRole === 'admin' || userRole === 'super_admin'
+    const isAdmin = userRole === 'admin' || userRole === 'super_admin' || userRole === 'owner'
     if (!isAdmin) {
       return new Response(
         JSON.stringify({ error: 'Only admins and super admins can delete other users comments' }),

@@ -151,7 +151,7 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
 }
 
 async function handleWebhooksCommand(supabase: any, options: any, registration: any) {
-  if (registration.user_role !== 'super_admin') {
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1610,7 +1610,7 @@ async function handleRegisterCommand(supabase: any, options: any, member: any) {
 }
 
 async function handleBanCommand_impl(supabase: any, options: any, registration: any) {
-  if (!['admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1699,7 +1699,7 @@ async function handleBanCommand_impl(supabase: any, options: any, registration: 
 }
 
 async function handleWarnCommand_impl(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1789,7 +1789,7 @@ async function handleWarnCommand_impl(supabase: any, options: any, registration:
 }
 
 async function handlePinCommand_impl(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -1874,7 +1874,7 @@ async function handlePinCommand_impl(supabase: any, options: any, registration: 
 }
 
 async function handleLockCommand_impl(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -2007,7 +2007,7 @@ async function verifyPlatformToken(platformType: string, userId: string, token: 
 
 async function handleSyncCommand(supabase: any, registration: any) {
   // Only Super Admins can sync commands
-  if (registration.user_role !== 'super_admin') {
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -2076,7 +2076,7 @@ async function handleHelpCommand(registration: any) {
       `• \`/unshadowban <user_id> [reason]\` - Remove shadow ban\n` +
       `• \`/delete <comment_id>\` - Delete any comment\n` +
       `• \`/help\` - Show this help message`
-  } else if (userRole === 'super_admin') {
+  } else if (userRole === 'super_admin' || userRole === 'owner') {
     helpText += `**Super Admin Commands:**\n` +
       `• All Admin commands\n` +
       `• \`/promote <user_id> <role> [reason]\` - Promote a user\n` +
@@ -2099,7 +2099,7 @@ async function handleHelpCommand(registration: any) {
 
 // Helper function to remove user from all role lists
 async function removeFromAllRoles(supabase: any, userId: string) {
-  const roles = ['super_admin_users', 'admin_users', 'moderator_users']
+  const roles = ['owner_users', 'super_admin_users', 'admin_users', 'moderator_users']
   
   for (const role of roles) {
     const { data: config } = await supabase
@@ -2215,7 +2215,7 @@ async function handleCmdList(registration: any) {
     commands.push('• `/queue` - View moderation queue')
   }
 
-  if (['admin', 'super_admin'].includes(userRole)) {
+  if (['admin', 'super_admin', 'owner'].includes(userRole)) {
     commands.push('\n👑 **Admin Commands**')
     commands.push('• `/ban <user_id> <reason> [shadow]` - Ban user')
     commands.push('• `/unban <user_id>` - Unban user')
@@ -2307,7 +2307,7 @@ async function handleCmdQuick(registration: any) {
       '• View all commands: `/cmd action:list`',
       '• System status: `/cmd action:status`'
     ]
-  } else if (userRole === 'super_admin') {
+  } else if (userRole === 'super_admin' || userRole === 'owner') {
     quickActions = [
       '⚡ **Quick Super Admin Actions**',
       '• Promote user: `/promote <user_id> <role>`',
@@ -2546,7 +2546,7 @@ async function getUserRoleFromPlatform(supabase: any, userId: string) {
 
 // Unban command handler
 async function handleUnbanCommand(supabase: any, options: any, registration: any) {
-  if (!['admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -2635,7 +2635,7 @@ async function handleUnbanCommand(supabase: any, options: any, registration: any
 
 // Promote command handler
 async function handlePromoteCommand(supabase: any, options: any, registration: any) {
-  if (registration.user_role !== 'super_admin') {
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -2657,7 +2657,7 @@ async function handlePromoteCommand(supabase: any, options: any, registration: a
       JSON.stringify({
         type: 4,
         data: {
-          content: '❌ Invalid role. Must be: moderator, admin, or super_admin',
+          content: '❌ Invalid role. Must be: moderator, admin, super_admin, or owner',
           flags: 64
         }
       }),
@@ -2756,7 +2756,7 @@ async function handlePromoteCommand(supabase: any, options: any, registration: a
 
 // Demote command handler
 async function handleDemoteCommand(supabase: any, options: any, registration: any) {
-  if (registration.user_role !== 'super_admin') {
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -2875,7 +2875,7 @@ async function handleDemoteCommand(supabase: any, options: any, registration: an
 
 // Mute command handler
 async function handleMuteCommand(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -2969,7 +2969,7 @@ async function handleMuteCommand(supabase: any, options: any, registration: any)
 
 // Unmute command handler
 async function handleUnmuteCommand(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -3059,7 +3059,7 @@ async function handleUnmuteCommand(supabase: any, options: any, registration: an
 
 // Shadowban command handler
 async function handleShadowbanCommand(supabase: any, options: any, registration: any) {
-  if (!['admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -3148,7 +3148,7 @@ async function handleShadowbanCommand(supabase: any, options: any, registration:
 
 // Unshadowban command handler
 async function handleUnshadowbanCommand(supabase: any, options: any, registration: any) {
-  if (!['admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -3238,7 +3238,7 @@ async function handleUnshadowbanCommand(supabase: any, options: any, registratio
 
 // Unpin command handler
 async function handleUnpinCommand(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -3322,7 +3322,7 @@ async function handleUnpinCommand(supabase: any, options: any, registration: any
 
 // Unlock command handler
 async function handleUnlockCommand(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -3478,7 +3478,7 @@ async function handleReportCommand(supabase: any, options: any, registration: an
 
 // Resolve command handler
 async function handleResolveCommand(supabase: any, options: any, registration: any) {
-  if (!['moderator', 'admin', 'super_admin'].includes(registration.user_role)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,
@@ -3757,7 +3757,7 @@ async function handleCommentCommand(supabase: any, options: any) {
 
 // Config command handler
 async function handleConfigCommand(supabase: any, options: any, registration: any) {
-  if (registration.user_role !== 'super_admin') {
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
         type: 4,

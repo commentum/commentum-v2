@@ -4,7 +4,7 @@
 export async function verifyAdminAccess(supabase: any, userId: string) {
   // Get user role from config
   const userRole = await getUserRole(supabase, userId)
-  if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
     return { valid: false, reason: 'Insufficient permissions' }
   }
 
@@ -14,6 +14,12 @@ export async function verifyAdminAccess(supabase: any, userId: string) {
 // Get user role from configuration
 export async function getUserRole(supabase: any, userId: string) {
   try {
+    const { data: owners } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'owner_users')
+      .single()
+
     const { data: superAdmins } = await supabase
       .from('config')
       .select('value')
@@ -32,10 +38,12 @@ export async function getUserRole(supabase: any, userId: string) {
       .eq('key', 'moderator_users')
       .single()
 
+    const ownerList = owners ? JSON.parse(owners.value) : []
     const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
     const adminList = admins ? JSON.parse(admins.value) : []
     const moderatorList = moderators ? JSON.parse(moderators.value) : []
 
+    if (ownerList.includes(userId)) return 'owner'
     if (superAdminList.includes(userId)) return 'super_admin'
     if (adminList.includes(userId)) return 'admin'
     if (moderatorList.includes(userId)) return 'moderator'
@@ -52,8 +60,14 @@ export function canModerate(moderatorRole: string, targetRole: string) {
     'user': 0,
     'moderator': 1,
     'admin': 2,
-    'super_admin': 3
+    'super_admin': 3,
+    'owner': 4
   }
   
   return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
+}
+
+// Hide owner role by displaying it as super_admin in API responses
+export function getDisplayRole(role: string): string {
+  return role === 'owner' ? 'super_admin' : role
 }

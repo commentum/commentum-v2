@@ -457,7 +457,7 @@ async function handleBanUser(supabase: any, params: any) {
   const { target_user_id, moderator_id, reason, shadow_ban, moderatorRole } = params
 
   // Only admin and super_admin can ban
-  if (!['admin', 'super_admin'].includes(moderatorRole)) {
+  if (!['admin', 'super_admin', 'owner'].includes(moderatorRole)) {
     return new Response(
       JSON.stringify({ error: 'Admin permissions required to ban users' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -536,7 +536,7 @@ async function handleUnbanUser(supabase: any, params: any) {
   const { target_user_id, moderator_id, reason, moderatorRole } = params
 
   // Only admin and super_admin can unban
-  if (!['admin', 'super_admin'].includes(moderatorRole)) {
+  if (!['admin', 'super_admin', 'owner'].includes(moderatorRole)) {
     return new Response(
       JSON.stringify({ error: 'Admin permissions required to unban users' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

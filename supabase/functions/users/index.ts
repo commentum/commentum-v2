@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
-import { getUserRole } from '../shared/auth.ts'
+import { getUserRole, getDisplayRole } from '../shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -63,11 +63,13 @@ async function handleGetRole(supabase: any, params: any) {
   try {
     // Get user role from config (no token verification needed)
     const role = await getUserRole(supabase, user_id)
+    // Hide owner role by displaying it as super_admin
+    const displayRole = getDisplayRole(role)
 
     return new Response(
       JSON.stringify({
         success: true,
-        role: role,
+        role: displayRole,
         user_id: user_id,
         client_type: client_type
       }),
