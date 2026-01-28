@@ -1346,11 +1346,10 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
         error: error.message
       })
     }
-    }
   }
 
-  const successfulSyncs = syncResults.filter(r => r.success)
-  const failedSyncs = syncResults.filter(r => !r.success)
+  const successfulSyncs = syncResults.filter(r => r.success);
+  const failedSyncs = syncResults.filter(r => !r.success);
 
   return new Response(
     JSON.stringify({
@@ -1374,6 +1373,7 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
+}
 
 async function handleDiscordInteraction(supabase: any, params: any) {
   const { command_data } = params
