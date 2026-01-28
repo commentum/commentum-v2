@@ -20,7 +20,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, user_id, media_id, content, comment_id, parent_id, token } = await req.json()
+    const { action, client_type, user_id, media_id, content, comment_id, parent_id, token, tag } = await req.json()
 
     // Validate action-specific required fields
     switch (action) {
@@ -80,6 +80,17 @@ serve(async (req) => {
         JSON.stringify({ error: 'Content must be between 1 and 10000 characters' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // Validate tag (episode number) if provided
+    if (tag !== undefined) {
+      // Tag should be an integer (episode number)
+      if (!Number.isInteger(tag) || tag < 0) {
+        return new Response(
+          JSON.stringify({ error: 'Tag must be a non-negative integer (episode number)' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     // Check if system is enabled
@@ -194,6 +205,7 @@ serve(async (req) => {
           media_id,
           content,
           parent_id,
+          tag,
           userInfo,
           mediaInfo,
           userRole,
@@ -234,7 +246,7 @@ serve(async (req) => {
 })
 
 async function handleCreateComment(supabase: any, params: any) {
-  const { client_type, user_id, media_id, content, parent_id, userInfo, mediaInfo, userRole, req } = params
+  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req } = params
 
   // Validate nesting level if parent_id is provided
   if (parent_id) {
@@ -303,6 +315,7 @@ async function handleCreateComment(supabase: any, params: any) {
       media_id,
       content,
       parent_id,
+      tags: tag !== undefined ? JSON.stringify([tag]) : null,
       username: userInfo.username,
       user_avatar: userInfo.avatar,
       user_role: userRole,
