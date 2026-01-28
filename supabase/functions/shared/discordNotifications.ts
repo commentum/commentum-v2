@@ -215,7 +215,7 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     timestamp: new Date().toISOString(),
     footer: {
       text: 'Commentum v2',
-      icon_url: 'https://i.imgur.com/3Z1jw3T.png'
+      icon_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
     }
   }
 
