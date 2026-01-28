@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { getUserRole } from '../shared/auth.ts'
 
 // All command handlers are defined in this file v2
 
@@ -824,12 +825,6 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
           description: 'Your platform user ID',
           type: 3,
           required: true
-        },
-        {
-          name: 'token',
-          description: 'Your platform access token',
-          type: 3,
-          required: true
         }
       ]
     },
@@ -1241,47 +1236,6 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
       description: 'View comment system statistics'
     },
     {
-      name: 'cmd',
-      description: 'Command palette and registration interface',
-      options: [
-        {
-          name: 'action',
-          description: 'Action to perform',
-          type: 3,
-          required: true,
-          choices: [
-            { name: 'Register', value: 'register' },
-            { name: 'List Commands', value: 'list' },
-            { name: 'Quick Actions', value: 'quick' },
-            { name: 'Status', value: 'status' }
-          ]
-        },
-        {
-          name: 'platform',
-          description: 'Platform (for registration)',
-          type: 3,
-          required: false,
-          choices: [
-            { name: 'AniList', value: 'anilist' },
-            { name: 'MyAnimeList', value: 'myanimelist' },
-            { name: 'SIMKL', value: 'simkl' }
-          ]
-        },
-        {
-          name: 'user_id',
-          description: 'Platform user ID (for registration)',
-          type: 3,
-          required: false
-        },
-        {
-          name: 'token',
-          description: 'Platform access token (for registration)',
-          type: 3,
-          required: false
-        }
-      ]
-    },
-    {
       name: 'help',
       description: 'Show help information'
     },
@@ -1522,8 +1476,8 @@ async function handleDiscordInteraction(supabase: any, params: any) {
       case 'webhooks':
         return await handleWebhooksCommand(supabase, options, registration)
       
-      case 'cmd':
-        return await handleCmdCommand(supabase, options, registration, member)
+      case 'help':
+        return await handleHelpCommand(registration)
       
       default:
         return new Response(
@@ -1556,25 +1510,9 @@ async function handleDiscordInteraction(supabase: any, params: any) {
 async function handleRegisterCommand(supabase: any, options: any, member: any) {
   const platform = options.find(opt => opt.name === 'platform')?.value
   const userId = options.find(opt => opt.name === 'user_id')?.value
-  const token = options.find(opt => opt.name === 'token')?.value
 
-  // Verify token
-  const tokenValid = await verifyPlatformToken(platform, userId, token)
-  if (!tokenValid) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: '❌ Invalid platform token. Please check your credentials.',
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
-  // Get user role
-  const userRole = await getUserRoleFromPlatform(supabase, userId)
+  // Get user role from config (no token verification needed in new system)
+  const userRole = await getUserRole(supabase, userId)
 
   // Register or update user
   const { data: registration, error } = await supabase
@@ -2120,289 +2058,6 @@ async function removeFromAllRoles(supabase: any, userId: string) {
   }
 }
 
-// Command palette handler
-// Command palette handler
-async function handleCmdCommand(supabase: any, options: any, registration: any, member: any) {
-  const action = options.find(opt => opt.name === 'action')?.value
-
-  switch (action) {
-    case 'register':
-      return await handleCmdRegister(supabase, options, member, registration)
-    
-    case 'list':
-      return await handleCmdList(registration)
-    
-    case 'quick':
-      return await handleCmdQuick(registration)
-    
-    case 'status':
-      return await handleCmdStatus(supabase, registration)
-    
-    default:
-      return new Response(
-        JSON.stringify({
-          type: 4,
-          data: {
-            content: '❌ Invalid action. Use: register, list, quick, or status',
-            flags: 64
-          }
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-  }
-}
-
-async function handleCmdRegister(supabase: any, options: any, member: any, registration: any) {
-  const platform = options.find(opt => opt.name === 'platform')?.value
-  const userId = options.find(opt => opt.name === 'user_id')?.value
-  const token = options.find(opt => opt.name === 'token')?.value
-
-  if (!platform || !userId || !token) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `📝 **Quick Registration**\n\n` +
-            `To register, provide:\n` +
-            `• **Platform**: ${platform || 'required'}\n` +
-            `• **User ID**: ${userId || 'required'}\n` +
-            `• **Token**: ${token ? '✅ Provided' : 'required'}\n\n` +
-            `**Example:**\n` +
-            `\`/cmd action:register platform:anilist user_id:123456 token:your_token\`\n\n` +
-            `**How to get tokens:**\n` +
-            `• **AniList**: Go to Settings -> Developer -> Create Personal Access Token\n` +
-            `• **MyAnimeList**: Go to API Settings -> Create Client ID\n` +
-            `• **SIMKL**: Get API Key from SIMKL API settings`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
-  // If all fields are provided, proceed with registration
-  return await handleRegisterCommand(supabase, [
-    { name: 'platform', value: platform },
-    { name: 'user_id', value: userId },
-    { name: 'token', value: token }
-  ], member)
-}
-
-async function handleCmdList(registration: any) {
-  const userRole = registration?.user_role || 'user'
-  
-  let commands = []
-
-  // Basic commands for all users
-  commands.push('📝 **Basic Commands**')
-  commands.push('• `/register` - Register your account')
-  commands.push('• `/report <comment_id> <reason>` - Report content')
-  commands.push('• `/user <user_id>` - Get user info')
-  commands.push('• `/comment <comment_id>` - Get comment info')
-  commands.push('• `/stats` - View statistics')
-  commands.push('• `/help` - Show help')
-
-  if (['moderator', 'admin', 'super_admin'].includes(userRole)) {
-    commands.push('\n🛡️ **Moderator Commands**')
-    commands.push('• `/warn <user_id> <reason>` - Warn user')
-    commands.push('• `/mute <user_id> [duration] <reason>` - Mute user')
-    commands.push('• `/unmute <user_id>` - Unmute user')
-    commands.push('• `/pin <comment_id> [reason]` - Pin comment')
-    commands.push('• `/unpin <comment_id>` - Unpin comment')
-    commands.push('• `/lock <comment_id> [reason]` - Lock thread')
-    commands.push('• `/unlock <comment_id>` - Unlock thread')
-    commands.push('• `/resolve <comment_id> <reporter_id> <resolution>` - Resolve report')
-    commands.push('• `/queue` - View moderation queue')
-  }
-
-  if (['admin', 'super_admin', 'owner'].includes(userRole)) {
-    commands.push('\n👑 **Admin Commands**')
-    commands.push('• `/ban <user_id> <reason> [shadow]` - Ban user')
-    commands.push('• `/unban <user_id>` - Unban user')
-    commands.push('• `/shadowban <user_id> <reason>` - Shadow ban')
-    commands.push('• `/unshadowban <user_id>` - Remove shadow ban')
-    commands.push('• `/delete <comment_id>` - Delete any comment')
-  }
-
-  if (userRole === 'super_admin') {
-    commands.push('\n⚡ **Super Admin Commands**')
-    commands.push('• `/promote <user_id> <role> [reason]` - Promote user')
-    commands.push('• `/demote <user_id> <role> [reason]` - Demote user')
-    commands.push('• `/config <action> [key] [value]` - System config')
-  }
-
-  commands.push('\n🎯 **Quick Actions**')
-  commands.push('• `/cmd action:quick` - Quick action menu')
-  commands.push('• `/cmd action:status` - System status')
-  commands.push('• `/cmd action:register` - Quick registration')
-
-  const commandList = commands.join('\n')
-
-  return new Response(
-    JSON.stringify({
-      type: 4,
-      data: {
-        content: `🤖 **Commentum Command List**\n\n**Your Role:** ${userRole}\n\n${commandList}`,
-        flags: 64
-      }
-    }),
-    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
-}
-
-async function handleCmdQuick(registration: any) {
-  const userRole = registration?.user_role || 'user'
-  
-  let quickActions = []
-
-  // Quick actions based on role
-  if (userRole === 'user') {
-    quickActions = [
-      '🔍 **Quick Lookups**',
-      '• User info: `/user <user_id>`',
-      '• Comment info: `/comment <comment_id>`',
-      '• System stats: `/stats`',
-      '',
-      '📝 **Quick Actions**',
-      '• Report comment: `/report <comment_id> <reason>`',
-      '• Register: `/cmd action:register`',
-      '• Get help: `/help`'
-    ]
-  } else if (userRole === 'moderator') {
-    quickActions = [
-      '🛡️ **Quick Moderation**',
-      '• Warn user: `/warn <user_id> <reason>`',
-      '• Mute user: `/mute <user_id> 24 <reason>`',
-      '• Pin comment: `/pin <comment_id>`',
-      '• Lock thread: `/lock <comment_id>`',
-      '',
-      '📊 **Quick Info**',
-      '• Check queue: `/queue`',
-      '• User lookup: `/user <user_id>`',
-      '• Resolve report: `/resolve <comment_id> <reporter_id> resolved`',
-      '',
-      '⚡ **Quick Actions**',
-      '• View all commands: `/cmd action:list`',
-      '• System status: `/cmd action:status`'
-    ]
-  } else if (userRole === 'admin') {
-    quickActions = [
-      '🔨 **Quick Admin Actions**',
-      '• Ban user: `/ban <user_id> <reason>`',
-      '• Shadow ban: `/shadowban <user_id> <reason>`',
-      '• Delete comment: `/delete <comment_id>`',
-      '• Unban user: `/unban <user_id>`',
-      '',
-      '🛡️ **Quick Moderation**',
-      '• Warn user: `/warn <user_id> <reason>`',
-      '• Pin/Unpin: `/pin <comment_id>` / `/unpin <comment_id>`',
-      '• Lock/Unlock: `/lock <comment_id>` / `/unlock <comment_id>`',
-      '',
-      '📊 **Quick Info**',
-      '• Check queue: `/queue`',
-      '• User lookup: `/user <user_id>`',
-      '• System stats: `/stats`',
-      '',
-      '⚡ **Quick Actions**',
-      '• View all commands: `/cmd action:list`',
-      '• System status: `/cmd action:status`'
-    ]
-  } else if (userRole === 'super_admin' || userRole === 'owner') {
-    quickActions = [
-      '⚡ **Quick Super Admin Actions**',
-      '• Promote user: `/promote <user_id> <role>`',
-      '• Demote user: `/demote <user_id> <role>`',
-      '• Ban/Unban: `/ban <user_id> <reason>` / `/unban <user_id>`',
-      '• Update config: `/config action:update key:<key> value:<value>`',
-      '',
-      '🔨 **Quick Admin Actions**',
-      '• Shadow ban: `/shadowban <user_id> <reason>`',
-      '• Delete comment: `/delete <comment_id>`',
-      '• System toggle: `/config action:update key:system_enabled value:false`',
-      '',
-      '📊 **Quick Info**',
-      '• View config: `/config action:view`',
-      '• System stats: `/stats`',
-      '• Check queue: `/queue`',
-      '',
-      '⚡ **Quick Actions**',
-      '• View all commands: `/cmd action:list`',
-      '• System status: `/cmd action:status`'
-    ]
-  }
-
-  const actionList = quickActions.join('\n')
-
-  return new Response(
-    JSON.stringify({
-      type: 4,
-      data: {
-        content: `⚡ **Quick Actions**\n\n**Your Role:** ${userRole}\n\n${actionList}`,
-        flags: 64
-      }
-    }),
-    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
-}
-
-async function handleCmdStatus(supabase: any, registration: any) {
-  const userRole = registration?.user_role || 'user'
-  
-  // Get system status
-  const { data: systemConfig } = await supabase
-    .from('config')
-    .select('key, value')
-    .in('key', ['system_enabled', 'voting_enabled', 'reporting_enabled', 'discord_notifications_enabled'])
-  const { data: commentStats } = await supabase
-    .from('comments')
-    .select('id')
-  const { data: discordUsers } = await supabase
-    .from('discord_users')
-    .select('user_role, is_active')
-    .eq('is_active', true)
-
-  const systemStatus = systemConfig?.reduce((acc, config) => {
-    acc[config.key] = JSON.parse(config.value)
-    return acc
-  }, {}) || {}
-
-  const totalComments = commentStats?.length || 0
-  const activeUsers = discordUsers?.length || 0
-  const moderators = discordUsers?.filter(u => u.user_role === 'moderator').length || 0
-  const admins = discordUsers?.filter(u => u.user_role === 'admin').length || 0
-  const superAdmins = discordUsers?.filter(u => u.user_role === 'super_admin').length || 0
-
-  let statusEmoji = '🟢'
-  if (!systemStatus.system_enabled) statusEmoji = '🔴'
-  else if (!systemStatus.voting_enabled || !systemStatus.reporting_enabled) statusEmoji = '🟡'
-
-  return new Response(
-    JSON.stringify({
-      type: 4,
-      data: {
-        content: `${statusEmoji} **System Status**\n\n` +
-          `**🤖 Bot Status:** ${systemStatus.system_enabled ? '🟢 Online' : '🔴 Offline'}\n` +
-          `**💬 Comments:** ${systemStatus.system_enabled ? '🟢 Enabled' : '🔴 Disabled'}\n` +
-          `**🗳️ Voting:** ${systemStatus.voting_enabled ? '🟢 Enabled' : '🔴 Disabled'}\n` +
-          `**🚨 Reporting:** ${systemStatus.reporting_enabled ? '🟢 Enabled' : '🔴 Disabled'}\n` +
-          `**📢 Discord Notifications:** ${systemStatus.discord_notifications_enabled ? '🟢 Enabled' : '🔴 Disabled'}\n\n` +
-          `**📊 Statistics:**\n` +
-          `• Total Comments: ${totalComments}\n` +
-          `• Active Discord Users: ${activeUsers}\n` +
-          `• Moderators: ${moderators}\n` +
-          `• Admins: ${admins}\n` +
-          `• Super Admins: ${superAdmins}\n\n` +
-          `**👤 Your Role:** ${userRole}\n` +
-          `**📅 Last Check:** ${new Date().toLocaleString()}`,
-        flags: 64
-      }
-    }),
-    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
-}
-}
-
-// Verify platform token function
 async function verifyPlatformToken(platformType: string, userId: string, token: string) {
   try {
     switch (platformType) {
