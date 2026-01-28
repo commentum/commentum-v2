@@ -1,8 +1,8 @@
 -- Add owner role configuration
 -- This adds a new role above super_admin that will be hidden in API responses
 
-INSERT INTO config (key, value, description) VALUES 
-('owner_users', '[]', 'JSON array of user IDs who have owner privileges (highest level, above super_admin)');
+INSERT INTO config (key, value) VALUES 
+('owner_users', '[]');
 
 -- Owner role has the highest level of permissions and can:
 -- - Manage all super_admin users
