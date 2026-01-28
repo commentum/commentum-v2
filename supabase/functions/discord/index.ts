@@ -475,7 +475,7 @@ serve(async (req) => {
     )
 
     // Get signature headers for Discord verification
-    const signature = req.headers.get('x-signature-ed25519')
+    const signature = req.headers.get("stripe-signature")
     const timestamp = req.headers.get('x-signature-timestamp')
     
     console.log('Request received')
