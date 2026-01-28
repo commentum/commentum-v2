@@ -60,6 +60,11 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
 }
 
+// Discord Public Key for signature verification
+const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')
+console.log('DISCORD_PUBLIC_KEY exists:', !!DISCORD_PUBLIC_KEY)
+console.log('DISCORD_PUBLIC_KEY length:', DISCORD_PUBLIC_KEY?.length)
+
 // Helper functions
 function hexToUint8Array(hex: string): Uint8Array {
   const matches = hex.match(/.{1,2}/g)
@@ -68,32 +73,36 @@ function hexToUint8Array(hex: string): Uint8Array {
 }
 
 async function verifyDiscordSignature(
-  body: string,
   signature: string,
   timestamp: string,
-  publicKey: string
+  body: string
 ): Promise<boolean> {
+  if (!DISCORD_PUBLIC_KEY) {
+    console.error('DISCORD_PUBLIC_KEY not set')
+    return false
+  }
+
   try {
-    const encoder = new TextEncoder()
-    const keyData = hexToUint8Array(publicKey)
-    const messageData = encoder.encode(timestamp + body)
-    
-    const key = await crypto.subtle.importKey(
+    const publicKey = await crypto.subtle.importKey(
       'raw',
-      keyData,
-      { name: 'NODE-ED25519', namedCurve: 'NODE-ED25519' },
+      hexToUint8Array(DISCORD_PUBLIC_KEY),
+      {
+        name: 'Ed25519',
+        namedCurve: 'Ed25519',
+      },
       false,
       ['verify']
     )
-    
-    const signatureData = hexToUint8Array(signature)
-    
-    return await crypto.subtle.verify(
-      'NODE-ED25519',
-      key,
-      signatureData,
-      messageData
+
+    const isVerified = await crypto.subtle.verify(
+      'Ed25519',
+      publicKey,
+      hexToUint8Array(signature),
+      new TextEncoder().encode(timestamp + body)
     )
+    
+    console.log('Signature verification result:', isVerified)
+    return isVerified
   } catch (error) {
     console.error('Signature verification error:', error)
     return false
@@ -116,32 +125,105 @@ serve(async (req) => {
     const signature = req.headers.get('x-signature-ed25519')
     const timestamp = req.headers.get('x-signature-timestamp')
     
-    const rawBody = await req.text()
-    const body = rawBody
+    console.log('Request received')
+    console.log('Method:', req.method)
+    console.log('URL:', req.url)
+    console.log('Signature header:', signature)
+    console.log('Timestamp header:', timestamp)
+    console.log('Content-Type:', req.headers.get('content-type'))
     
-    // Parse JSON body
-    let params
+    const rawBody = await req.text()
+    console.log('Body:', rawBody)
+    console.log('Body length:', rawBody.length)
+
+    // Check if body is empty
+    if (!rawBody || rawBody.trim() === '') {
+      console.error('Empty body received')
+      // If it's a PING request without body, respond anyway
+      return new Response(
+        JSON.stringify({ type: 1 }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    let body
     try {
-      params = JSON.parse(body)
-    } catch {
-      params = {}
+      body = JSON.parse(rawBody)
+      console.log('Parsed body type:', body.type)
+    } catch (parseError) {
+      console.error('JSON parse error:', parseError)
+      console.error('Raw body that failed to parse:', rawBody)
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON in request body' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
+    // Handle Discord PING verification FIRST (before signature check)
+    // Discord sends PING during endpoint setup verification
+    if (body.type === 1) {
+      console.log('Responding to Discord PING')
+      
+      // Verify signature even for PING
+      if (signature && timestamp) {
+        console.log('Verifying PING signature...')
+        const isValid = await verifyDiscordSignature(signature, timestamp, rawBody)
+        
+        if (!isValid) {
+          console.error('PING signature verification FAILED')
+          return new Response(
+            JSON.stringify({ error: 'Invalid request signature' }),
+            { 
+              status: 401, 
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+            }
+          )
+        }
+        console.log('PING signature verification PASSED')
+      }
+      
+      return new Response(
+        JSON.stringify({ type: 1 }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      )
+    }
+    
+    // Verify signature for all other requests (actual interactions)
+    if (signature && timestamp) {
+      console.log('Verifying Discord signature...')
+      const isValid = await verifyDiscordSignature(signature, timestamp, rawBody)
+      
+      if (!isValid) {
+        console.error('Signature verification FAILED')
+        return new Response(
+          JSON.stringify({ error: 'Invalid request signature' }),
+          { 
+            status: 401, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          }
+        )
+      }
+      console.log('Signature verification PASSED')
     }
 
     // Handle different actions
-    const action = params.action || params.type
+    const action = body.action || body.type
     
     switch (action) {
       case 'sync_commands':
-        return await handleSyncCommands(supabase, params.guild_ids)
+        return await handleSyncCommands(supabase, body.guild_ids)
         
       case 'register':
-        return await handleDiscordRegistration(supabase, params)
+        return await handleDiscordRegistration(supabase, body)
         
       case 'verify':
-        return await handleDiscordVerification(supabase, params)
+        return await handleDiscordVerification(supabase, body)
         
       case 'interaction':
-        return await handleDiscordInteraction(supabase, params)
+        return await handleDiscordInteraction(supabase, body)
         
       default:
         return new Response(
