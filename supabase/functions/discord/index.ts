@@ -54,24 +54,27 @@ import {
   handleWebhooksCommand
 } from './handlers/utility-commands.ts'
 
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type, Authorization',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
 }
 
-// Discord Public Key for signature verification
+// Discord bot configuration
+const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
+const DISCORD_GUILD_ID = Deno.env.get('DISCORD_GUILD_ID')
+const DISCORD_WEBHOOK_URL = Deno.env.get('DISCORD_WEBHOOK_URL')
 const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')
+
+// Discord API endpoints
+const DISCORD_API_BASE = 'https://discord.com/api/v10'
+
+// Log on startup
 console.log('DISCORD_PUBLIC_KEY exists:', !!DISCORD_PUBLIC_KEY)
 console.log('DISCORD_PUBLIC_KEY length:', DISCORD_PUBLIC_KEY?.length)
 
-// Helper functions
-function hexToUint8Array(hex: string): Uint8Array {
-  const matches = hex.match(/.{1,2}/g)
-  if (!matches) return new Uint8Array()
-  return new Uint8Array(matches.map(byte => parseInt(byte, 16)))
-}
-
+// Verify Discord request signature using Web Crypto API
 async function verifyDiscordSignature(
   signature: string,
   timestamp: string,
@@ -109,7 +112,12 @@ async function verifyDiscordSignature(
   }
 }
 
-// Main server function
+function hexToUint8Array(hex: string): Uint8Array {
+  const matches = hex.match(/.{1,2}/g)
+  if (!matches) return new Uint8Array()
+  return new Uint8Array(matches.map(byte => parseInt(byte, 16)))
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
