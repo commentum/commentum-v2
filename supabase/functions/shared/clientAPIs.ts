@@ -191,6 +191,13 @@ async function fetchSIMKLUser(userId: string) {
   if (!response.ok) return null
 
   const data = await response.json()
+  
+  // Check if data is valid
+  if (!data || !data.name) {
+    console.warn('Invalid SIMKL user data received:', data)
+    return null
+  }
+  
   return {
     username: data.name,
     avatar: data.avatar
@@ -213,6 +220,13 @@ async function fetchSIMKLMedia(mediaId: string) {
   if (!response.ok) return null
 
   const data = await response.json()
+  
+  // Check if data is valid
+  if (!data || !data.title) {
+    console.warn('Invalid SIMKL media data received:', data)
+    return null
+  }
+  
   return {
     type: 'anime',
     title: data.title,
