@@ -271,7 +271,8 @@ async function handleResolveReport(supabase: any, params: any) {
     return new Response(
       JSON.stringify({ error: 'comment_id, reporter_info, moderator_id, and resolution are required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    }
+    )
+  }
 
   // Extract reporter_id from reporter_info
   const reporter_id = reporter_info?.user_id
