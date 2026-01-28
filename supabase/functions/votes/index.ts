@@ -18,12 +18,21 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { comment_id, user_id, vote_type } = await req.json()
+    const { comment_id, user_info, vote_type } = await req.json()
 
     // Validate required fields
-    if (!comment_id || !user_id || !vote_type) {
+    if (!comment_id || !user_info || !vote_type) {
       return new Response(
-        JSON.stringify({ error: 'comment_id, user_id, and vote_type are required' }),
+        JSON.stringify({ error: 'comment_id, user_info, and vote_type are required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Extract user_id from user_info
+    const user_id = user_info?.user_id
+    if (!user_id) {
+      return new Response(
+        JSON.stringify({ error: 'user_info.user_id is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

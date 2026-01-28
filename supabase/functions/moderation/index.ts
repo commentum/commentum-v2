@@ -19,13 +19,22 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, moderator_id, target_user_id, comment_id, reason, severity, duration, shadow_ban, token } = await req.json()
+    const { action, moderator_info, target_user_id, comment_id, reason, severity, duration, shadow_ban } = await req.json()
 
-    // All moderation actions require authentication
-    if (!moderator_id || !token || !client_type) {
+    // All moderation actions require authentication (no token needed)
+    if (!moderator_info) {
       return new Response(
-        JSON.stringify({ error: 'moderator_id, token, and client_type are required for moderation actions' }),
+        JSON.stringify({ error: 'moderator_info is required for moderation actions' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Extract moderator_id from moderator_info
+    const moderator_id = moderator_info?.user_id
+    if (!moderator_id) {
+      return new Response(
+        JSON.stringify({ error: 'moderator_info.user_id is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -37,16 +46,16 @@ serve(async (req) => {
       )
     }
 
-    // Verify admin access with token
-    const tokenVerification = await verifyAdminAccess(supabase, client_type, moderator_id, token)
-    if (!tokenVerification.valid) {
+    // Verify admin access with user_id only
+    const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+    if (!adminVerification.valid) {
       return new Response(
-        JSON.stringify({ error: tokenVerification.reason || 'Authentication failed' }),
+        JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    const moderatorRole = tokenVerification.role
+    const moderatorRole = adminVerification.role
 
     switch (action) {
       case 'pin_comment':

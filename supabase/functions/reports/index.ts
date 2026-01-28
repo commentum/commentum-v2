@@ -19,18 +19,27 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, comment_id, reporter_id, reason, notes, client_type, moderator_id, token, resolution, review_notes } = await req.json()
+    const { action, comment_id, reporter_info, reason, notes, moderator_info, resolution, review_notes } = await req.json()
 
     switch (action) {
       case 'create':
-        return await handleCreateReport(supabase, { comment_id, reporter_id, reason, notes })
+        return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes })
       
       case 'resolve':
-        // Resolve requires admin authentication
-        if (!moderator_id || !token || !client_type) {
+        // Resolve requires admin authentication (no token needed)
+        if (!moderator_info) {
           return new Response(
-            JSON.stringify({ error: 'moderator_id, token, and client_type are required to resolve reports' }),
+            JSON.stringify({ error: 'moderator_info is required to resolve reports' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Extract moderator_id from moderator_info
+        const moderator_id = moderator_info?.user_id
+        if (!moderator_id) {
+          return new Response(
+            JSON.stringify({ error: 'moderator_info.user_id is required' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
 
@@ -42,34 +51,43 @@ serve(async (req) => {
           )
         }
 
-        const tokenVerification = await verifyAdminAccess(supabase, client_type, moderator_id, token)
-        if (!tokenVerification.valid) {
+        const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+        if (!adminVerification.valid) {
           return new Response(
-            JSON.stringify({ error: tokenVerification.reason || 'Authentication failed' }),
+            JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
 
-        return await handleResolveReport(supabase, { comment_id, reporter_id, moderator_id, resolution, review_notes })
+        return await handleResolveReport(supabase, { comment_id, reporter_info, moderator_id, resolution, review_notes })
       
       case 'get_queue':
-        // Get queue requires admin authentication
-        if (!moderator_id || !token || !client_type) {
+        // Get queue requires admin authentication (no token needed)
+        if (!moderator_info) {
           return new Response(
-            JSON.stringify({ error: 'moderator_id, token, and client_type are required to view reports queue' }),
+            JSON.stringify({ error: 'moderator_info is required to view reports queue' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
 
-        const queueTokenVerification = await verifyAdminAccess(supabase, client_type, moderator_id, token)
-        if (!queueTokenVerification.valid) {
+        // Extract moderator_id from moderator_info
+        const queueModeratorId = moderator_info?.user_id
+        if (!queueModeratorId) {
           return new Response(
-            JSON.stringify({ error: queueTokenVerification.reason || 'Authentication failed' }),
+            JSON.stringify({ error: 'moderator_info.user_id is required' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const queueAdminVerification = await verifyAdminAccess(supabase, queueModeratorId)
+        if (!queueAdminVerification.valid) {
+          return new Response(
+            JSON.stringify({ error: queueAdminVerification.reason || 'Insufficient permissions' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
 
-        return await handleGetReportsQueue(supabase, { moderator_id })
+        return await handleGetReportsQueue(supabase, { queueModeratorId })
       
       default:
         return new Response(
@@ -88,12 +106,21 @@ serve(async (req) => {
 })
 
 async function handleCreateReport(supabase: any, params: any) {
-  const { comment_id, reporter_id, reason, notes } = params
+  const { comment_id, reporter_info, reason, notes } = params
 
   // Validate required fields
-  if (!comment_id || !reporter_id || !reason) {
+  if (!comment_id || !reporter_info || !reason) {
     return new Response(
-      JSON.stringify({ error: 'comment_id, reporter_id, and reason are required' }),
+      JSON.stringify({ error: 'comment_id, reporter_info, and reason are required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Extract reporter_id from reporter_info
+  const reporter_id = reporter_info?.user_id
+  if (!reporter_id) {
+    return new Response(
+      JSON.stringify({ error: 'reporter_info.user_id is required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -237,12 +264,20 @@ async function handleCreateReport(supabase: any, params: any) {
 }
 
 async function handleResolveReport(supabase: any, params: any) {
-  const { comment_id, reporter_id, moderator_id, resolution, review_notes } = params
+  const { comment_id, reporter_info, moderator_id, resolution, review_notes } = params
 
   // Validate required fields
-  if (!comment_id || !reporter_id || !moderator_id || !resolution) {
+  if (!comment_id || !reporter_info || !moderator_id || !resolution) {
     return new Response(
-      JSON.stringify({ error: 'comment_id, reporter_id, moderator_id, and resolution are required' }),
+      JSON.stringify({ error: 'comment_id, reporter_info, moderator_id, and resolution are required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    }
+
+  // Extract reporter_id from reporter_info
+  const reporter_id = reporter_info?.user_id
+  if (!reporter_id) {
+    return new Response(
+      JSON.stringify({ error: 'reporter_info.user_id is required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -352,7 +387,7 @@ async function handleResolveReport(supabase: any, params: any) {
 }
 
 async function handleGetReportsQueue(supabase: any, params: any) {
-  const { moderator_id } = params
+  const { queueModeratorId } = params
 
   // Get reported comments
   const { data: comments, error } = await supabase

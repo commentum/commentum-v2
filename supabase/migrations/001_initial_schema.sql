@@ -14,18 +14,18 @@ CREATE TABLE comments (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     
     -- Core data (minimal required from frontend)
-    client_type TEXT NOT NULL CHECK (client_type IN ('anilist', 'myanimelist', 'simkl', 'other')),
+    client_type TEXT NOT NULL,
     user_id TEXT NOT NULL,
     media_id TEXT NOT NULL,
     content TEXT NOT NULL,
     
-    -- Auto-fetched user information (from client APIs)
+    -- User information (provided by frontend)
     username TEXT NOT NULL,
     user_avatar TEXT,
     user_role TEXT DEFAULT 'user' CHECK (user_role IN ('user', 'moderator', 'admin', 'super_admin')),
     
-    -- Auto-fetched media information (from client APIs)
-    media_type TEXT NOT NULL CHECK (media_type IN ('anime', 'manga', 'movie', 'tv', 'other')),
+    -- Media information (provided by frontend)
+    media_type TEXT NOT NULL,
     media_title TEXT NOT NULL,
     media_year INTEGER,
     media_poster TEXT,
@@ -153,10 +153,7 @@ INSERT INTO config (key, value) VALUES
     ('banned_keywords', '[]'),   -- JSON array of banned keywords
     ('system_enabled', 'true'),
     ('voting_enabled', 'true'),
-    ('reporting_enabled', 'true'),
-    ('anilist_client_id', ''),
-    ('myanimelist_client_id', ''),
-    ('simkl_client_id', '');
+    ('reporting_enabled', 'true');
 
 -- Helper function to check if user is in a role list
 CREATE OR REPLACE FUNCTION is_user_in_role(user_id_param TEXT, role_key TEXT)

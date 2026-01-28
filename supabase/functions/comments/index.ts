@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
-import { fetchUserInfo, fetchMediaInfo } from '../shared/clientAPIs.ts'
+import { validateUserInfo, validateMediaInfo, UserInfo, MediaInfo } from '../shared/clientAPIs.ts'
 import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
 import { sendDiscordNotification } from '../shared/discordNotifications.ts'
 
@@ -20,32 +20,32 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, user_id, media_id, content, comment_id, parent_id, token, tag } = await req.json()
+    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info } = await req.json()
 
     // Validate action-specific required fields
     switch (action) {
       case 'create':
-        if (!client_type || !user_id || !media_id || !content) {
+        if (!client_type || !content || !user_info || !media_info) {
           return new Response(
-            JSON.stringify({ error: 'client_type, user_id, media_id, and content are required for create action' }),
+            JSON.stringify({ error: 'client_type, content, user_info, and media_info are required for create action' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
         break
         
       case 'edit':
-        if (!comment_id || !user_id || !content) {
+        if (!comment_id || !user_info || !content) {
           return new Response(
-            JSON.stringify({ error: 'comment_id, user_id, and content are required for edit action' }),
+            JSON.stringify({ error: 'comment_id, user_info, and content are required for edit action' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
         break
         
       case 'delete':
-        if (!comment_id || !user_id) {
+        if (!comment_id || !user_info) {
           return new Response(
-            JSON.stringify({ error: 'comment_id and user_id are required for delete action' }),
+            JSON.stringify({ error: 'comment_id and user_info are required for delete action' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
@@ -123,6 +123,25 @@ serve(async (req) => {
       )
     }
 
+    // Extract user_id and media_id from info objects
+    const user_id = user_info?.user_id
+    const media_id = media_info?.media_id
+
+    // Validate extracted IDs
+    if (!user_id) {
+      return new Response(
+        JSON.stringify({ error: 'user_info.user_id is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (action === 'create' && !media_id) {
+      return new Response(
+        JSON.stringify({ error: 'media_info.media_id is required for create action' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // For delete action, check if user owns the comment first
     let userRole = 'user'
     if (action === 'delete') {
@@ -140,55 +159,56 @@ serve(async (req) => {
         )
       }
 
-      // If user owns the comment, no token needed
+      // If user owns the comment, no admin check needed
       if (comment.user_id === user_id) {
         userRole = await getUserRole(supabase, user_id)
       } else {
-        // User is trying to delete someone else's comment - require token and client_type
-        if (!token || !client_type) {
+        // User is trying to delete someone else's comment - check admin permissions
+        const adminVerification = await verifyAdminAccess(supabase, user_id)
+        if (!adminVerification.valid) {
           return new Response(
-            JSON.stringify({ error: 'Token and client_type required to delete other users comments' }),
+            JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
-
-        const tokenVerification = await verifyAdminAccess(supabase, client_type, user_id, token)
-        if (!tokenVerification.valid) {
-          return new Response(
-            JSON.stringify({ error: tokenVerification.reason || 'Authentication failed' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-        userRole = tokenVerification.role
+        userRole = adminVerification.role
       }
     } else {
       // For regular actions (create, edit), just get user role without token verification
       userRole = await getUserRole(supabase, user_id)
     }
 
-    // Fetch user and media information only for actions that need them
-    let userInfo = null
-    let mediaInfo = null
+    // Validate user and media information only for create action
+    let userInfo: UserInfo | null = null
+    let mediaInfo: MediaInfo | null = null
     
     if (action === 'create') {
-      [userInfo, mediaInfo] = await Promise.all([
-        fetchUserInfo(client_type, user_id),
-        fetchMediaInfo(client_type, media_id)
-      ])
-
-      if (!userInfo) {
+      // Validate user info provided by frontend
+      if (!validateUserInfo(user_info)) {
         return new Response(
-          JSON.stringify({ error: 'Failed to fetch user information' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+      userInfo = user_info
 
-      if (!mediaInfo) {
+      // Validate media info provided by frontend
+      if (!validateMediaInfo(media_info)) {
         return new Response(
-          JSON.stringify({ error: 'Failed to fetch media information' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ error: 'Invalid media_info format. Required: media_id, type (any string), title (1-200 chars), optional: year, poster' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
+      mediaInfo = media_info
+    } else if (action === 'edit' || action === 'delete') {
+      // For edit and delete, just validate user_info structure
+      if (!validateUserInfo(user_info)) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      userInfo = user_info
     }
 
     // Check user status
@@ -327,8 +347,8 @@ async function handleCreateComment(supabase: any, params: any) {
     .from('comments')
     .insert({
       client_type,
-      user_id,
-      media_id,
+      user_id: userInfo.user_id,
+      media_id: mediaInfo.media_id,
       content,
       parent_id,
       tags: tag !== undefined ? JSON.stringify([tag]) : null,
@@ -362,7 +382,7 @@ async function handleCreateComment(supabase: any, params: any) {
       },
       user: userInfo,
       media: {
-        id: mediaInfo.id || media_id,
+        id: mediaInfo.media_id,
         title: mediaInfo.title,
         year: mediaInfo.year,
         poster: mediaInfo.poster
