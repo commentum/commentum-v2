@@ -54,7 +54,6 @@ import {
   handleWebhooksCommand
 } from './handlers/utility-commands.ts'
 
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
@@ -74,7 +73,13 @@ const DISCORD_API_BASE = 'https://discord.com/api/v10'
 console.log('DISCORD_PUBLIC_KEY exists:', !!DISCORD_PUBLIC_KEY)
 console.log('DISCORD_PUBLIC_KEY length:', DISCORD_PUBLIC_KEY?.length)
 
-// Verify Discord request signature using Web Crypto API
+// Helper functions
+function hexToUint8Array(hex: string): Uint8Array {
+  const matches = hex.match(/.{1,2}/g)
+  if (!matches) return new Uint8Array()
+  return new Uint8Array(matches.map(byte => parseInt(byte, 16)))
+}
+
 async function verifyDiscordSignature(
   signature: string,
   timestamp: string,
@@ -112,12 +117,7 @@ async function verifyDiscordSignature(
   }
 }
 
-function hexToUint8Array(hex: string): Uint8Array {
-  const matches = hex.match(/.{1,2}/g)
-  if (!matches) return new Uint8Array()
-  return new Uint8Array(matches.map(byte => parseInt(byte, 16)))
-}
-
+// Main server function
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -217,22 +217,44 @@ serve(async (req) => {
       console.log('Signature verification PASSED')
     }
 
-    // Handle different actions
-    const action = body.action || body.type
-    
+    // Handle Discord interactions (slash commands)
+    if (body.type === 2) {
+      return await handleDiscordInteraction(supabase, { command_data: body })
+    }
+
+    const { action, discord_user_id, discord_username, platform_user_id, platform_type, token, command_data } = body
+
     switch (action) {
-      case 'sync_commands':
-        return await handleSyncCommands(supabase, body.guild_ids)
-        
       case 'register':
-        return await handleDiscordRegistration(supabase, body)
-        
+        return await handleDiscordRegistration(supabase, {
+          discord_user_id,
+          discord_username,
+          platform_user_id,
+          platform_type,
+          token
+        })
+      
       case 'verify':
-        return await handleDiscordVerification(supabase, body)
-        
-      case 'interaction':
-        return await handleDiscordInteraction(supabase, body)
-        
+        return await handleDiscordVerification(supabase, {
+          discord_user_id,
+          platform_user_id,
+          platform_type,
+          token
+        })
+      
+      case 'get_user_role':
+        return await handleGetUserRole(supabase, {
+          discord_user_id
+        })
+      
+      case 'sync_commands':
+        return await handleSyncCommands(supabase)
+      
+      case 'interact':
+        return await handleDiscordInteraction(supabase, {
+          command_data
+        })
+      
       default:
         return new Response(
           JSON.stringify({ error: 'Invalid action' }),
@@ -248,6 +270,33 @@ serve(async (req) => {
     )
   }
 })
+
+async function handleGetUserRole(supabase: any, params: any) {
+  const { discord_user_id } = params
+
+  const { data: registration, error } = await supabase
+    .from('discord_users')
+    .select('user_role, is_active, is_verified')
+    .eq('discord_user_id', discord_user_id)
+    .eq('is_active', true)
+    .single()
+
+  if (error || !registration) {
+    return new Response(
+      JSON.stringify({ error: 'Discord user not found or inactive' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      role: registration.user_role,
+      is_verified: registration.is_verified
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
 
 // Discord interaction handler
 async function handleDiscordInteraction(supabase: any, params: any) {
