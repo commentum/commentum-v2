@@ -54,7 +54,6 @@ import {
   handleWebhooksCommand
 } from './handlers/utility-commands.ts'
 
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
@@ -74,7 +73,13 @@ const DISCORD_API_BASE = 'https://discord.com/api/v10'
 console.log('DISCORD_PUBLIC_KEY exists:', !!DISCORD_PUBLIC_KEY)
 console.log('DISCORD_PUBLIC_KEY length:', DISCORD_PUBLIC_KEY?.length)
 
-// Verify Discord request signature using Web Crypto API
+// Helper functions
+function hexToUint8Array(hex: string): Uint8Array {
+  const matches = hex.match(/.{1,2}/g)
+  if (!matches) return new Uint8Array()
+  return new Uint8Array(matches.map(byte => parseInt(byte, 16)))
+}
+
 async function verifyDiscordSignature(
   signature: string,
   timestamp: string,
@@ -112,12 +117,7 @@ async function verifyDiscordSignature(
   }
 }
 
-function hexToUint8Array(hex: string): Uint8Array {
-  const matches = hex.match(/.{1,2}/g)
-  if (!matches) return new Uint8Array()
-  return new Uint8Array(matches.map(byte => parseInt(byte, 16)))
-}
-
+// Main server function
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -217,22 +217,44 @@ serve(async (req) => {
       console.log('Signature verification PASSED')
     }
 
-    // Handle different actions
-    const action = body.action || body.type
-    
+    // Handle Discord interactions (slash commands)
+    if (body.type === 2) {
+      return await handleDiscordInteraction(supabase, { command_data: body })
+    }
+
+    const { action, discord_user_id, discord_username, platform_user_id, platform_type, token, command_data } = body
+
     switch (action) {
-      case 'sync_commands':
-        return await handleSyncCommands(supabase, body.guild_ids)
-        
       case 'register':
-        return await handleDiscordRegistration(supabase, body)
-        
+        return await handleDiscordRegistration(supabase, {
+          discord_user_id,
+          discord_username,
+          platform_user_id,
+          platform_type,
+          token
+        })
+      
       case 'verify':
-        return await handleDiscordVerification(supabase, body)
-        
-      case 'interaction':
-        return await handleDiscordInteraction(supabase, body)
-        
+        return await handleDiscordVerification(supabase, {
+          discord_user_id,
+          platform_user_id,
+          platform_type,
+          token
+        })
+      
+      case 'get_user_role':
+        return await handleGetUserRole(supabase, {
+          discord_user_id
+        })
+      
+      case 'sync_commands':
+        return await handleSyncCommands(supabase)
+      
+      case 'interact':
+        return await handleDiscordInteraction(supabase, {
+          command_data
+        })
+      
       default:
         return new Response(
           JSON.stringify({ error: 'Invalid action' }),
@@ -248,6 +270,33 @@ serve(async (req) => {
     )
   }
 })
+
+async function handleGetUserRole(supabase: any, params: any) {
+  const { discord_user_id } = params
+
+  const { data: registration, error } = await supabase
+    .from('discord_users')
+    .select('user_role, is_active, is_verified')
+    .eq('discord_user_id', discord_user_id)
+    .eq('is_active', true)
+    .single()
+
+  if (error || !registration) {
+    return new Response(
+      JSON.stringify({ error: 'Discord user not found or inactive' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      role: registration.user_role,
+      is_verified: registration.is_verified
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
 
 // Discord interaction handler
 async function handleDiscordInteraction(supabase: any, params: any) {
@@ -526,66 +575,89 @@ async function handleGetUserRole(supabase: any, params: any) {
 }
 
 async function handleSyncCommands(supabase: any, guildIds?: string[]) {
-  try {
-    // Get Discord configuration
-    const { data: botTokenConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_bot_token')
-      .single()
+  // Use environment variables first (like the old working version)
+  let DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+  let DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
+  let targetGuildIds: string[] = []
 
-    const { data: clientIdConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_client_id')
-      .single()
-
-    const { data: guildIdsConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_guild_ids')
-      .single()
-
-    // DON'T parse these - they're plain strings, not JSON
-    const DISCORD_BOT_TOKEN = botTokenConfig?.value || ''
-    const DISCORD_CLIENT_ID = clientIdConfig?.value || ''
-
-    // Get guild IDs - use provided ones, or from config, or fallback to single guild_id
-    let targetGuildIds: string[] = []
-    if (guildIds && guildIds.length > 0) {
-      targetGuildIds = guildIds
-    } else if (guildIdsConfig?.value) {
+  // If guild IDs provided as parameter, use them
+  if (guildIds && guildIds.length > 0) {
+    targetGuildIds = guildIds
+  } else {
+    // Use environment variable if available
+    const envGuildIds = Deno.env.get('DISCORD_GUILD_IDS')
+    if (envGuildIds) {
       try {
-        targetGuildIds = JSON.parse(guildIdsConfig.value)
+        targetGuildIds = JSON.parse(envGuildIds)
       } catch {
-        targetGuildIds = guildIdsConfig.value.split(',').map(id => id.trim())
+        targetGuildIds = envGuildIds.split(',').map(id => id.trim())
       }
     } else {
-      // Fallback to single guild_id config
-      const { data: guildIdConfig } = await supabase
-        .from('config')
-        .select('value')
-        .eq('key', 'discord_guild_id')
-        .single()
-      if (guildIdConfig?.value) {
-        targetGuildIds = [guildIdConfig.value]
+      // Fallback to single guild_id environment variable
+      const envGuildId = Deno.env.get('DISCORD_GUILD_ID')
+      if (envGuildId) {
+        targetGuildIds = [envGuildId]
       }
     }
+  }
 
-    if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !targetGuildIds.length) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Discord configuration missing in database',
-          details: {
-            bot_token: !!DISCORD_BOT_TOKEN,
-            client_id: !!DISCORD_CLIENT_ID,
-            guild_ids: targetGuildIds
-          },
-          message: 'Please update config table with Discord credentials'
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+  // If still no guild IDs, try database config as fallback
+  if (targetGuildIds.length === 0) {
+    try {
+      const { data: guildIdsConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_guild_ids')
+        .single()
+
+      if (guildIdsConfig?.value) {
+        try {
+          targetGuildIds = JSON.parse(guildIdsConfig.value)
+        } catch {
+          targetGuildIds = guildIdsConfig.value.split(',').map(id => id.trim())
+        }
+      } else {
+        // Fallback to single guild_id config
+        const { data: guildIdConfig } = await supabase
+          .from('config')
+          .select('value')
+          .eq('key', 'discord_guild_id')
+          .single()
+        if (guildIdConfig?.value) {
+          targetGuildIds = [guildIdConfig.value]
+        }
+      }
+    } catch (error) {
+      console.error('Database config error:', error)
     }
+  }
+
+  // If still no config from database, try environment variables as final fallback
+  if (!DISCORD_BOT_TOKEN) {
+    DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+  }
+  if (!DISCORD_CLIENT_ID) {
+    DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
+  }
+
+  if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !targetGuildIds.length) {
+    return new Response(
+      JSON.stringify({ 
+        error: 'Discord configuration missing',
+        details: {
+          bot_token: !!DISCORD_BOT_TOKEN,
+          client_id: !!DISCORD_CLIENT_ID,
+          guild_ids: targetGuildIds,
+          env_bot_token: !!Deno.env.get('DISCORD_BOT_TOKEN'),
+          env_client_id: !!Deno.env.get('DISCORD_CLIENT_ID'),
+          env_guild_id: !!Deno.env.get('DISCORD_GUILD_ID'),
+          env_guild_ids: !!Deno.env.get('DISCORD_GUILD_IDS')
+        },
+        message: 'Please set DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, and DISCORD_GUILD_IDS environment variables'
+      }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 
     // Define slash commands
     const commands = [
