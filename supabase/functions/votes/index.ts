@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
-import { sendDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -154,31 +154,26 @@ serve(async (req) => {
 
     if (updateError) throw updateError
 
-  // Send Discord notification for vote (only for new votes, not removals)
+  // Queue Discord notification for vote in background (only for new votes, not removals) - NON-BLOCKING
   if (vote_type !== 'remove' && (!currentVote || currentVote !== vote_type)) {
-    try {
-      await sendDiscordNotification(supabase, {
-        type: 'vote_cast',
-        voteType: vote_type,
-        comment: {
-          id: comment.id,
-          username: comment.username,
-          user_id: comment.user_id,
-          content: comment.content,
-          client_type: comment.client_type,
-          media_id: comment.media_id
-        },
-        media: {
-          id: comment.media_id,
-          title: comment.media_title,
-          year: comment.media_year,
-          poster: comment.media_poster
-        }
-      })
-    } catch (notificationError) {
-      console.error('Failed to send Discord notification:', notificationError)
-      // Don't fail the request if notification fails
-    }
+    queueDiscordNotification({
+      type: 'vote_cast',
+      voteType: vote_type,
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        user_id: comment.user_id,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id
+      },
+      media: {
+        id: comment.media_id,
+        title: comment.media_title,
+        year: comment.media_year,
+        poster: comment.media_poster
+      }
+    })
   }
 
   return new Response(

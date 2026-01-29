@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { validateUserInfo, validateMediaInfo, UserInfo, MediaInfo } from '../shared/clientAPIs.ts'
 import { verifyAdminAccess, getUserRole, canModerate, getDisplayRole } from '../shared/auth.ts'
-import { sendDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -345,29 +345,26 @@ async function handleCreateComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  try {
-    await sendDiscordNotification(supabase, {
-      type: 'comment_created',
-      comment: {
-        id: comment.id,
-        username: comment.username,
-        user_id: comment.user_id,
-        content: comment.content,
-        client_type: comment.client_type,
-        media_id: comment.media_id,
-        parent_id: comment.parent_id
-      },
-      user: userInfo,
-      media: {
-        id: mediaInfo.media_id,
-        title: mediaInfo.title,
-        year: mediaInfo.year,
-        poster: mediaInfo.poster
-      }
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-  }
+  // Queue Discord notification in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_created',
+    comment: {
+      id: comment.id,
+      username: comment.username,
+      user_id: comment.user_id,
+      content: comment.content,
+      client_type: comment.client_type,
+      media_id: comment.media_id,
+      parent_id: comment.parent_id
+    },
+    user: userInfo,
+    media: {
+      id: mediaInfo.media_id,
+      title: mediaInfo.title,
+      year: mediaInfo.year,
+      poster: mediaInfo.poster
+    }
+  })
 
   return new Response(
     JSON.stringify({ success: true, comment }),
@@ -435,21 +432,18 @@ async function handleEditComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  try {
-    await sendDiscordNotification(supabase, {
-      type: 'comment_updated',
-      comment: {
-        id: updatedComment.id,
-        username: updatedComment.username,
-        user_id: updatedComment.user_id,
-        content: updatedComment.content,
-        client_type: updatedComment.client_type,
-        media_id: updatedComment.media_id
-      }
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-  }
+  // Queue Discord notification in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_updated',
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      user_id: updatedComment.user_id,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id
+    }
+  })
 
   return new Response(
     JSON.stringify({ success: true, comment: updatedComment }),
@@ -503,13 +497,13 @@ async function handleDeleteComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  try {
-    const moderator = comment.user_id !== user_id ? {
+  const moderator = comment.user_id !== user_id ? {
       username: user_id,
       id: user_id
     } : null
 
-    await sendDiscordNotification(supabase, {
+    // Queue Discord notification in background - NON-BLOCKING
+    queueDiscordNotification({
       type: 'comment_deleted',
       comment: {
         id: deletedComment.id,
@@ -521,9 +515,6 @@ async function handleDeleteComment(supabase: any, params: any) {
       },
       moderator
     })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-  }
 
   return new Response(
     JSON.stringify({ success: true, comment: deletedComment }),

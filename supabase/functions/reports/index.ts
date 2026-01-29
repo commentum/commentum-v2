@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole } from '../shared/auth.ts'
-import { sendDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -224,34 +224,29 @@ async function handleCreateReport(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for new report
-  try {
-    await sendDiscordNotification(supabase, {
-      type: 'report_filed',
-      comment: {
-        id: comment.id,
-        username: comment.username,
-        user_id: comment.user_id,
-        content: comment.content,
-        client_type: comment.client_type,
-        media_id: comment.media_id
-      },
-      user: {
-        id: reporter_id,
-        username: `User ${reporter_id}` // We don't have reporter username without API call
-      },
-      media: {
-        id: comment.media_id,
-        title: comment.media_title,
-        year: comment.media_year,
-        poster: comment.media_poster
-      },
-      reportReason: reason
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
-  }
+  // Queue Discord notification for new report in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'report_filed',
+    comment: {
+      id: comment.id,
+      username: comment.username,
+      user_id: comment.user_id,
+      content: comment.content,
+      client_type: comment.client_type,
+      media_id: comment.media_id
+    },
+    user: {
+      id: reporter_id,
+      username: `User ${reporter_id}` // We don't have reporter username without API call
+    },
+    media: {
+      id: comment.media_id,
+      title: comment.media_title,
+      year: comment.media_year,
+      poster: comment.media_poster
+    },
+    reportReason: reason
+  })
 
   return new Response(
     JSON.stringify({
@@ -346,35 +341,30 @@ async function handleResolveReport(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for resolved report
-  try {
-    await sendDiscordNotification(supabase, {
-      type: resolution === 'resolved' ? 'report_resolved' : 'report_dismissed',
-      comment: {
-        id: fullComment.id,
-        username: fullComment.username,
-        user_id: fullComment.user_id,
-        content: fullComment.content,
-        client_type: fullComment.client_type,
-        media_id: fullComment.media_id
-      },
-      moderator: {
-        id: moderator_id,
-        username: `Moderator ${moderator_id}`
-      },
-      media: {
-        id: fullComment.media_id,
-        title: fullComment.media_title,
-        year: fullComment.media_year,
-        poster: fullComment.media_poster
-      },
-      reason: review_notes || `Report ${resolution}`,
-      reportReason: reports[reportIndex].reason
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
-  }
+  // Queue Discord notification for report resolution in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: resolution === 'resolved' ? 'report_resolved' : 'report_dismissed',
+    comment: {
+      id: fullComment.id,
+      username: fullComment.username,
+      user_id: fullComment.user_id,
+      content: fullComment.content,
+      client_type: fullComment.client_type,
+      media_id: fullComment.media_id
+    },
+    moderator: {
+      id: moderator_id,
+      username: `Moderator ${moderator_id}`
+    },
+    media: {
+      id: fullComment.media_id,
+      title: fullComment.media_title,
+      year: fullComment.media_year,
+      poster: fullComment.media_poster
+    },
+    reason: review_notes || `Report ${resolution}`,
+    reportReason: reports[reportIndex].reason
+  })
 
   return new Response(
     JSON.stringify({

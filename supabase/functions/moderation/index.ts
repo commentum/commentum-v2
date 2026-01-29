@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
-import { sendDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -147,34 +147,29 @@ async function handlePinComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for pinned comment
-  try {
-    await sendDiscordNotification(supabase, {
-      type: 'comment_pinned',
-      comment: {
-        id: updatedComment.id,
-        username: updatedComment.username,
-        user_id: updatedComment.user_id,
-        content: updatedComment.content,
-        client_type: updatedComment.client_type,
-        media_id: updatedComment.media_id
-      },
-      moderator: {
-        id: moderator_id,
-        username: `Moderator ${moderator_id}`
-      },
-      media: {
-        id: updatedComment.media_id,
-        title: updatedComment.media_title,
-        year: updatedComment.media_year,
-        poster: updatedComment.media_poster
-      },
-      reason
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
-  }
+  // Queue Discord notification for pinned comment in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_pinned',
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      user_id: updatedComment.user_id,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id
+    },
+    moderator: {
+      id: moderator_id,
+      username: `Moderator ${moderator_id}`
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      year: updatedComment.media_year,
+      poster: updatedComment.media_poster
+    },
+    reason
+  })
 
   return new Response(
     JSON.stringify({
@@ -280,34 +275,29 @@ async function handleLockThread(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for locked thread
-  try {
-    await sendDiscordNotification(supabase, {
-      type: 'comment_locked',
-      comment: {
-        id: updatedComment.id,
-        username: updatedComment.username,
-        user_id: updatedComment.user_id,
-        content: updatedComment.content,
-        client_type: updatedComment.client_type,
-        media_id: updatedComment.media_id
-      },
-      moderator: {
-        id: moderator_id,
-        username: `Moderator ${moderator_id}`
-      },
-      media: {
-        id: updatedComment.media_id,
-        title: updatedComment.media_title,
-        year: updatedComment.media_year,
-        poster: updatedComment.media_poster
-      },
-      reason
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
-  }
+  // Queue Discord notification for locked thread in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_locked',
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      user_id: updatedComment.user_id,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id
+    },
+    moderator: {
+      id: moderator_id,
+      username: `Moderator ${moderator_id}`
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      year: updatedComment.media_year,
+      poster: updatedComment.media_poster
+    },
+    reason
+  })
 
   return new Response(
     JSON.stringify({
@@ -421,25 +411,20 @@ async function handleWarnUser(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for user warning
-  try {
-    await sendDiscordNotification(supabase, {
-      type: 'user_warned',
-      user: {
-        id: target_user_id,
-        username: `User ${target_user_id}`
-      },
-      moderator: {
-        id: moderator_id,
-        username: `Moderator ${moderator_id}`
-      },
-      reason,
-      severity
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
-  }
+  // Queue Discord notification for user warning in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'user_warned',
+    user: {
+      id: target_user_id,
+      username: `User ${target_user_id}`
+    },
+    moderator: {
+      id: moderator_id,
+      username: `Moderator ${moderator_id}`
+    },
+    reason,
+    severity
+  })
 
   return new Response(
     JSON.stringify({
@@ -502,24 +487,19 @@ async function handleBanUser(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Send Discord notification for user ban
-  try {
-    await sendDiscordNotification(supabase, {
-      type: 'user_banned',
-      user: {
-        id: target_user_id,
-        username: `User ${target_user_id}`
-      },
-      moderator: {
-        id: moderator_id,
-        username: `Moderator ${moderator_id}`
-      },
-      reason
-    })
-  } catch (notificationError) {
-    console.error('Failed to send Discord notification:', notificationError)
-    // Don't fail the request if notification fails
-  }
+  // Queue Discord notification for user ban in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'user_banned',
+    user: {
+      id: target_user_id,
+      username: `User ${target_user_id}`
+    },
+    moderator: {
+      id: moderator_id,
+      username: `Moderator ${moderator_id}`
+    },
+    reason
+  })
 
   return new Response(
     JSON.stringify({

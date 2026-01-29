@@ -1,4 +1,5 @@
 // Discord notification utilities for Commentum v2
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
   type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'vote_cast' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
@@ -11,11 +12,72 @@ export interface DiscordNotificationData {
   voteType?: string;
   reportReason?: string;
   actionedBy?: string;
-  serverKey?: string; // Use Supabase SERVICE_ROLE_KEY for server-side authentication
   metadata?: any;
 }
 
+// Background notification queue - stores notifications for async processing
+let notificationQueue: DiscordNotificationData[] = [];
+let isProcessingQueue = false;
+
+// Add notification to background queue - NON-BLOCKING
+export function queueDiscordNotification(data: DiscordNotificationData) {
+  // Add to queue without waiting
+  notificationQueue.push(data);
+  
+  // Start background processing if not already running
+  if (!isProcessingQueue) {
+    processNotificationQueue();
+  }
+  
+  // Immediately return success - don't wait for Discord
+  return { success: true, queued: true, message: 'Notification queued for background processing' };
+}
+
+// Legacy function for backward compatibility - now just queues the notification
 export async function sendDiscordNotification(supabase: any, data: DiscordNotificationData) {
+  // Just queue it and return immediately - don't block the main flow
+  return queueDiscordNotification(data);
+}
+
+// Background queue processor - runs independently
+async function processNotificationQueue() {
+  if (isProcessingQueue || notificationQueue.length === 0) {
+    return;
+  }
+  
+  isProcessingQueue = true;
+  
+  try {
+    while (notificationQueue.length > 0) {
+      const notification = notificationQueue.shift();
+      if (notification) {
+        // Process each notification without blocking the main flow
+        processNotificationInBackground(notification).catch(error => {
+          console.error('Background notification processing failed:', error);
+        });
+      }
+    }
+  } finally {
+    isProcessingQueue = false;
+  }
+}
+
+// Individual notification processing - runs in background
+async function processNotificationInBackground(data: DiscordNotificationData) {
+  try {
+    // Create a temporary Supabase client for background processing
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    
+    await sendDiscordNotificationInternal(supabase, data);
+  } catch (error) {
+    console.error('Background notification error:', error);
+  }
+}
+
+// Internal Discord notification implementation - separated from public API
+async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotificationData) {
   try {
     // Check if Discord notifications are enabled
     const { data: config } = await supabase
@@ -487,295 +549,50 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       embed.description = `**${data.moderator?.username}** resolved a report on a comment by **${data.comment.username}**`
       embed.fields = [
         {
-          name: 'Resolution',
-          value: data.reason || 'Report resolved',
-          inline: true
-        },
-        {
-          name: 'Resolved By',
-          value: data.moderator?.username || 'Unknown Moderator',
-          inline: true
-        },
-        {
-          name: 'IDs (Click to Copy)',
-          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
-          inline: false
-        }
-      ]
-
-      if (data.comment.content) {
-        embed.fields.push({
-          name: 'Comment',
-          value: data.comment.content.length > 200 
-            ? data.comment.content.substring(0, 200) + '...' 
-            : data.comment.content
-        })
-      }
-      break
-
-    case 'report_dismissed':
-      embed.title = 'Report Dismissed'
-      embed.color = 0x808080 // Gray
-      embed.description = `**${data.moderator?.username}** dismissed a report on a comment by **${data.comment.username}**`
-      embed.fields = [
-        {
-          name: 'Dismissal Reason',
-          value: data.reason || 'Report dismissed',
-          inline: true
-        },
-        {
-          name: 'Dismissed By',
-          value: data.moderator?.username || 'Unknown Moderator',
-          inline: true
-        },
-        {
-          name: 'IDs (Click to Copy)',
-          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
-          inline: false
-        }
-      ]
-
-      if (data.comment.content) {
-        embed.fields.push({
-          name: 'Comment',
-          value: data.comment.content.length > 200 
-            ? data.comment.content.substring(0, 200) + '...' 
-            : data.comment.content
-        })
-      }
-      break
-
-    case 'vote_removed':
-      embed.title = 'Vote Removed'
-      embed.color = 0xffa500 // Orange
-      embed.description = `A vote was removed from a comment by **${data.comment.username}**`
-      
-      if (data.comment.content) {
-        embed.fields = [{
-          name: 'Comment',
-          value: data.comment.content.length > 200 
-            ? data.comment.content.substring(0, 200) + '...' 
-            : data.comment.content
-        }]
-      }
-
-      embed.fields = embed.fields || []
-      embed.fields.push({
-        name: 'IDs (Click to Copy)',
-        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\``,
-        inline: false
-      })
-      break
-
-    case 'user_muted':
-      embed.title = 'User Muted'
-      embed.color = 0xffa500 // Orange
-      embed.description = `**${data.user?.username || data.user?.id}** has been muted`
-      embed.fields = [
-        {
-          name: 'Muted User',
-          value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
-          inline: true
-        },
-        {
-          name: 'Muted By',
-          value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
-          inline: true
-        },
-        {
-          name: 'Duration',
-          value: data.metadata?.duration || 'Unknown',
-          inline: true
-        }
-      ]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: 'Reason',
-          value: data.reason
-        })
-      }
-      break
-
-    case 'user_shadow_banned':
-      embed.title = 'User Shadow Banned'
-      embed.color = 0x8b0000 // Dark Red
-      embed.description = `**${data.user?.username || data.user?.id}** has been shadow banned`
-      embed.fields = [
-        {
-          name: 'Shadow Banned User',
-          value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
-          inline: true
-        },
-        {
-          name: 'Banned By',
-          value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
-          inline: true
-        }
-      ]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: 'Reason',
-          value: data.reason
-        })
-      }
-      break
-
-    case 'user_unbanned':
-      embed.title = 'User Unbanned'
-      embed.color = 0x00ff00 // Green
-      embed.description = `**${data.user?.username || data.user?.id}** has been unbanned`
-      embed.fields = [
-        {
-          name: 'Unbanned User',
-          value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
-          inline: true
-        },
-        {
-          name: 'Unbanned By',
-          value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
-          inline: true
-        }
-      ]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: 'Reason',
-          value: data.reason
-        })
-      }
-      break
-
-    case 'comment_unlocked':
-      embed.title = 'Comment Thread Unlocked'
-      embed.color = 0x00ff00 // Green
-      embed.description = `**${data.moderator?.username}** unlocked a comment thread by **${data.comment.username}**`
-      
-      embed.fields = [{
-        name: 'IDs (Click to Copy)',
-        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
-        inline: false
-      }]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: 'Reason',
-          value: data.reason
-        })
-      }
-      break
-
-    case 'moderation_action':
-      embed.title = 'Moderation Action'
-      embed.color = 0xffd700 // Gold
-      embed.description = `**${data.moderator?.username}** performed a moderation action`
-      embed.fields = [
-        {
-          name: 'Action',
-          value: data.metadata?.action || 'Unknown',
-          inline: true
-        },
-        {
           name: 'Moderator',
           value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
           inline: true
         },
         {
-          name: 'Target',
-          value: data.user?.username || data.comment?.username || 'Unknown',
-          inline: true
-        }
-      ]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: 'Reason',
-          value: data.reason
-        })
-      }
-      break
-
-    case 'config_updated':
-      embed.title = 'Configuration Updated'
-      embed.color = 0x4169e1 // Royal Blue
-      embed.description = `**${data.moderator?.username}** updated system configuration`
-      embed.fields = [
-        {
-          name: 'Config Key',
-          value: data.metadata?.configKey || 'Unknown',
+          name: 'Comment Author',
+          value: `${data.comment.username} (\`${data.comment.user_id}\`)`,
           inline: true
         },
         {
-          name: 'Updated By',
-          value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-          inline: true
-        }
-      ]
-
-      if (data.metadata?.oldValue && data.metadata?.newValue) {
-        embed.fields.push({
-          name: 'Changes',
-          value: `**From:** ${data.metadata.oldValue}\n**To:** ${data.metadata.newValue}`,
+          name: 'IDs (Click to Copy)',
+          value: `**Comment ID:** \`${data.comment.id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
           inline: false
-        })
-      }
-      break
-
-    case 'system_enabled':
-      embed.title = 'System Enabled'
-      embed.color = 0x00ff00 // Green
-      embed.description = `**${data.moderator?.username}** enabled the comment system`
-      embed.fields = [
-        {
-          name: 'Enabled By',
-          value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-          inline: true
         }
       ]
       break
 
-    case 'system_disabled':
-      embed.title = 'System Disabled'
-      embed.color = 0xff0000 // Red
-      embed.description = `**${data.moderator?.username}** disabled the comment system`
-      embed.fields = [
-        {
-          name: 'Disabled By',
-          value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-          inline: true
-        }
-      ]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: 'Reason',
-          value: data.reason
-        })
-      }
-      break
-
-    case 'bulk_action':
-      embed.title = 'Bulk Action Performed'
+    case 'moderation_action':
+      embed.title = 'Moderation Action'
       embed.color = 0x9932cc // Dark Orchid
-      embed.description = `**${data.moderator?.username}** performed a bulk action`
-      embed.fields = [
-        {
-          name: 'Action Type',
-          value: data.metadata?.actionType || 'Unknown',
+      embed.description = `**${data.moderator?.username}** performed a moderation action`
+      
+      if (data.metadata?.action) {
+        embed.fields = [{
+          name: 'Action',
+          value: data.metadata.action,
           inline: true
-        },
-        {
-          name: 'Items Affected',
-          value: data.metadata?.count || 'Unknown',
+        }]
+      }
+
+      embed.fields = embed.fields || []
+      embed.fields.push({
+        name: 'Moderator',
+        value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
+        inline: true
+      })
+
+      if (data.user) {
+        embed.fields.push({
+          name: 'Target User',
+          value: `${data.user.username || data.user.id} (\`${data.user.id}\`)`,
           inline: true
-        },
-        {
-          name: 'Performed By',
-          value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-          inline: true
-        }
-      ]
+        })
+      }
 
       if (data.reason) {
         embed.fields.push({
@@ -784,171 +601,13 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
         })
       }
       break
-  }
 
-  // Add media info if available
-  if (data.media && data.type !== 'comment_created') {
-    embed.fields = embed.fields || []
-    embed.fields.push({
-      name: '📺 Media',
-      value: `**${data.media.title}** (${data.media.year || 'Unknown Year'})`,
-      inline: true
-    })
-
-    if (data.media.poster) {
-      embed.thumbnail = {
-        url: data.media.poster
-      }
-    }
+    default:
+      embed.title = 'Notification'
+      embed.color = 0x0000ff // Blue
+      embed.description = `A ${data.type} event occurred`
+      break
   }
 
   return embed
-}
-
-export async function retryFailedNotifications(supabase: any) {
-  try {
-    const { data: failedNotifications, error } = await supabase
-      .from('discord_notifications')
-      .select('*')
-      .eq('delivery_status', 'failed')
-      .lt('next_retry_at', new Date().toISOString())
-      .lt('retry_count', 3) // Max 3 retries
-      .order('created_at', { ascending: true })
-      .limit(10)
-
-    if (error || !failedNotifications.length) {
-      return { success: true, retried: 0 }
-    }
-
-    let retried = 0
-
-    for (const notification of failedNotifications) {
-      try {
-        const response = await fetch(notification.webhook_url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            username: 'Commentum Bot',
-            avatar_url: 'https://i.imgur.com/3Z1jw3T.png',
-            embeds: [JSON.parse(notification.comment_data || '{}')]
-          })
-        })
-
-        if (response.ok) {
-          await supabase
-            .from('discord_notifications')
-            .update({
-              delivery_status: 'sent',
-              delivered_at: new Date().toISOString()
-            })
-            .eq('id', notification.id)
-
-          retried++
-        } else {
-          await supabase
-            .from('discord_notifications')
-            .update({
-              retry_count: notification.retry_count + 1,
-              next_retry_at: new Date(Date.now() + Math.pow(2, notification.retry_count + 1) * 60 * 1000).toISOString() // Exponential backoff
-            })
-            .eq('id', notification.id)
-        }
-      } catch (error) {
-        console.error(`Retry failed for notification ${notification.id}:`, error)
-      }
-    }
-
-    return { success: true, retried }
-
-  } catch (error) {
-    console.error('Error retrying notifications:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// Permission checking function for server key actions
-async function checkActionPermissions(supabase: any, userId: string, actionType: string) {
-  try {
-    // Get user role
-    const userRole = await getUserRole(supabase, userId)
-    
-    // Define permission matrix
-    const permissions: { [key: string]: string[] } = {
-      'user': [
-        'comment_created', 'comment_updated', 'comment_deleted', 
-        'vote_cast', 'vote_removed', 'report_filed'
-      ],
-      'moderator': [
-        'comment_created', 'comment_updated', 'comment_deleted', 
-        'vote_cast', 'vote_removed', 'report_filed', 'report_resolved', 'report_dismissed',
-        'user_warned', 'user_muted', 'comment_pinned', 'comment_locked', 'comment_unlocked',
-        'moderation_action'
-      ],
-      'admin': [
-        'comment_created', 'comment_updated', 'comment_deleted', 
-        'vote_cast', 'vote_removed', 'report_filed', 'report_resolved', 'report_dismissed',
-        'user_warned', 'user_muted', 'user_banned', 'user_shadow_banned', 'user_unbanned',
-        'comment_pinned', 'comment_locked', 'comment_unlocked', 'moderation_action',
-        'system_enabled', 'system_disabled', 'bulk_action'
-      ],
-      'super_admin': [
-        'comment_created', 'comment_updated', 'comment_deleted', 
-        'vote_cast', 'vote_removed', 'report_filed', 'report_resolved', 'report_dismissed',
-        'user_warned', 'user_muted', 'user_banned', 'user_shadow_banned', 'user_unbanned',
-        'comment_pinned', 'comment_locked', 'comment_unlocked', 'moderation_action',
-        'config_updated', 'system_enabled', 'system_disabled', 'bulk_action'
-      ]
-    }
-
-    const allowedActions = permissions[userRole] || []
-    
-    if (allowedActions.includes(actionType)) {
-      return { allowed: true }
-    } else {
-      return { 
-        allowed: false, 
-        reason: `User role '${userRole}' not allowed to perform action '${actionType}'` 
-      }
-    }
-  } catch (error) {
-    console.error('Permission check error:', error)
-    return { allowed: false, reason: 'Permission check failed' }
-  }
-}
-
-// Get user role from config (reuse from auth.ts)
-async function getUserRole(supabase: any, userId: string) {
-  try {
-    const { data: superAdmins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'super_admin_users')
-      .single()
-
-    const { data: admins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'admin_users')
-      .single()
-
-    const { data: moderators } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'moderator_users')
-      .single()
-
-    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
-    const adminList = admins ? JSON.parse(admins.value) : []
-    const moderatorList = moderators ? JSON.parse(moderators.value) : []
-
-    if (superAdminList.includes(userId)) return 'super_admin'
-    if (adminList.includes(userId)) return 'admin'
-    if (moderatorList.includes(userId)) return 'moderator'
-    return 'user'
-  } catch (error) {
-    console.error('Get user role error:', error)
-    return 'user'
-  }
 }
