@@ -2260,6 +2260,9 @@ serve(async (req) => {
       case 'sync_commands':
         return await handleSyncCommands(supabase)
       
+      case 'sync_global':
+        return await handleGlobalSyncCommands(supabase)
+      
       case 'interact':
         return await handleDiscordInteraction(supabase, {
           command_data
