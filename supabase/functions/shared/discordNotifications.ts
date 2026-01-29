@@ -93,7 +93,7 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
           comment_data: data.comment ? JSON.stringify(data.comment) : null,
           user_data: data.user ? JSON.stringify(data.user) : null,
           media_data: data.media ? JSON.stringify(data.media) : null,
-          webhook_url: webhookUrl,
+          webhook_url: JSON.stringify(webhookUrls),
           delivery_status: 'pending'
         })
         .select('id')
