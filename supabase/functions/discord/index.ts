@@ -152,18 +152,333 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
 }
 
 async function handlePromoteCommand(supabase: any, options: any, registration: any) {
-  // Implementation will be below
-  return await handlePromoteCommand_impl(supabase, options, registration)
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can promote users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const newRole = options.find(opt => opt.name === 'role')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Promotion'
+
+  if (!['moderator', 'admin', 'super_admin'].includes(newRole)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Invalid role. Must be: moderator, admin, super_admin, or owner',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Get current role lists
+    const { data: superAdmins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'super_admin_users')
+      .single()
+
+    const { data: admins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'admin_users')
+      .single()
+
+    const { data: moderators } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'moderator_users')
+      .single()
+
+    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
+    const adminList = admins ? JSON.parse(admins.value) : []
+    const moderatorList = moderators ? JSON.parse(moderators.value) : []
+
+    // Remove from all roles first
+    const cleanSuperAdmins = superAdminList.filter((id: string) => id !== targetUserId)
+    const cleanAdmins = adminList.filter((id: string) => id !== targetUserId)
+    const cleanModerators = moderatorList.filter((id: string) => id !== targetUserId)
+
+    // Add to new role
+    let newSuperAdmins = cleanSuperAdmins
+    let newAdmins = cleanAdmins
+    let newModerators = cleanModerators
+
+    switch (newRole) {
+      case 'super_admin':
+        newSuperAdmins = [...cleanSuperAdmins, targetUserId]
+        break
+      case 'admin':
+        newAdmins = [...cleanAdmins, targetUserId]
+        break
+      case 'moderator':
+        newModerators = [...cleanModerators, targetUserId]
+        break
+    }
+
+    // Update all role configurations
+    await Promise.all([
+      supabase.from('config').update({ value: JSON.stringify(newSuperAdmins) }).eq('key', 'super_admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newAdmins) }).eq('key', 'admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newModerators) }).eq('key', 'moderator_users')
+    ])
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { action: `promoted to ${newRole}` }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully promoted **${targetUserId}** to **${newRole}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Promote command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to promote user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 }
 
 async function handleDemoteCommand(supabase: any, options: any, registration: any) {
-  // Implementation will be below
-  return await handleDemoteCommand_impl(supabase, options, registration)
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can demote users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const newRole = options.find(opt => opt.name === 'role')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Demotion'
+
+  if (!['user', 'moderator', 'admin'].includes(newRole)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Invalid role. Must be: user, moderator, or admin',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Get current role lists
+    const { data: superAdmins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'super_admin_users')
+      .single()
+
+    const { data: admins } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'admin_users')
+      .single()
+
+    const { data: moderators } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'moderator_users')
+      .single()
+
+    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
+    const adminList = admins ? JSON.parse(admins.value) : []
+    const moderatorList = moderators ? JSON.parse(moderators.value) : []
+
+    // Remove from all roles first
+    const cleanSuperAdmins = superAdminList.filter((id: string) => id !== targetUserId)
+    const cleanAdmins = adminList.filter((id: string) => id !== targetUserId)
+    const cleanModerators = moderatorList.filter((id: string) => id !== targetUserId)
+
+    // Add to new role
+    let newSuperAdmins = cleanSuperAdmins
+    let newAdmins = cleanAdmins
+    let newModerators = cleanModerators
+
+    switch (newRole) {
+      case 'admin':
+        newAdmins = [...cleanAdmins, targetUserId]
+        break
+      case 'moderator':
+        newModerators = [...cleanModerators, targetUserId]
+        break
+      // 'user' means remove from all roles (already done above)
+    }
+
+    // Update all role configurations
+    await Promise.all([
+      supabase.from('config').update({ value: JSON.stringify(newSuperAdmins) }).eq('key', 'super_admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newAdmins) }).eq('key', 'admin_users'),
+      supabase.from('config').update({ value: JSON.stringify(newModerators) }).eq('key', 'moderator_users')
+    ])
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { action: `demoted to ${newRole}` }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully demoted **${targetUserId}** to **${newRole}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Demote command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to demote user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
 }
 
 async function handleUnbanCommand(supabase: any, options: any, registration: any) {
-  // Implementation will be below
-  return await handleUnbanCommand_impl(supabase, options, registration)
+  if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Admins and Super Admins can unban users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value || 'Ban lifted'
+
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in the system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Update all comments for this user to remove ban
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_banned: false,
+        user_muted_until: null,
+        user_shadow_banned: false,
+        user_warnings: 0,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: 'unban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: 'moderation_action',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason,
+      metadata: { action: 'unbanned' }
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully unbanned **${targetUserId}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Unban command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to unban user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 }
 
 async function handleMuteCommand(supabase: any, options: any, registration: any) {
@@ -2279,334 +2594,7 @@ async function getUserRoleFromPlatform(supabase: any, userId: string) {
   }
 }
 
-// Unban command handler
-async function handleUnbanCommand_impl(supabase: any, options: any, registration: any) {
-  if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: '❌ Only Admins and Super Admins can unban users',
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
 
-  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
-  const reason = options.find(opt => opt.name === 'reason')?.value || 'Ban lifted'
-
-  try {
-    // Direct database operation using service role key
-    const { data: targetUserComments } = await supabase
-      .from('comments')
-      .select('user_id, client_type')
-      .eq('user_id', targetUserId)
-      .limit(1)
-
-    if (!targetUserComments || targetUserComments.length === 0) {
-      return new Response(
-        JSON.stringify({
-          type: 4,
-          data: {
-            content: `❌ User **${targetUserId}** not found in system`,
-            flags: 64
-          }
-        }),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Unban the user
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_banned: false,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: registration.platform_user_id,
-        moderation_reason: reason,
-        moderation_action: 'unban'
-      })
-      .eq('user_id', targetUserId)
-
-    if (error) throw error
-
-    // Send Discord notification for ALL actions
-    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
-    await sendDiscordNotification(supabase, {
-      type: 'user_unbanned',
-      user: { id: targetUserId, username: targetUserId },
-      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
-      reason: reason
-    })
-
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `✅ Successfully unbanned user **${targetUserId}**\nReason: ${reason}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-
-  } catch (error) {
-    console.error('Unban command error:', error)
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `❌ Failed to unban user: ${error.message}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-}
-
-// Promote command handler
-async function handlePromoteCommand_impl(supabase: any, options: any, registration: any) {
-  if (!['super_admin', 'owner'].includes(registration.user_role)) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: '❌ Only Super Admins can promote users',
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
-  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
-  const newRole = options.find(opt => opt.name === 'role')?.value
-  const reason = options.find(opt => opt.name === 'reason')?.value || 'Promotion'
-
-  if (!['moderator', 'admin', 'super_admin'].includes(newRole)) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: '❌ Invalid role. Must be: moderator, admin, super_admin, or owner',
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
-  try {
-    // Get current role lists
-    const { data: superAdmins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'super_admin_users')
-      .single()
-
-    const { data: admins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'admin_users')
-      .single()
-
-    const { data: moderators } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'moderator_users')
-      .single()
-
-    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
-    const adminList = admins ? JSON.parse(admins.value) : []
-    const moderatorList = moderators ? JSON.parse(moderators.value) : []
-
-    // Remove from all roles first
-    const cleanSuperAdmins = superAdminList.filter((id: string) => id !== targetUserId)
-    const cleanAdmins = adminList.filter((id: string) => id !== targetUserId)
-    const cleanModerators = moderatorList.filter((id: string) => id !== targetUserId)
-
-    // Add to new role
-    let newSuperAdmins = cleanSuperAdmins
-    let newAdmins = cleanAdmins
-    let newModerators = cleanModerators
-
-    switch (newRole) {
-      case 'super_admin':
-        newSuperAdmins = [...cleanSuperAdmins, targetUserId]
-        break
-      case 'admin':
-        newAdmins = [...cleanAdmins, targetUserId]
-        break
-      case 'moderator':
-        newModerators = [...cleanModerators, targetUserId]
-        break
-    }
-
-    // Update all role configurations
-    await Promise.all([
-      supabase.from('config').update({ value: JSON.stringify(newSuperAdmins) }).eq('key', 'super_admin_users'),
-      supabase.from('config').update({ value: JSON.stringify(newAdmins) }).eq('key', 'admin_users'),
-      supabase.from('config').update({ value: JSON.stringify(newModerators) }).eq('key', 'moderator_users')
-    ])
-
-    // Send Discord notification for ALL actions
-    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
-    await sendDiscordNotification(supabase, {
-      type: 'moderation_action',
-      user: { id: targetUserId, username: targetUserId },
-      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
-      reason: reason,
-      metadata: { action: `promoted to ${newRole}` }
-    })
-
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `✅ Successfully promoted **${targetUserId}** to **${newRole}**\nReason: ${reason}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-
-  } catch (error) {
-    console.error('Promote command error:', error)
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `❌ Failed to promote user: ${error.message}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-}
-
-// Demote command handler
-async function handleDemoteCommand_impl(supabase: any, options: any, registration: any) {
-  if (!['super_admin', 'owner'].includes(registration.user_role)) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: '❌ Only Super Admins can demote users',
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
-
-  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
-  const newRole = options.find(opt => opt.name === 'role')?.value
-  const reason = options.find(opt => opt.name === 'reason')?.value || 'Demotion'
-
-  if (!['user', 'moderator', 'admin'].includes(newRole)) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: '❌ Invalid role. Must be: user, moderator, or admin',
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
-
-  try {
-    // Get current role lists
-    const { data: superAdmins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'super_admin_users')
-      .single()
-
-    const { data: admins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'admin_users')
-      .single()
-
-    const { data: moderators } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'moderator_users')
-      .single()
-
-    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
-    const adminList = admins ? JSON.parse(admins.value) : []
-    const moderatorList = moderators ? JSON.parse(moderators.value) : []
-
-    // Remove from all roles first
-    const cleanSuperAdmins = superAdminList.filter((id: string) => id !== targetUserId)
-    const cleanAdmins = adminList.filter((id: string) => id !== targetUserId)
-    const cleanModerators = moderatorList.filter((id: string) => id !== targetUserId)
-
-    // Add to new role
-    let newSuperAdmins = cleanSuperAdmins
-    let newAdmins = cleanAdmins
-    let newModerators = cleanModerators
-
-    switch (newRole) {
-      case 'admin':
-        newAdmins = [...cleanAdmins, targetUserId]
-        break
-      case 'moderator':
-        newModerators = [...cleanModerators, targetUserId]
-        break
-      // user role - don't add to any list
-    }
-
-    // Update all role configurations
-    await Promise.all([
-      supabase.from('config').update({ value: JSON.stringify(newSuperAdmins) }).eq('key', 'super_admin_users'),
-      supabase.from('config').update({ value: JSON.stringify(newAdmins) }).eq('key', 'admin_users'),
-      supabase.from('config').update({ value: JSON.stringify(newModerators) }).eq('key', 'moderator_users')
-    ])
-
-    // Send Discord notification
-    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
-    await sendDiscordNotification(supabase, {
-      type: 'moderation_action',
-      user: { id: targetUserId, username: targetUserId },
-      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
-      reason: reason,
-      metadata: { action: `demoted to ${newRole}` }
-    })
-
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `✅ Successfully demoted **${targetUserId}** to **${newRole}**\nReason: ${reason}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    )
-
-  } catch (error) {
-    console.error('Demote command error:', error)
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `❌ Failed to demote user: ${error.message}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
-}
 
 // Mute command handler
 async function handleMuteCommand_impl(supabase: any, options: any, registration: any) {
