@@ -2,6 +2,25 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { getUserRole } from '../shared/auth.ts'
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
+}
+
+// Discord bot configuration
+const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
+const DISCORD_GUILD_ID = Deno.env.get('DISCORD_GUILD_ID')
+const DISCORD_WEBHOOK_URL = Deno.env.get('DISCORD_WEBHOOK_URL')
+const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')
+
+// Discord API endpoints
+const DISCORD_API_BASE = 'https://discord.com/api/v10'
+
+// Log on startup
+console.log('DISCORD_PUBLIC_KEY exists:', !!DISCORD_PUBLIC_KEY)
+console.log('DISCORD_PUBLIC_KEY length:', DISCORD_PUBLIC_KEY?.length)
+
 // All command handlers are defined in this file v2
 
 // Pre-define critical functions to avoid scoping issues
@@ -795,24 +814,8 @@ async function handleWebhooksCommand(supabase: any, options: any, registration: 
   }
 }
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
-}
-
-// Discord bot configuration
-const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
-const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
-const DISCORD_GUILD_ID = Deno.env.get('DISCORD_GUILD_ID')
-const DISCORD_WEBHOOK_URL = Deno.env.get('DISCORD_WEBHOOK_URL')
-const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')
-
 // Discord API endpoints
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
-
-// Log on startup
-console.log('DISCORD_PUBLIC_KEY exists:', !!DISCORD_PUBLIC_KEY)
-console.log('DISCORD_PUBLIC_KEY length:', DISCORD_PUBLIC_KEY?.length)
 
 // Verify Discord request signature using Web Crypto API
 async function verifyDiscordSignature(
@@ -859,15 +862,39 @@ function hexToUint8Array(hex: string): Uint8Array {
 }
 
 serve(async (req) => {
+  console.log('=== Discord function called ===')
+  console.log('Method:', req.method)
+  console.log('URL:', req.url)
+  
   if (req.method === 'OPTIONS') {
+    console.log('OPTIONS request - returning ok')
     return new Response('ok', { headers: corsHeaders })
   }
 
+  // Simple health check endpoint
+  if (req.url.includes('/health')) {
+    console.log('Health check requested')
+    return new Response(
+      JSON.stringify({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        environment: {
+          SUPABASE_URL: !!Deno.env.get('SUPABASE_URL'),
+          DISCORD_PUBLIC_KEY: !!Deno.env.get('DISCORD_PUBLIC_KEY'),
+          DISCORD_BOT_TOKEN: !!Deno.env.get('DISCORD_BOT_TOKEN')
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
   try {
+    console.log('Creating Supabase client...')
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
+    console.log('Supabase client created successfully')
 
     // Get signature headers for Discord verification
     const signature = req.headers.get('x-signature-ed25519')
@@ -1003,9 +1030,19 @@ serve(async (req) => {
     }
 
   } catch (error) {
-    console.error('Discord bot API error:', error)
+    console.error('=== DISCORD FUNCTION ERROR ===')
+    console.error('Error type:', typeof error)
+    console.error('Error name:', error?.name)
+    console.error('Error message:', error?.message)
+    console.error('Error stack:', error?.stack)
+    console.error('Full error:', error)
+    
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({ 
+        error: 'Internal server error',
+        details: error?.message,
+        type: error?.name 
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
