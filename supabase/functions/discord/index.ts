@@ -1408,13 +1408,6 @@ async function handleGlobalSyncCommands(supabase: any) {
       description: 'Register your Discord account with Commentum',
       options: [
         {
-          name: 'guild_name',
-          description: 'Server name to register for',
-          type: 3,
-          required: false,
-          choices: [] // Will be populated dynamically
-        },
-        {
           name: 'platform',
           description: 'Your platform (anilist, myanimelist, simkl, other)',
           type: 3,
@@ -1431,6 +1424,13 @@ async function handleGlobalSyncCommands(supabase: any) {
           description: 'Your platform user ID',
           type: 3,
           required: true
+        },
+        {
+          name: 'guild_name',
+          description: 'Server name to register for',
+          type: 3,
+          required: false,
+          choices: [] // Will be populated dynamically
         }
       ]
     },
@@ -1566,16 +1566,16 @@ async function handleGlobalSyncCommands(supabase: any) {
           required: true
         },
         {
-          name: 'duration',
-          description: 'Duration in hours (default: 24)',
-          type: 4,
-          required: false
-        },
-        {
           name: 'reason',
           description: 'Reason for muting',
           type: 3,
           required: true
+        },
+        {
+          name: 'duration',
+          description: 'Duration in hours (default: 24)',
+          type: 4,
+          required: false
         }
       ]
     },
@@ -1841,7 +1841,7 @@ async function handleGlobalSyncCommands(supabase: any) {
           name: 'subcommand',
           description: 'Add subcommand',
           type: 3,
-          required: false,
+          required: true,
           choices: [
             { name: 'Add Server', value: 'app' },
             { name: 'List Servers', value: 'list' },
