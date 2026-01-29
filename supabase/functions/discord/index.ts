@@ -1908,6 +1908,13 @@ async function handleGlobalSyncCommands(supabase: any) {
 
   try {
     // Sync to application globally (no guild-specific endpoint)
+    console.log('Sending bulk overwrite request to Discord:')
+    console.log('- URL:', `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/commands`)
+    console.log('- Method: PUT')
+    console.log('- Commands count:', commands.length)
+    console.log('- Bot token length:', DISCORD_BOT_TOKEN.length)
+    console.log('- Client ID:', DISCORD_CLIENT_ID)
+
     const response = await fetch(
       `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/commands`,
       {
@@ -1920,8 +1927,12 @@ async function handleGlobalSyncCommands(supabase: any) {
       }
     )
 
+    console.log('Discord API response status:', response.status)
+    console.log('Discord API response headers:', Object.fromEntries(response.headers.entries()))
+
     if (response.ok) {
       const syncedCommands = await response.json()
+      console.log('Successfully synced commands:', syncedCommands.length)
       
       return new Response(
         JSON.stringify({
@@ -1939,7 +1950,16 @@ async function handleGlobalSyncCommands(supabase: any) {
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     } else {
-      const errorData = await response.json().catch(() => ({}))
+      const errorText = await response.text()
+      console.error('Global sync error response:', errorText)
+      
+      let errorData
+      try {
+        errorData = JSON.parse(errorText)
+      } catch {
+        errorData = { message: errorText, details: 'Raw error response' }
+      }
+      
       console.error('Global sync error:', response.status, errorData)
       
       return new Response(
@@ -1948,11 +1968,13 @@ async function handleGlobalSyncCommands(supabase: any) {
           data: {
             content: `❌ **Global sync failed**\n\n` +
               `Status: ${response.status}\n` +
-              `Error: ${errorData.message || response.statusText}\n\n` +
+              `Error: ${errorData.message || response.statusText}\n` +
+              `${errorData.details ? `Details: ${errorData.details}` : ''}\n\n` +
               `Please check:\n` +
               `• Bot token is valid\n` +
               `• Client ID is correct\n` +
-              `• Bot has applications.commands scope`,
+              `• Bot has applications.commands scope\n` +
+              `• Bot is properly invited to servers`,
             flags: 64
           }
         }),
