@@ -2,6 +2,11 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { getUserRole } from '../shared/auth.ts'
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'content-type',
+}
+
 // All command handlers are defined in this file v2
 
 // Pre-define critical functions to avoid scoping issues
@@ -544,6 +549,11 @@ async function handleConfigCommand(supabase: any, options: any, registration: an
 async function handleSyncCommand(supabase: any, registration: any) {
   // Implementation will be below
   return await handleSyncCommand_impl(supabase, registration)
+}
+
+async function handleHelpCommand(registration: any) {
+  // Implementation will be below
+  return await handleHelpCommand_impl(registration)
 }
 
 async function handleWebhooksCommand(supabase: any, options: any, registration: any) {
@@ -2306,7 +2316,7 @@ async function handleSyncCommand_impl(supabase: any, registration: any) {
   }
 }
 
-async function handleHelpCommand(registration: any) {
+async function handleHelpCommand_impl(registration: any) {
   const userRole = registration?.user_role || 'user'
   
   let helpText = `🤖 **Commentum Bot Help**\n\n`
