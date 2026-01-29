@@ -2775,7 +2775,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Get Discord public key from environment or database
+    // Get Discord public key ONCE at the start
     let publicKey = Deno.env.get('DISCORD_PUBLIC_KEY')
     
     if (!publicKey) {
@@ -2787,36 +2787,40 @@ serve(async (req) => {
       publicKey = publicKeyConfig?.value
     }
 
+    if (!publicKey) {
+      return new Response(
+        JSON.stringify({ error: 'Discord public key not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const signature = req.headers.get('x-signature-ed25519')
     const timestamp = req.headers.get('x-signature-timestamp')
+    
+    if (!signature || !timestamp) {
+      return new Response(
+        JSON.stringify({ error: 'Missing signature headers' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const rawBody = await req.text()
 
-    // Handle PING request
+    // Verify signature FIRST, before anything else
+    const isValid = await verifyDiscordSignature(signature, timestamp, rawBody, publicKey)
+    if (!isValid) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid request signature' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Handle PING - respond immediately
     if (rawBody.includes('"type":1')) {
-      if (publicKey && signature && timestamp) {
-        const isValid = await verifyDiscordSignature(signature, timestamp, rawBody, publicKey)
-        if (!isValid) {
-          return new Response(
-            JSON.stringify({ error: 'Invalid signature' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-      }
       return new Response(
         JSON.stringify({ type: 1 }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-    }
-
-    // Verify signature for interactions
-    if (publicKey && signature && timestamp) {
-      const isValid = await verifyDiscordSignature(signature, timestamp, rawBody, publicKey)
-      if (!isValid) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid signature' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
     }
 
     const body = JSON.parse(rawBody)
