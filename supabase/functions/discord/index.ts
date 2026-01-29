@@ -1370,6 +1370,612 @@ async function handleAddCommand(supabase: any, options: any, registration: any, 
   }
 }
 
+async function handleGlobalSyncCommands(supabase: any) {
+  // Fetch Discord config from database
+  const { data: botTokenConfig } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', 'discord_bot_token')
+    .single()
+
+  const { data: clientIdConfig } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', 'discord_client_id')
+    .single()
+
+  // DON'T parse these - they're plain strings, not JSON
+  const DISCORD_BOT_TOKEN = botTokenConfig?.value || ''
+  const DISCORD_CLIENT_ID = clientIdConfig?.value || ''
+
+  if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID) {
+    return new Response(
+      JSON.stringify({ 
+        error: 'Discord configuration missing in database',
+        details: {
+          bot_token: !!DISCORD_BOT_TOKEN,
+          client_id: !!DISCORD_CLIENT_ID
+        }
+      }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  console.log('Syncing commands globally to application')
+
+  // Define slash commands
+  const commands = [
+    {
+      name: 'register',
+      description: 'Register your Discord account with Commentum',
+      options: [
+        {
+          name: 'guild_name',
+          description: 'Server name to register for',
+          type: 3,
+          required: false,
+          choices: [] // Will be populated dynamically
+        },
+        {
+          name: 'platform',
+          description: 'Your platform (anilist, myanimelist, simkl, other)',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'AniList', value: 'anilist' },
+            { name: 'MyAnimeList', value: 'myanimelist' },
+            { name: 'SIMKL', value: 'simkl' },
+            { name: 'Other', value: 'other' }
+          ]
+        },
+        {
+          name: 'user_id',
+          description: 'Your platform user ID',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'help',
+      description: 'Show help and available commands'
+    },
+    {
+      name: 'stats',
+      description: 'View system statistics'
+    },
+    {
+      name: 'user',
+      description: 'Get user information',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to lookup',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'comment',
+      description: 'Get comment information',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID to lookup',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'report',
+      description: 'Report a comment (requires registration)',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID to report',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for reporting',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'Spam', value: 'spam' },
+            { name: 'Inappropriate Content', value: 'inappropriate' },
+            { name: 'Harassment', value: 'harassment' },
+            { name: 'Misinformation', value: 'misinformation' },
+            { name: 'Other', value: 'other' }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'queue',
+      description: 'View moderation queue (Mod+ only)'
+    },
+    {
+      name: 'ban',
+      description: 'Ban a user (Admin/Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to ban',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for banning',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'shadow',
+          description: 'Shadow ban (invisible to user)',
+          type: 5,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'unban',
+      description: 'Unban a user (Admin/Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to unban',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for unbanning',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'warn',
+      description: 'Warn a user (Mod+ only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to warn',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for warning',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'mute',
+      description: 'Mute a user (Mod+ only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to mute',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'duration',
+          description: 'Duration in hours (default: 24)',
+          type: 4,
+          required: false
+        },
+        {
+          name: 'reason',
+          description: 'Reason for muting',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'unmute',
+      description: 'Unmute a user (Mod+ only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to unmute',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for unmuting',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'shadowban',
+      description: 'Shadow ban a user (Admin/Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to shadow ban',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for shadow banning',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'unshadowban',
+      description: 'Remove shadow ban (Admin/Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to unshadow ban',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for removing shadow ban',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'pin',
+      description: 'Pin a comment (Mod+ only)',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID to pin',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for pinning',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'unpin',
+      description: 'Unpin a comment (Mod+ only)',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID to unpin',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for unpinning',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'lock',
+      description: 'Lock a comment thread (Mod+ only)',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID to lock',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for locking',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'unlock',
+      description: 'Unlock a comment thread (Mod+ only)',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID to unlock',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for unlocking',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'delete',
+      description: 'Delete a comment (Admin/Super Admin only)',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID to delete',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'resolve',
+      description: 'Resolve a report (Mod+ only)',
+      options: [
+        {
+          name: 'comment_id',
+          description: 'Comment ID with report',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reporter_id',
+          description: 'Reporter user ID',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'resolution',
+          description: 'Resolution action',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'Valid Report', value: 'valid' },
+            { name: 'Invalid Report', value: 'invalid' },
+            { name: 'Already Handled', value: 'handled' }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'promote',
+      description: 'Promote a user to higher role (Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to promote',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'role',
+          description: 'New role to assign',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'Moderator', value: 'moderator' },
+            { name: 'Admin', value: 'admin' },
+            { name: 'Super Admin', value: 'super_admin' }
+          ]
+        },
+        {
+          name: 'reason',
+          description: 'Reason for promotion',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'demote',
+      description: 'Demote a user to lower role (Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to demote',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'role',
+          description: 'New role to assign',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'User', value: 'user' },
+            { name: 'Moderator', value: 'moderator' },
+            { name: 'Admin', value: 'admin' }
+          ]
+        },
+        {
+          name: 'reason',
+          description: 'Reason for demotion',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'config',
+      description: 'Manage system configuration (Super Admin only)',
+      options: [
+        {
+          name: 'action',
+          description: 'Configuration action',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'Get Value', value: 'get' },
+            { name: 'Set Value', value: 'set' },
+            { name: 'List All', value: 'list' }
+          ]
+        },
+        {
+          name: 'key',
+          description: 'Configuration key',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'value',
+          description: 'Configuration value',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'add',
+      description: 'Manage server configurations (Super Admin only)',
+      options: [
+        {
+          name: 'subcommand',
+          description: 'Add subcommand',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'Add Server', value: 'app' },
+            { name: 'List Servers', value: 'list' },
+            { name: 'Remove Server', value: 'remove' }
+          ]
+        },
+        {
+          name: 'guild_name',
+          description: 'Server name',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'guild_id',
+          description: 'Discord server ID',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'webhook_url',
+          description: 'Discord webhook URL',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'role_id',
+          description: 'Discord role ID for moderators',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'server_name',
+          description: 'Server name to remove',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'webhooks',
+      description: 'Manage webhook configurations (Super Admin only)',
+      options: [
+        {
+          name: 'action',
+          description: 'Webhook action',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'List Webhooks', value: 'list' },
+            { name: 'Add Webhook', value: 'add' },
+            { name: 'Remove Webhook', value: 'remove' },
+            { name: 'Test Webhook', value: 'test' }
+          ]
+        },
+        {
+          name: 'webhook_url',
+          description: 'Discord webhook URL',
+          type: 3,
+          required: false
+        }
+      ]
+    }
+  ]
+
+  try {
+    // Sync to application globally (no guild-specific endpoint)
+    const response = await fetch(
+      `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/commands`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(commands)
+      }
+    )
+
+    if (response.ok) {
+      const syncedCommands = await response.json()
+      
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `✅ **Global bot sync successful!**\n\n` +
+              `🤖 **Commands synced:** ${syncedCommands.length}\n` +
+              `🌐 **Scope:** Application-wide (available in all servers)\n` +
+              `📋 **Server-specific data:** Will use server_configs table\n\n` +
+              `**Bot is now available globally!**\n` +
+              `Servers can invite the bot without needing admin permissions.`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    } else {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('Global sync error:', response.status, errorData)
+      
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ **Global sync failed**\n\n` +
+              `Status: ${response.status}\n` +
+              `Error: ${errorData.message || response.statusText}\n\n` +
+              `Please check:\n` +
+              `• Bot token is valid\n` +
+              `• Client ID is correct\n` +
+              `• Bot has applications.commands scope`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+  } catch (error) {
+    console.error('Global sync error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ **Global sync failed**\n\nError: ${error.message}\n\nPlease check bot configuration.`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
@@ -2503,6 +3109,9 @@ async function handleDiscordInteraction(supabase: any, params: any) {
       
       case 'sync-multi':
         return await handleSyncCommands(supabase) // Will use configured guild IDs
+      
+      case 'sync-global':
+        return await handleGlobalSyncCommands(supabase) // Sync to application globally
       
       case 'webhooks':
         return await handleWebhooksCommand(supabase, options, registration)
