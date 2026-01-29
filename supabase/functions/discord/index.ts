@@ -11,6 +11,33 @@ const corsHeaders = {
 // Discord API configuration
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
 
+// Helper function to send follow-up messages
+async function sendFollowUp(applicationId: string, interactionToken: string, content: string, flags: number = 64) {
+  try {
+    const response = await fetch(
+      `${DISCORD_API_BASE}/webhooks/${applicationId}/${interactionToken}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          content,
+          flags
+        })
+      }
+    )
+    
+    if (!response.ok) {
+      console.error('Follow-up failed:', await response.text())
+    }
+    return response.ok
+  } catch (error) {
+    console.error('Follow-up error:', error)
+    return false
+  }
+}
+
 // Utility functions
 function hexToUint8Array(hex: string): Uint8Array {
   const matches = hex.match(/.{1,2}/g)
@@ -2564,6 +2591,8 @@ async function handleDiscordInteraction(supabase: any, body: any) {
   const options = body.data?.options || []
   const member = body.member
   const discordUserId = member?.user?.id
+  const applicationId = body.application_id
+  const interactionToken = body.token
 
   if (!discordUserId) {
     return {
@@ -2575,120 +2604,144 @@ async function handleDiscordInteraction(supabase: any, body: any) {
     }
   }
 
-  // Register command doesn't require existing registration
-  if (commandName === 'register') {
-    return await handleRegisterCommand(supabase, options, member)
-  }
-
-  // Check user registration for all other commands
-  const { data: registration } = await supabase
-    .from('discord_users')
-    .select('user_role, platform_user_id, platform_type, discord_username')
-    .eq('discord_user_id', discordUserId)
-    .eq('is_active', true)
-    .single()
-
-  if (!registration) {
-    return {
-      type: 4,
-      data: {
-        content: '❌ You need to register first using `/register`',
-        flags: 64
-      }
+  // Commands that can respond immediately (fast, no DB queries)
+  const fastCommands = ['register', 'help']
+  
+  // Handle fast commands synchronously
+  if (fastCommands.includes(commandName)) {
+    if (commandName === 'register') {
+      return await handleRegisterCommand(supabase, options, member)
     }
+    // We'll handle help after checking registration
   }
 
-  // Update last command timestamp
-  await supabase
-    .from('discord_users')
-    .update({ last_command_at: new Date().toISOString() })
-    .eq('discord_user_id', discordUserId)
+  // For all other commands, use deferred response pattern
+  // Return acknowledgment immediately to avoid 3-second timeout
+  setTimeout(async () => {
+    try {
+      // Check user registration
+      const { data: registration } = await supabase
+        .from('discord_users')
+        .select('user_role, platform_user_id, platform_type, discord_username')
+        .eq('discord_user_id', discordUserId)
+        .eq('is_active', true)
+        .single()
 
-  // Handle commands
-  switch (commandName) {
-    case 'stats':
-      return await handleStatsCommand(supabase)
-    
-    case 'delete':
-      return await handleDeleteCommand(supabase, options, registration)
-    
-    case 'ban':
-      return await handleBanCommand(supabase, options, registration)
-    
-    case 'unban':
-      return await handleUnbanCommand(supabase, options, registration)
-    
-    case 'promote':
-      return await handlePromoteCommand(supabase, options, registration)
-    
-    case 'demote':
-      return await handleDemoteCommand(supabase, options, registration)
-    
-    case 'warn':
-      return await handleWarnCommand(supabase, options, registration)
-    
-    case 'mute':
-      return await handleMuteCommand(supabase, options, registration)
-    
-    case 'unmute':
-      return await handleUnmuteCommand(supabase, options, registration)
-    
-    case 'shadowban':
-      return await handleShadowbanCommand(supabase, options, registration)
-    
-    case 'unshadowban':
-      return await handleUnshadowbanCommand(supabase, options, registration)
-    
-    case 'pin':
-      return await handlePinCommand(supabase, options, registration)
-    
-    case 'unpin':
-      return await handleUnpinCommand(supabase, options, registration)
-    
-    case 'lock':
-      return await handleLockCommand(supabase, options, registration)
-    
-    case 'unlock':
-      return await handleUnlockCommand(supabase, options, registration)
-    
-    case 'report':
-      return await handleReportCommand(supabase, options, registration)
-    
-    case 'resolve':
-      return await handleResolveCommand(supabase, options, registration)
-    
-    case 'queue':
-      return await handleQueueCommand(supabase)
-    
-    case 'user':
-      return await handleUserCommand(supabase, options)
-    
-    case 'comment':
-      return await handleCommentCommand(supabase, options)
-    
-    case 'config':
-      return await handleConfigCommand(supabase, options, registration)
-    
-    case 'sync':
-      return await handleSyncCommand(supabase, registration)
-    
-    case 'sync-multi':
-      return await handleSyncMultiCommand(supabase, registration)
-    
-    case 'webhooks':
-      return await handleWebhooksCommand(supabase, options, registration)
-    
-    case 'help':
-      return await handleHelpCommand(registration)
-    
-    default:
-      return {
-        type: 4,
-        data: {
-          content: '❌ Command not implemented yet',
-          flags: 64
-        }
+      if (!registration && commandName !== 'help') {
+        await sendFollowUp(applicationId, interactionToken, '❌ You need to register first using `/register`')
+        return
       }
+
+      // Update last command timestamp
+      if (registration) {
+        await supabase
+          .from('discord_users')
+          .update({ last_command_at: new Date().toISOString() })
+          .eq('discord_user_id', discordUserId)
+      }
+
+      // Execute command and get result
+      let result
+      switch (commandName) {
+        case 'help':
+          result = await handleHelpCommand(registration)
+          break
+        case 'stats':
+          result = await handleStatsCommand(supabase)
+          break
+        case 'delete':
+          result = await handleDeleteCommand(supabase, options, registration)
+          break
+        case 'ban':
+          result = await handleBanCommand(supabase, options, registration)
+          break
+        case 'unban':
+          result = await handleUnbanCommand(supabase, options, registration)
+          break
+        case 'promote':
+          result = await handlePromoteCommand(supabase, options, registration)
+          break
+        case 'demote':
+          result = await handleDemoteCommand(supabase, options, registration)
+          break
+        case 'warn':
+          result = await handleWarnCommand(supabase, options, registration)
+          break
+        case 'mute':
+          result = await handleMuteCommand(supabase, options, registration)
+          break
+        case 'unmute':
+          result = await handleUnmuteCommand(supabase, options, registration)
+          break
+        case 'shadowban':
+          result = await handleShadowbanCommand(supabase, options, registration)
+          break
+        case 'unshadowban':
+          result = await handleUnshadowbanCommand(supabase, options, registration)
+          break
+        case 'pin':
+          result = await handlePinCommand(supabase, options, registration)
+          break
+        case 'unpin':
+          result = await handleUnpinCommand(supabase, options, registration)
+          break
+        case 'lock':
+          result = await handleLockCommand(supabase, options, registration)
+          break
+        case 'unlock':
+          result = await handleUnlockCommand(supabase, options, registration)
+          break
+        case 'report':
+          result = await handleReportCommand(supabase, options, registration)
+          break
+        case 'resolve':
+          result = await handleResolveCommand(supabase, options, registration)
+          break
+        case 'queue':
+          result = await handleQueueCommand(supabase)
+          break
+        case 'user':
+          result = await handleUserCommand(supabase, options)
+          break
+        case 'comment':
+          result = await handleCommentCommand(supabase, options)
+          break
+        case 'config':
+          result = await handleConfigCommand(supabase, options, registration)
+          break
+        case 'sync':
+          result = await handleSyncCommand(supabase, registration)
+          break
+        case 'sync-multi':
+          result = await handleSyncMultiCommand(supabase, registration)
+          break
+        case 'webhooks':
+          result = await handleWebhooksCommand(supabase, options, registration)
+          break
+        default:
+          result = {
+            type: 4,
+            data: {
+              content: '❌ Command not implemented yet',
+              flags: 64
+            }
+          }
+      }
+
+      // Send the result as a follow-up message
+      await sendFollowUp(applicationId, interactionToken, result.data.content, result.data.flags)
+    } catch (error) {
+      console.error('Command execution error:', error)
+      await sendFollowUp(applicationId, interactionToken, `❌ An error occurred: ${error.message}`)
+    }
+  }, 0)
+
+  // Return deferred response immediately (prevents 3-second timeout)
+  return {
+    type: 5, // ACK with source (shows "Bot is thinking...")
+    data: {
+      flags: 64 // Ephemeral
+    }
   }
 }
 
@@ -2765,6 +2818,11 @@ async function syncCommands(supabase: any, guildIds: string[]) {
 
 // Main serve function
 serve(async (req) => {
+  // Debug logging
+  console.log('=== INCOMING REQUEST ===')
+  console.log('Method:', req.method)
+  console.log('Headers:', JSON.stringify(Object.fromEntries(req.headers.entries()), null, 2))
+  
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -2775,69 +2833,38 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Get Discord public key ONCE at the start
-    let publicKey = Deno.env.get('DISCORD_PUBLIC_KEY')
-    
-    if (!publicKey) {
-      const { data: publicKeyConfig } = await supabase
-        .from('config')
-        .select('value')
-        .eq('key', 'discord_public_key')
-        .single()
-      publicKey = publicKeyConfig?.value
-    }
-
-    if (!publicKey) {
-      return new Response(
-        JSON.stringify({ error: 'Discord public key not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
     const signature = req.headers.get('x-signature-ed25519')
     const timestamp = req.headers.get('x-signature-timestamp')
-    
-    if (!signature || !timestamp) {
-      return new Response(
-        JSON.stringify({ error: 'Missing signature headers' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
     const rawBody = await req.text()
+    
+    console.log('Signature present:', !!signature)
+    console.log('Timestamp present:', !!timestamp)
+    console.log('Body preview:', rawBody.substring(0, 150))
 
-    // Verify signature FIRST, before anything else
-    const isValid = await verifyDiscordSignature(signature, timestamp, rawBody, publicKey)
-    if (!isValid) {
+    // Parse body early to check if it's a sync_commands action
+    let body
+    try {
+      body = JSON.parse(rawBody)
+    } catch (e) {
+      console.error('Failed to parse body:', e)
       return new Response(
-        JSON.stringify({ error: 'Invalid request signature' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Invalid JSON body' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Handle PING - respond immediately
-    if (rawBody.includes('"type":1')) {
+    // Handle PING request - respond immediately without requiring signature
+    if (body.type === 1 || rawBody.includes('"type":1')) {
+      console.log('PING request detected')
       return new Response(
         JSON.stringify({ type: 1 }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    const body = JSON.parse(rawBody)
-
-    // Handle slash command interaction
-    if (body.type === 2) {
-      const result = await handleDiscordInteraction(supabase, body)
-      return new Response(
-        JSON.stringify(result),
-        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Handle other actions
-    const { action } = body
-    switch (action) {
-    case 'sync_commands':
+    // Handle sync_commands action - this is called by your code, not Discord
+    if (body.action === 'sync_commands') {
+      console.log('sync_commands action detected - bypassing signature check')
       const guildIds = body.guild_ids || []
       let targetGuildIds: string[] = []
       
@@ -2888,13 +2915,63 @@ serve(async (req) => {
         JSON.stringify({ success: true, results: syncResults }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-
-      default:
-        return new Response(
-          JSON.stringify({ error: 'Invalid action' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
     }
+
+    // For Discord interactions (type 2), require signature headers
+    if (!signature || !timestamp) {
+      console.error('Missing signature headers for non-PING request!')
+      return new Response(
+        JSON.stringify({ error: 'Missing signature headers' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Get Discord public key from environment or database
+    let publicKey = Deno.env.get('DISCORD_PUBLIC_KEY')
+    
+    if (!publicKey) {
+      const { data: publicKeyConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_public_key')
+        .single()
+      publicKey = publicKeyConfig?.value
+    }
+
+    if (!publicKey) {
+      console.error('Discord public key not configured!')
+      return new Response(
+        JSON.stringify({ error: 'Discord public key not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Verify signature for interactions
+    const isValid = await verifyDiscordSignature(signature, timestamp, rawBody, publicKey)
+    if (!isValid) {
+      console.error('Invalid signature!')
+      return new Response(
+        JSON.stringify({ error: 'Invalid signature' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Signature verified successfully')
+
+    // Handle slash command interaction
+    if (body.type === 2) {
+      const result = await handleDiscordInteraction(supabase, body)
+      return new Response(
+        JSON.stringify(result),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Handle other actions (if any)
+    return new Response(
+      JSON.stringify({ error: 'Invalid action or interaction type' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
 
   } catch (error) {
     console.error('Discord bot error:', error)
