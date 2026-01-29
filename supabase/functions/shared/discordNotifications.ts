@@ -90,38 +90,21 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       return { success: false, reason: 'Discord notifications disabled' }
     }
 
-    // Get webhook configurations
-    const { data: webhookConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_webhook_urls')
-      .single()
-
-    const { data: singleWebhookConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_webhook_url')
-      .single()
+    // Get webhook URLs from server_configs table
+    const { data: serverConfigs } = await supabase
+      .from('server_configs')
+      .select('webhook_url')
+      .eq('is_active', true)
+      .not('webhook_url', 'is', null)
 
     let webhookUrls: string[] = []
     
-    // Try to get multiple webhooks first
-    if (webhookConfig?.value) {
-      try {
-        webhookUrls = JSON.parse(webhookConfig.value)
-      } catch {
-        // Fallback to comma-separated
-        webhookUrls = webhookConfig.value.split(',').map(url => url.trim()).filter(url => url)
-      }
-    }
-    
-    // Fallback to single webhook if no multiple configured
-    if (webhookUrls.length === 0 && singleWebhookConfig?.value) {
-      webhookUrls = [singleWebhookConfig.value]
+    if (serverConfigs && serverConfigs.length > 0) {
+      webhookUrls = serverConfigs.map(server => server.webhook_url).filter(url => url)
     }
 
     if (webhookUrls.length === 0) {
-      return { success: false, reason: 'Discord webhook URLs not configured' }
+      return { success: false, reason: 'Discord webhook URLs not configured in server_configs table' }
     }
 
     // Check if this notification type is enabled

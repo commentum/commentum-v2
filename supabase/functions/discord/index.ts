@@ -132,8 +132,92 @@ async function handleDeleteCommand(supabase: any, options: any, registration: an
 
 // Add stubs for other critical functions to ensure they're defined
 async function handleBanCommand(supabase: any, options: any, registration: any) {
-  // Implementation will be below
-  return await handleBanCommand_impl(supabase, options, registration)
+  if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Admins and Super Admins can ban users',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUserId = options.find(opt => opt.name === 'user_id')?.value
+  const reason = options.find(opt => opt.name === 'reason')?.value
+  const shadow = options.find(opt => opt.name === 'shadow')?.value || false
+
+  try {
+    // Direct database operation using service role key
+    const { data: targetUserComments } = await supabase
+      .from('comments')
+      .select('user_id, client_type')
+      .eq('user_id', targetUserId)
+      .limit(1)
+
+    if (!targetUserComments || targetUserComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${targetUserId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Update all comments by the target user to ban them
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_banned: true,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: registration.platform_user_id,
+        moderation_reason: reason,
+        moderation_action: shadow ? 'shadow_ban' : 'ban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    // Send Discord notification for ALL actions
+    const { sendDiscordNotification } = await import('../shared/discordNotifications.ts')
+    await sendDiscordNotification(supabase, {
+      type: shadow ? 'user_shadow_banned' : 'user_banned',
+      user: { id: targetUserId, username: targetUserId },
+      moderator: { id: registration.platform_user_id, username: registration.platform_user_id },
+      reason: reason
+    })
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `✅ Successfully ${shadow ? 'shadow ' : ''}banned user **${targetUserId}**\nReason: ${reason}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Ban command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to ban user: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 }
 
 async function handleWarnCommand(supabase: any, options: any, registration: any) {
@@ -527,13 +611,135 @@ async function handleQueueCommand(supabase: any, registration?: any) {
 }
 
 async function handleUserCommand(supabase: any, options: any) {
-  // Implementation will be below
-  return await handleUserCommand_impl(supabase, options)
+  const userId = options.find(opt => opt.name === 'user_id')?.value
+
+  try {
+    // Get user information
+    const { data: userComments } = await supabase
+      .from('comments')
+      .select('id, content, upvotes, downvotes, report_count, created_at, moderated, user_muted_until, user_shadow_banned')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+
+    if (!userComments || userComments.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ User **${userId}** not found in system`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const totalComments = userComments.length
+    const totalUpvotes = userComments.reduce((sum, comment) => sum + comment.upvotes, 0)
+    const totalDownvotes = userComments.reduce((sum, comment) => sum + comment.downvotes, 0)
+    const totalReports = userComments.reduce((sum, comment) => sum + comment.report_count, 0)
+    const moderatedComments = userComments.filter(comment => comment.moderated).length
+    const isMuted = userComments.some(comment => comment.user_muted_until && new Date(comment.user_muted_until) > new Date())
+    const isShadowBanned = userComments.some(comment => comment.user_shadow_banned)
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `👤 **User Information for ${userId}**\n\n` +
+            `💬 **Total Comments:** ${totalComments}\n` +
+            `👍 **Total Upvotes:** ${totalUpvotes}\n` +
+            `👎 **Total Downvotes:** ${totalDownvotes}\n` +
+            `🚨 **Total Reports:** ${totalReports}\n` +
+            `🛡️ **Moderated Comments:** ${moderatedComments}\n` +
+            `🔇 **Muted:** ${isMuted ? 'Yes' : 'No'}\n` +
+            `👻 **Shadow Banned:** ${isShadowBanned ? 'Yes' : 'No'}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('User command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to fetch user information: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 }
 
 async function handleCommentCommand(supabase: any, options: any) {
-  // Implementation will be below
-  return await handleCommentCommand_impl(supabase, options)
+  const commentId = options.find(opt => opt.name === 'comment_id')?.value
+
+  try {
+    // Get comment information
+    const { data: comment } = await supabase
+      .from('comments')
+      .select('id, username, content, user_id, media_id, upvotes, downvotes, report_count, created_at, moderated, pinned, locked, user_muted_until, user_shadow_banned')
+      .eq('id', commentId)
+      .single()
+
+    if (!comment) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `❌ Comment **${commentId}** not found`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const status = [
+      comment.moderated ? '🛡️ Moderated' : '',
+      comment.pinned ? '📌 Pinned' : '',
+      comment.locked ? '🔒 Locked' : '',
+      comment.user_muted_until && new Date(comment.user_muted_until) > new Date() ? '🔇 User Muted' : '',
+      comment.user_shadow_banned ? '👻 Shadow Banned' : ''
+    ].filter(Boolean).join(' ') || '✅ Normal'
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `💬 **Comment Information for ${commentId}**\n\n` +
+            `👤 **User:** ${comment.username} (${comment.user_id})\n` +
+            `📺 **Media ID:** ${comment.media_id}\n` +
+            `👍 **Upvotes:** ${comment.upvotes}\n` +
+            `👎 **Downvotes:** ${comment.downvotes}\n` +
+            `🚨 **Reports:** ${comment.report_count}\n` +
+            `📅 **Created:** ${new Date(comment.created_at).toLocaleString()}\n` +
+            `🏷️ **Status:** ${status}\n\n` +
+            `📝 **Content:**\n${comment.content.substring(0, 200)}${comment.content.length > 200 ? '...' : ''}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Comment command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to fetch comment information: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 }
 
 async function handleConfigCommand(supabase: any, options: any, registration: any) {
@@ -542,13 +748,95 @@ async function handleConfigCommand(supabase: any, options: any, registration: an
 }
 
 async function handleSyncCommand(supabase: any, registration: any) {
-  // Implementation will be below
-  return await handleSyncCommand_impl(supabase, registration)
+  // Only Super Admins can sync commands
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can sync Discord commands',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Call the existing sync commands function
+    return await handleSyncCommands(supabase)
+  } catch (error) {
+    console.error('Sync command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to sync commands: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 }
 
 async function handleHelpCommand(registration: any) {
-  // Implementation will be below
-  return await handleHelpCommand_impl(registration)
+  const userRole = registration?.user_role || 'user'
+  
+  let helpText = `🤖 **Commentum Bot Help**\n\n`
+  
+  if (userRole === 'user') {
+    helpText += `**Available Commands:**\n` +
+      `• \`/register\` - Register your Discord account\n` +
+      `• \`/report\` - Report a comment\n` +
+      `• \`/user <user_id>\` - Get user information\n` +
+      `• \`/comment <comment_id>\` - Get comment information\n` +
+      `• \`/stats\` - View system statistics\n` +
+      `• \`/help\` - Show this help message`
+  } else if (userRole === 'moderator') {
+    helpText += `**Moderator Commands:**\n` +
+      `• \`/warn <user_id> <reason>\` - Warn a user\n` +
+      `• \`/mute <user_id> [duration] <reason>\` - Mute a user\n` +
+      `• \`/unmute <user_id> [reason]\` - Unmute a user\n` +
+      `• \`/pin <comment_id> [reason]\` - Pin a comment\n` +
+      `• \`/unpin <comment_id> [reason]\` - Unpin a comment\n` +
+      `• \`/lock <comment_id> [reason]\` - Lock a thread\n` +
+      `• \`/unlock <comment_id> [reason]\` - Unlock a thread\n` +
+      `• \`/resolve <comment_id> <reporter_id> <resolution>\` - Resolve report\n` +
+      `• \`/queue\` - View moderation queue\n` +
+      `• \`/report\` - Report a comment\n` +
+      `• \`/user <user_id>\` - Get user information\n` +
+      `• \`/comment <comment_id>\` - Get comment information\n` +
+      `• \`/stats\` - View system statistics\n` +
+      `• \`/help\` - Show this help message`
+  } else if (userRole === 'admin') {
+    helpText += `**Admin Commands:**\n` +
+      `• All Moderator commands\n` +
+      `• \`/ban <user_id> <reason> [shadow]\` - Ban a user\n` +
+      `• \`/unban <user_id> [reason]\` - Unban a user\n` +
+      `• \`/shadowban <user_id> <reason>\` - Shadow ban a user\n` +
+      `• \`/unshadowban <user_id> [reason]\` - Remove shadow ban\n` +
+      `• \`/delete <comment_id>\` - Delete any comment\n` +
+      `• \`/help\` - Show this help message`
+  } else if (userRole === 'super_admin' || userRole === 'owner') {
+    helpText += `**Super Admin Commands:**\n` +
+      `• All Admin commands\n` +
+      `• \`/promote <user_id> <role> [reason]\` - Promote a user\n` +
+      `• \`/demote <user_id> <role> [reason]\` - Demote a user\n` +
+      `• \`/config <action> [key] [value]\` - Manage system configuration\n` +
+      `• \`/help\` - Show this help message`
+  }
+
+  return new Response(
+    JSON.stringify({
+      type: 4,
+      data: {
+        content: helpText,
+        flags: 64
+      }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
 }
 
 async function handleWebhooksCommand(supabase: any, options: any, registration: any) {
@@ -800,6 +1088,288 @@ async function handleWebhooksCommand(supabase: any, options: any, registration: 
   }
 }
 
+async function handleAddCommand(supabase: any, options: any, registration: any, guild_id: string) {
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can add server configurations',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const subCommand = options.find(opt => opt.name === 'subcommand')?.value || 'app'
+  const guildName = options.find(opt => opt.name === 'guild_name')?.value
+  const appGuildId = options.find(opt => opt.name === 'guild_id')?.value
+  const webhookUrl = options.find(opt => opt.name === 'webhook_url')?.value
+  const roleId = options.find(opt => opt.name === 'role_id')?.value
+
+  try {
+    switch (subCommand) {
+      case 'app':
+        if (!guildName || !appGuildId) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: '❌ Guild name and Guild ID are required\nUsage: `/add app <guild_name> <guild_id> [webhook_url] [role_id]`',
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Check if server already exists
+        let existingServer = null
+        try {
+          const { data: server } = await supabase
+            .from('server_configs')
+            .select('server_name, guild_id')
+            .or(`server_name.eq.${guildName},guild_id.eq.${appGuildId}`)
+            .single()
+          existingServer = server
+        } catch (error) {
+          // Table might not exist, continue with creation
+          console.log('Server config table check (will create if needed):', error.message)
+        }
+
+        if (existingServer) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: `❌ Server already exists: ${existingServer.server_name} (Guild: ${existingServer.guild_id})`,
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Insert new server configuration
+        let newServer = null
+        let insertError = null
+        
+        try {
+          const result = await supabase
+            .from('server_configs')
+            .insert({
+              server_name: guildName,
+              guild_id: appGuildId,
+              webhook_url: webhookUrl || null,
+              role_id: roleId || null,
+              is_active: true
+            })
+            .select()
+            .single()
+          newServer = result.data
+          insertError = result.error
+        } catch (error) {
+          insertError = error
+        }
+
+        if (insertError) throw insertError
+
+        // Update guild IDs in config for bot sync
+        const { data: guildConfig } = await supabase
+          .from('config')
+          .select('value')
+          .eq('key', 'discord_guild_ids')
+          .single()
+
+        let guildIds: string[] = []
+        if (guildConfig?.value) {
+          guildIds = JSON.parse(guildConfig.value)
+        }
+
+        if (!guildIds.includes(appGuildId)) {
+          guildIds.push(appGuildId)
+          await supabase
+            .from('config')
+            .update({ value: JSON.stringify(guildIds) })
+            .eq('key', 'discord_guild_ids')
+        }
+
+        // Update webhook URLs if provided
+        if (webhookUrl) {
+          const { data: webhookConfig } = await supabase
+            .from('config')
+            .select('value')
+            .eq('key', 'discord_webhook_urls')
+            .single()
+
+          let webhookUrls: string[] = []
+          if (webhookConfig?.value) {
+            webhookUrls = JSON.parse(webhookConfig.value)
+          }
+
+          if (!webhookUrls.includes(webhookUrl)) {
+            webhookUrls.push(webhookUrl)
+            await supabase
+              .from('config')
+              .update({ value: JSON.stringify(webhookUrls) })
+              .eq('key', 'discord_webhook_urls')
+          }
+        }
+
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              content: `✅ Successfully added server: **${guildName}**\n\n` +
+                `🏷️ **Name:** ${newServer.server_name}\n` +
+                `🆔 **Guild ID:** ${newServer.guild_id}\n` +
+                `🔗 **Webhook:** ${newServer.webhook_url || 'Not set'}\n` +
+                `🛡️ **Role ID:** ${newServer.role_id || 'Not set'}\n\n` +
+                `Bot will now sync commands to this server!`,
+              flags: 64
+            }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+
+      case 'list':
+        const { data: servers } = await supabase
+          .from('server_configs')
+          .select('*')
+          .eq('is_active', true)
+          .order('server_name')
+
+        if (!servers || servers.length === 0) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: '📋 **No servers configured**\nUse `/add app <guild_name> <guild_id>` to add a server',
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        const serverList = servers.map((server, index) => {
+          return `${index + 1}. **${server.server_name}**\n` +
+            `   🆔 Guild: \`${server.guild_id}\`\n` +
+            `   🔗 Webhook: ${server.webhook_url ? '✅ Configured' : '❌ Not set'}\n` +
+            `   🛡️ Role ID: ${server.role_id || '❌ Not set'}`
+        }).join('\n\n')
+
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              content: `📋 **Configured Servers (${servers.length})**\n\n${serverList}`,
+              flags: 64
+            }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+
+      case 'remove':
+        const serverToRemove = options.find(opt => opt.name === 'server_name')?.value
+        
+        if (!serverToRemove) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: '❌ Server name is required\nUsage: `/add remove <server_name>`',
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Get server to remove
+        const { data: serverConfig } = await supabase
+          .from('server_configs')
+          .select('*')
+          .eq('server_name', serverToRemove)
+          .single()
+
+        if (!serverConfig) {
+          return new Response(
+            JSON.stringify({
+              type: 4,
+              data: {
+                content: `❌ Server "${serverToRemove}" not found`,
+                flags: 64
+              }
+            }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+
+        // Deactivate server
+        const { error: deactivateError } = await supabase
+          .from('server_configs')
+          .update({ is_active: false })
+          .eq('server_name', serverToRemove)
+
+        if (deactivateError) throw deactivateError
+
+        // Remove from guild IDs config
+        const { data: currentGuildConfig } = await supabase
+          .from('config')
+          .select('value')
+          .eq('key', 'discord_guild_ids')
+          .single()
+
+        if (currentGuildConfig?.value) {
+          let guildIds = JSON.parse(currentGuildConfig.value)
+          guildIds = guildIds.filter((id: string) => id !== serverConfig.guild_id)
+          
+          await supabase
+            .from('config')
+            .update({ value: JSON.stringify(guildIds) })
+            .eq('key', 'discord_guild_ids')
+        }
+
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              content: `✅ Server "${serverToRemove}" has been deactivated\nBot will no longer sync commands to this server`,
+              flags: 64
+            }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+
+      default:
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              content: '❌ Unknown subcommand. Use: `app`, `list`, or `remove`',
+              flags: 64
+            }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+    }
+  } catch (error) {
+    console.error('Add command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to manage server configuration: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-signature-ed25519, x-signature-timestamp',
@@ -814,6 +1384,99 @@ const DISCORD_PUBLIC_KEY = Deno.env.get('DISCORD_PUBLIC_KEY')
 
 // Discord API endpoints
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
+
+// Function to assign Discord role to user
+async function assignDiscordRole(
+  guildId: string, 
+  userId: string, 
+  roleId: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(
+      `${DISCORD_API_BASE}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+
+    if (response.ok) {
+      return { success: true }
+    } else {
+      const errorData = await response.json().catch(() => ({}))
+      return { 
+        success: false, 
+        error: `Discord API Error: ${response.status} - ${errorData.message || response.statusText}` 
+      }
+    }
+  } catch (error) {
+    return { 
+      success: false, 
+      error: `Network Error: ${error.message}` 
+    }
+  }
+}
+
+// Function to get server configuration
+async function getServerConfig(supabase: any, guildId: string) {
+  try {
+    const { data: serverConfig } = await supabase
+      .from('server_configs')
+      .select('*')
+      .eq('guild_id', guildId)
+      .eq('is_active', true)
+      .single()
+
+    return serverConfig
+  } catch (error) {
+    // Table might not exist yet, return null
+    console.log('Server config table not found or error:', error.message)
+    return null
+  }
+}
+
+// Function to get all active server configurations
+async function getAllServerConfigs(supabase: any) {
+  try {
+    const { data: serverConfigs } = await supabase
+      .from('server_configs')
+      .select('*')
+      .eq('is_active', true)
+      .order('server_name')
+
+    return serverConfigs || []
+  } catch (error) {
+    console.log('Error fetching all server configs:', error.message)
+    return []
+  }
+}
+
+// Function to get all guild IDs for bot sync
+async function getAllGuildIds(supabase: any) {
+  try {
+    const serverConfigs = await getAllServerConfigs(supabase)
+    return serverConfigs.map(server => server.guild_id)
+  } catch (error) {
+    console.log('Error fetching guild IDs:', error.message)
+    return []
+  }
+}
+
+// Function to get all webhook URLs for notifications
+async function getAllWebhookUrls(supabase: any) {
+  try {
+    const serverConfigs = await getAllServerConfigs(supabase)
+    return serverConfigs
+      .filter(server => server.webhook_url)
+      .map(server => server.webhook_url)
+  } catch (error) {
+    console.log('Error fetching webhook URLs:', error.message)
+    return []
+  }
+}
 
 // Log on startup
 console.log('DISCORD_PUBLIC_KEY exists:', !!DISCORD_PUBLIC_KEY)
@@ -1139,52 +1802,34 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
     .eq('key', 'discord_client_id')
     .single()
 
-  const { data: guildIdsConfig } = await supabase
-    .from('config')
-    .select('value')
-    .eq('key', 'discord_guild_ids')
-    .single()
-
   // DON'T parse these - they're plain strings, not JSON
   const DISCORD_BOT_TOKEN = botTokenConfig?.value || ''
   const DISCORD_CLIENT_ID = clientIdConfig?.value || ''
 
-  // Get guild IDs - use provided ones, or from config, or fallback to single guild_id
+  // Get guild IDs from server_configs table - use provided ones, or fetch from table
   let targetGuildIds: string[] = []
   if (guildIds && guildIds.length > 0) {
     targetGuildIds = guildIds
-  } else if (guildIdsConfig?.value) {
-    try {
-      targetGuildIds = JSON.parse(guildIdsConfig.value)
-    } catch {
-      targetGuildIds = guildIdsConfig.value.split(',').map(id => id.trim())
-    }
   } else {
-    // Fallback to single guild_id config
-    const { data: guildIdConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_guild_id')
-      .single()
-    if (guildIdConfig?.value) {
-      targetGuildIds = [guildIdConfig.value]
-    }
+    // Fetch all active guild IDs from server_configs table
+    targetGuildIds = await getAllGuildIds(supabase)
   }
 
   if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !targetGuildIds.length) {
     return new Response(
       JSON.stringify({ 
-        error: 'Discord configuration missing in database',
+        error: 'Discord configuration missing or no servers configured',
         details: {
           bot_token: !!DISCORD_BOT_TOKEN,
           client_id: !!DISCORD_CLIENT_ID,
-          guild_ids: targetGuildIds
-        },
-        message: 'Please update config table with Discord credentials'
+          guild_ids_count: targetGuildIds.length
+        }
       }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
+
+  console.log(`Syncing commands to ${targetGuildIds.length} guilds:`, targetGuildIds)
 
   // Define slash commands
   const commands = [
@@ -1757,7 +2402,7 @@ async function handleDiscordInteraction(supabase: any, params: any) {
 
   // Special handling for register command - doesn't require existing registration
   if (commandName === 'register') {
-    return await handleRegisterCommand(supabase, options, member)
+    return await handleRegisterCommand(supabase, options, member, guild_id)
   }
 
   // For all other commands, check if user is registered
@@ -1785,7 +2430,7 @@ async function handleDiscordInteraction(supabase: any, params: any) {
   try {
     switch (commandName) {
       case 'register':
-        return await handleRegisterCommand(supabase, options, member)
+        return await handleRegisterCommand(supabase, options, member, guild_id)
       
       case 'ban':
         return await handleBanCommand(supabase, options, registration)
@@ -1862,6 +2507,9 @@ async function handleDiscordInteraction(supabase: any, params: any) {
       case 'webhooks':
         return await handleWebhooksCommand(supabase, options, registration)
       
+      case 'add':
+        return await handleAddCommand(supabase, options, registration, guild_id)
+      
       default:
         return new Response(
           JSON.stringify({
@@ -1890,11 +2538,109 @@ async function handleDiscordInteraction(supabase: any, params: any) {
 }
 
 // Command handlers
-async function handleRegisterCommand(supabase: any, options: any, member: any) {
+async function handleRegisterCommand(supabase: any, options: any, member: any, guild_id: string) {
+  const guildName = options.find(opt => opt.name === 'guild_name')?.value
   const platform = options.find(opt => opt.name === 'platform')?.value
   const userId = options.find(opt => opt.name === 'user_id')?.value
 
-  // Get user role from config (no token verification needed in new system)
+  // If no guild name provided, show available guilds
+  if (!guildName) {
+    try {
+      const { data: servers } = await supabase
+        .from('server_configs')
+        .select('server_name, guild_id')
+        .eq('is_active', true)
+        .order('server_name')
+
+      if (!servers || servers.length === 0) {
+        return new Response(
+          JSON.stringify({
+            type: 4,
+            data: {
+              content: '❌ No servers configured. Please contact an admin to add servers.',
+              flags: 64
+            }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const guildList = servers.map((server, index) => {
+        return `${index + 1}. **${server.server_name}**`
+      }).join('\n')
+
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: `🏷️ **Available Guilds**\n\n${guildList}\n\n` +
+              `Usage: \`/register <guild_name> <platform> <user_id>\`\n` +
+              `Platforms: anilist, myanimelist, simkl, other`,
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    } catch (error) {
+      console.error('Error fetching servers:', error)
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: '❌ Failed to fetch available guilds. Please try again later.',
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+  }
+
+  // Validate required parameters
+  if (!platform || !userId) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Platform and User ID are required\nUsage: `/register <guild_name> <platform> <user_id>`',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Get server configuration for the selected guild
+  const serverConfig = await getServerConfig(supabase, guild_id)
+  let targetServerConfig = null
+
+  // Find the server by name (since user provided guild_name, not guild_id)
+  try {
+    const { data: servers } = await supabase
+      .from('server_configs')
+      .select('*')
+      .eq('server_name', guildName)
+      .eq('is_active', true)
+      .single()
+    targetServerConfig = servers
+  } catch (error) {
+    console.log('Server config lookup error:', error.message)
+  }
+
+  if (!targetServerConfig) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Server "${guildName}" not found or not active.\nUse \`/register\` to see available guilds.`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Get user role from config
   const userRole = await getUserRole(supabase, userId)
 
   // Register or update user
@@ -1918,11 +2664,44 @@ async function handleRegisterCommand(supabase: any, options: any, member: any) {
 
   if (error) throw error
 
+  // Assign Discord role if user is moderator+ and server has role configured
+  let roleAssignmentResult = null
+  if (userRole !== 'user' && targetServerConfig.role_id) {
+    try {
+      roleAssignmentResult = await assignDiscordRole(
+        targetServerConfig.guild_id,
+        member.user.id,
+        targetServerConfig.role_id
+      )
+    } catch (roleError) {
+      console.error('Role assignment error:', roleError)
+      roleAssignmentResult = { success: false, error: roleError.message }
+    }
+  }
+
+  // Build response message
+  let responseMessage = `✅ Successfully registered as **${userRole}**!\n` +
+    `Guild: **${guildName}**\n` +
+    `Platform: ${platform}\n` +
+    `User ID: ${userId}`
+  
+  if (userRole !== 'user' && targetServerConfig.role_id) {
+    if (roleAssignmentResult?.success) {
+      responseMessage += `\n\n🎉 **Role assigned successfully!**`
+    } else {
+      responseMessage += `\n\n⚠️ **Role assignment failed:** ${roleAssignmentResult?.error || 'Unknown error'}`
+    }
+  } else if (userRole === 'user') {
+    responseMessage += `\n\nℹ️ **Registered as regular user** (no special role assigned)`
+  } else {
+    responseMessage += `\n\n⚠️ **Role not configured for this server**`
+  }
+
   return new Response(
     JSON.stringify({
       type: 4,
       data: {
-        content: `✅ Successfully registered as **${userRole}**!\nPlatform: ${platform}\nUser ID: ${userId}`,
+        content: responseMessage,
         flags: 64
       }
     }),
@@ -2277,39 +3056,6 @@ async function handleLockCommand_impl(supabase: any, options: any, registration:
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
-
-async function handleSyncCommand_impl(supabase: any, registration: any) {
-  // Only Super Admins can sync commands
-  if (!['super_admin', 'owner'].includes(registration.user_role)) {
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: '❌ Only Super Admins can sync Discord commands',
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
-  try {
-    // Call the existing sync commands function
-    return await handleSyncCommands(supabase)
-  } catch (error) {
-    console.error('Sync command error:', error)
-    return new Response(
-      JSON.stringify({
-        type: 4,
-        data: {
-          content: `❌ Failed to sync commands: ${error.message}`,
-          flags: 64
-        }
-      }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-}
 
 async function handleHelpCommand_impl(registration: any) {
   const userRole = registration?.user_role || 'user'
