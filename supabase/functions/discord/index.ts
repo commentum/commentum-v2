@@ -1371,35 +1371,33 @@ async function handleAddCommand(supabase: any, options: any, registration: any, 
 }
 
 async function handleGlobalSyncCommands(supabase: any) {
-  // Fetch Discord config from database
-  const { data: botTokenConfig } = await supabase
-    .from('config')
-    .select('value')
-    .eq('key', 'discord_bot_token')
-    .single()
-
-  const { data: clientIdConfig } = await supabase
-    .from('config')
-    .select('value')
-    .eq('key', 'discord_client_id')
-    .single()
-
-  // DON'T parse these - they're plain strings, not JSON
-  const DISCORD_BOT_TOKEN = botTokenConfig?.value || ''
-  const DISCORD_CLIENT_ID = clientIdConfig?.value || ''
+  // Get Discord config from environment variables
+  const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+  const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
 
   if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID) {
     return new Response(
-      JSON.stringify({ 
-        error: 'Discord configuration missing in database',
-        details: {
-          bot_token: !!DISCORD_BOT_TOKEN,
-          client_id: !!DISCORD_CLIENT_ID
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ **Discord configuration missing in environment variables**\n\n` +
+            `Required environment variables:\n` +
+            `• \`DISCORD_BOT_TOKEN\`: ${DISCORD_BOT_TOKEN ? '✅ Set' : '❌ Missing'}\n` +
+            `• \`DISCORD_CLIENT_ID\`: ${DISCORD_CLIENT_ID ? '✅ Set' : '❌ Missing'}\n\n` +
+            `Please set these environment variables in your Supabase Edge Function settings.`,
+          flags: 64
         }
       }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
+
+  console.log('Global sync config check:', {
+    bot_token_length: DISCORD_BOT_TOKEN.length,
+    client_id_length: DISCORD_CLIENT_ID.length,
+    bot_token_prefix: DISCORD_BOT_TOKEN.substring(0, 10) + '...',
+    client_id_prefix: DISCORD_CLIENT_ID.substring(0, 10) + '...'
+  })
 
   console.log('Syncing commands globally to application')
 
@@ -2398,22 +2396,9 @@ async function handleGetUserRole(supabase: any, params: any) {
 }
 
 async function handleSyncCommands(supabase: any, guildIds?: string[]) {
-  // Fetch Discord config from database
-  const { data: botTokenConfig } = await supabase
-    .from('config')
-    .select('value')
-    .eq('key', 'discord_bot_token')
-    .single()
-
-  const { data: clientIdConfig } = await supabase
-    .from('config')
-    .select('value')
-    .eq('key', 'discord_client_id')
-    .single()
-
-  // DON'T parse these - they're plain strings, not JSON
-  const DISCORD_BOT_TOKEN = botTokenConfig?.value || ''
-  const DISCORD_CLIENT_ID = clientIdConfig?.value || ''
+  // Get Discord config from environment variables
+  const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+  const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
 
   // Get guild IDs from server_configs table - use provided ones, or fetch from table
   let targetGuildIds: string[] = []
