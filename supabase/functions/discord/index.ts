@@ -962,7 +962,7 @@ serve(async (req) => {
       return await handleDiscordInteraction(supabase, { command_data: body })
     }
 
-    const { action, discord_user_id, discord_username, platform_user_id, platform_type, token, command_data } = body
+    const { action, discord_user_id, discord_username, platform_user_id, platform_type, command_data } = body
 
     switch (action) {
       case 'register':
@@ -970,16 +970,12 @@ serve(async (req) => {
           discord_user_id,
           discord_username,
           platform_user_id,
-          platform_type,
-          token
+          platform_type
         })
       
       case 'verify':
         return await handleDiscordVerification(supabase, {
-          discord_user_id,
-          platform_user_id,
-          platform_type,
-          token
+          discord_user_id
         })
       
       case 'get_user_role':
@@ -1012,24 +1008,17 @@ serve(async (req) => {
 })
 
 async function handleDiscordRegistration(supabase: any, params: any) {
-  const { discord_user_id, discord_username, platform_user_id, platform_type, token } = params
+  const { discord_user_id, discord_username, platform_user_id, platform_type } = params
 
-  // Validate required fields
-  if (!discord_user_id || !discord_username || !platform_user_id || !platform_type || !token) {
+  // Validate required fields (token removed - not used anymore)
+  if (!discord_user_id || !discord_username || !platform_user_id || !platform_type) {
     return new Response(
       JSON.stringify({ error: 'All fields are required for registration' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Verify platform token
-  const tokenValid = await verifyPlatformToken(platform_type, platform_user_id, token)
-  if (!tokenValid) {
-    return new Response(
-      JSON.stringify({ error: 'Invalid platform token' }),
-      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
+  // No token verification needed - tokens are not used anymore
 
   // Check if Discord user is already registered
   const { data: existingRegistration } = await supabase
@@ -1076,16 +1065,10 @@ async function handleDiscordRegistration(supabase: any, params: any) {
 }
 
 async function handleDiscordVerification(supabase: any, params: any) {
-  const { discord_user_id, platform_user_id, platform_type, token } = params
+  const { discord_user_id } = params
 
-  // Verify platform token
-  const tokenValid = await verifyPlatformToken(platform_type, platform_user_id, token)
-  if (!tokenValid) {
-    return new Response(
-      JSON.stringify({ error: 'Invalid platform token' }),
-      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
+  // No token verification needed - tokens are not used anymore
+  // Auto-verify Discord users since token system is deprecated
 
   // Update verification status
   const { data: registration, error } = await supabase
@@ -2290,54 +2273,6 @@ async function handleLockCommand_impl(supabase: any, options: any, registration:
     )
   }
 
-// Helper functions
-async function verifyPlatformToken(platformType: string, userId: string, token: string) {
-  try {
-    switch (platformType) {
-      case 'anilist':
-        const response = await fetch('https://graphql.anilist.co', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            query: '{ Viewer { id name } }'
-          })
-        })
-        if (!response.ok) return false
-        const data = await response.json()
-        return data.data?.Viewer?.id?.toString() === userId
-
-      case 'myanimelist':
-        const malResponse = await fetch('https://api.myanimelist.net/v2/users/me', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          }
-        })
-        if (!malResponse.ok) return false
-        const malData = await malResponse.json()
-        return malData.id?.toString() === userId
-
-      case 'simkl':
-        const simklResponse = await fetch('https://api.simkl.com/users/settings', {
-          headers: {
-            'simkl-api-key': token,
-          }
-        })
-        if (!simklResponse.ok) return false
-        const simklData = await simklResponse.json()
-        return simklData.account?.id?.toString() === userId
-
-      default:
-        return false
-    }
-  } catch (error) {
-    console.error('Token verification error:', error)
-    return false
-  }
-}
-
 async function handleSyncCommand_impl(supabase: any, registration: any) {
   // Only Super Admins can sync commands
   if (!['super_admin', 'owner'].includes(registration.user_role)) {
@@ -2450,112 +2385,6 @@ async function removeFromAllRoles(supabase: any, userId: string) {
         .update({ value: JSON.stringify(filteredList) })
         .eq('key', role)
     }
-  }
-}
-
-async function verifyPlatformToken(platformType: string, userId: string, token: string) {
-  try {
-    switch (platformType) {
-      case 'anilist':
-        return await verifyAniListToken(userId, token)
-      case 'myanimelist':
-        return await verifyMyAnimeListToken(userId, token)
-      case 'simkl':
-        return await verifySIMKLToken(userId, token)
-      default:
-        return false
-    }
-  } catch (error) {
-    console.error(`Token verification error for ${platformType}:`, error)
-    return false
-  }
-}
-
-// AniList token verification
-async function verifyAniListToken(userId: string, token: string) {
-  try {
-    const query = `
-      query {
-        Viewer {
-          id
-          name
-          avatar {
-            large
-            medium
-          }
-        }
-      }
-    `
-
-    const response = await fetch('https://graphql.anilist.co', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ query })
-    })
-
-    if (!response.ok) return false
-
-    const data = await response.json()
-    if (data.errors) return false
-
-    const user = data.data.Viewer
-    return user.id.toString() === userId
-  } catch (error) {
-    console.error('AniList token verification error:', error)
-    return false
-  }
-}
-
-// MyAnimeList token verification
-async function verifyMyAnimeListToken(userId: string, token: string) {
-  try {
-    const clientId = Deno.env.get('MYANIMELIST_CLIENT_ID')
-    if (!clientId) {
-      console.warn('MYANIMELIST_CLIENT_ID not configured')
-      return false
-    }
-
-    const response = await fetch('https://api.myanimelist.net/v2/users/me', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      }
-    })
-
-    if (!response.ok) return false
-
-    const data = await response.json()
-    return data.id.toString() === userId
-  } catch (error) {
-    console.error('MyAnimeList token verification error:', error)
-    return false
-  }
-}
-
-// SIMKL token verification
-async function verifySIMKLToken(userId: string, token: string) {
-  try {
-    const clientId = Deno.env.get('SIMKL_CLIENT_ID')
-    if (!clientId) {
-      console.warn('SIMKL_CLIENT_ID not configured')
-      return false
-    }
-
-    const response = await fetch('https://api.simkl.com/users/settings', {
-      headers: {
-        'simkl-api-key': token,
-      }
-    })
-
-    if (!response.ok) return false
-
-    const data = await response.json()
-    return data.account?.id?.toString() === userId
-  } catch (error) {
-    console.error('SIMKL token verification error:', error)
-    return false
   }
 }
 
