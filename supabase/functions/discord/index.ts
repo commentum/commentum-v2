@@ -151,6 +151,86 @@ async function handleLockCommand(supabase: any, options: any, registration: any)
   return await handleLockCommand_impl(supabase, options, registration)
 }
 
+async function handlePromoteCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handlePromoteCommand_impl(supabase, options, registration)
+}
+
+async function handleDemoteCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleDemoteCommand_impl(supabase, options, registration)
+}
+
+async function handleUnbanCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleUnbanCommand_impl(supabase, options, registration)
+}
+
+async function handleMuteCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleMuteCommand_impl(supabase, options, registration)
+}
+
+async function handleUnmuteCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleUnmuteCommand_impl(supabase, options, registration)
+}
+
+async function handleShadowbanCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleShadowbanCommand_impl(supabase, options, registration)
+}
+
+async function handleUnshadowbanCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleUnshadowbanCommand_impl(supabase, options, registration)
+}
+
+async function handleUnpinCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleUnpinCommand_impl(supabase, options, registration)
+}
+
+async function handleUnlockCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleUnlockCommand_impl(supabase, options, registration)
+}
+
+async function handleReportCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleReportCommand_impl(supabase, options, registration)
+}
+
+async function handleResolveCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleResolveCommand_impl(supabase, options, registration)
+}
+
+async function handleQueueCommand(supabase: any, registration?: any) {
+  // Implementation will be below
+  return await handleQueueCommand_impl(supabase, registration)
+}
+
+async function handleUserCommand(supabase: any, options: any) {
+  // Implementation will be below
+  return await handleUserCommand_impl(supabase, options)
+}
+
+async function handleCommentCommand(supabase: any, options: any) {
+  // Implementation will be below
+  return await handleCommentCommand_impl(supabase, options)
+}
+
+async function handleConfigCommand(supabase: any, options: any, registration: any) {
+  // Implementation will be below
+  return await handleConfigCommand_impl(supabase, options, registration)
+}
+
+async function handleSyncCommand(supabase: any, registration: any) {
+  // Implementation will be below
+  return await handleSyncCommand_impl(supabase, registration)
+}
+
 async function handleWebhooksCommand(supabase: any, options: any, registration: any) {
   if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
@@ -1943,7 +2023,7 @@ async function verifyPlatformToken(platformType: string, userId: string, token: 
   }
 }
 
-async function handleSyncCommand(supabase: any, registration: any) {
+async function handleSyncCommand_impl(supabase: any, registration: any) {
   // Only Super Admins can sync commands
   if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
@@ -2200,7 +2280,7 @@ async function getUserRoleFromPlatform(supabase: any, userId: string) {
 }
 
 // Unban command handler
-async function handleUnbanCommand(supabase: any, options: any, registration: any) {
+async function handleUnbanCommand_impl(supabase: any, options: any, registration: any) {
   if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2289,7 +2369,7 @@ async function handleUnbanCommand(supabase: any, options: any, registration: any
 }
 
 // Promote command handler
-async function handlePromoteCommand(supabase: any, options: any, registration: any) {
+async function handlePromoteCommand_impl(supabase: any, options: any, registration: any) {
   if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2410,7 +2490,7 @@ async function handlePromoteCommand(supabase: any, options: any, registration: a
 }
 
 // Demote command handler
-async function handleDemoteCommand(supabase: any, options: any, registration: any) {
+async function handleDemoteCommand_impl(supabase: any, options: any, registration: any) {
   if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2529,7 +2609,7 @@ async function handleDemoteCommand(supabase: any, options: any, registration: an
 }
 
 // Mute command handler
-async function handleMuteCommand(supabase: any, options: any, registration: any) {
+async function handleMuteCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2623,7 +2703,7 @@ async function handleMuteCommand(supabase: any, options: any, registration: any)
 }
 
 // Unmute command handler
-async function handleUnmuteCommand(supabase: any, options: any, registration: any) {
+async function handleUnmuteCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2713,7 +2793,7 @@ async function handleUnmuteCommand(supabase: any, options: any, registration: an
 }
 
 // Shadowban command handler
-async function handleShadowbanCommand(supabase: any, options: any, registration: any) {
+async function handleShadowbanCommand_impl(supabase: any, options: any, registration: any) {
   if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2802,7 +2882,7 @@ async function handleShadowbanCommand(supabase: any, options: any, registration:
 }
 
 // Unshadowban command handler
-async function handleUnshadowbanCommand(supabase: any, options: any, registration: any) {
+async function handleUnshadowbanCommand_impl(supabase: any, options: any, registration: any) {
   if (!['admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2892,7 +2972,7 @@ async function handleUnshadowbanCommand(supabase: any, options: any, registratio
 }
 
 // Unpin command handler
-async function handleUnpinCommand(supabase: any, options: any, registration: any) {
+async function handleUnpinCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -2976,7 +3056,7 @@ async function handleUnpinCommand(supabase: any, options: any, registration: any
 }
 
 // Unlock command handler
-async function handleUnlockCommand(supabase: any, options: any, registration: any) {
+async function handleUnlockCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -3060,7 +3140,7 @@ async function handleUnlockCommand(supabase: any, options: any, registration: an
 }
 
 // Report command handler
-async function handleReportCommand(supabase: any, options: any, registration: any) {
+async function handleReportCommand_impl(supabase: any, options: any, registration: any) {
   const commentId = options.find(opt => opt.name === 'comment_id')?.value
   const reason = options.find(opt => opt.name === 'reason')?.value || 'Reported via Discord'
 
@@ -3132,7 +3212,7 @@ async function handleReportCommand(supabase: any, options: any, registration: an
 }
 
 // Resolve command handler
-async function handleResolveCommand(supabase: any, options: any, registration: any) {
+async function handleResolveCommand_impl(supabase: any, options: any, registration: any) {
   if (!['moderator', 'admin', 'super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
@@ -3223,7 +3303,7 @@ async function handleResolveCommand(supabase: any, options: any, registration: a
 }
 
 // Queue command handler
-async function handleQueueCommand(supabase: any) {
+async function handleQueueCommand_impl(supabase: any, registration?: any) {
   try {
     // Get reported comments
     const { data: reportedComments } = await supabase
@@ -3277,7 +3357,7 @@ async function handleQueueCommand(supabase: any) {
 }
 
 // User command handler
-async function handleUserCommand(supabase: any, options: any) {
+async function handleUserCommand_impl(supabase: any, options: any) {
   const userId = options.find(opt => opt.name === 'user_id')?.value
 
   try {
@@ -3344,7 +3424,7 @@ async function handleUserCommand(supabase: any, options: any) {
 }
 
 // Comment command handler
-async function handleCommentCommand(supabase: any, options: any) {
+async function handleCommentCommand_impl(supabase: any, options: any) {
   const commentId = options.find(opt => opt.name === 'comment_id')?.value
 
   try {
@@ -3411,7 +3491,7 @@ async function handleCommentCommand(supabase: any, options: any) {
 }
 
 // Config command handler
-async function handleConfigCommand(supabase: any, options: any, registration: any) {
+async function handleConfigCommand_impl(supabase: any, options: any, registration: any) {
   if (!['super_admin', 'owner'].includes(registration.user_role)) {
     return new Response(
       JSON.stringify({
