@@ -1751,24 +1751,28 @@ async function handleSyncCommand(supabase: any, registration: any) {
       }
     }
 
-    // Get Discord config from database
-    const { data: guildIdConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_guild_id')
-      .single()
+    // Get Discord guild ID from environment or database
+    let guildId = Deno.env.get('DISCORD_GUILD_ID')
+    
+    if (!guildId) {
+      const { data: guildIdConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_guild_id')
+        .single()
+      guildId = guildIdConfig?.value
+    }
 
-    if (!guildIdConfig?.value) {
+    if (!guildId) {
       return {
         type: 4,
         data: {
-          content: '❌ Discord guild ID not configured',
+          content: '❌ Discord guild ID not configured. Please set DISCORD_GUILD_ID in environment variables or database config.',
           flags: 64
         }
       }
     }
 
-    const guildId = guildIdConfig.value
     const results = await syncCommands(supabase, [guildId])
 
     return {
@@ -1802,19 +1806,30 @@ async function handleSyncMultiCommand(supabase: any, registration: any) {
       }
     }
 
-    // Get multiple guild IDs from config
-    const { data: guildIdsConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_guild_ids')
-      .single()
-
+    // Get multiple guild IDs from environment or config
     let targetGuildIds: string[] = []
-    if (guildIdsConfig?.value) {
+    const envGuildIds = Deno.env.get('DISCORD_GUILD_IDS')
+    
+    if (envGuildIds) {
       try {
-        targetGuildIds = JSON.parse(guildIdsConfig.value)
+        targetGuildIds = JSON.parse(envGuildIds)
       } catch {
-        targetGuildIds = guildIdsConfig.value.split(',').map(id => id.trim()).filter(id => id)
+        targetGuildIds = envGuildIds.split(',').map(id => id.trim()).filter(id => id)
+      }
+    } else {
+      // Try database as fallback
+      const { data: guildIdsConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_guild_ids')
+        .single()
+
+      if (guildIdsConfig?.value) {
+        try {
+          targetGuildIds = JSON.parse(guildIdsConfig.value)
+        } catch {
+          targetGuildIds = guildIdsConfig.value.split(',').map(id => id.trim()).filter(id => id)
+        }
       }
     }
 
@@ -2680,31 +2695,41 @@ async function handleDiscordInteraction(supabase: any, body: any) {
 // Sync commands function
 async function syncCommands(supabase: any, guildIds: string[]) {
   try {
-    // Get Discord config from database
-    const { data: botTokenConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_bot_token')
-      .single()
+    // Try to get Discord config from database first
+    let botToken = Deno.env.get('DISCORD_BOT_TOKEN')
+    let clientId = Deno.env.get('DISCORD_CLIENT_ID')
+    let publicKey = Deno.env.get('DISCORD_PUBLIC_KEY')
 
-    const { data: clientIdConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_client_id')
-      .single()
+    // If not in env, try database
+    if (!botToken) {
+      const { data: botTokenConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_bot_token')
+        .single()
+      botToken = botTokenConfig?.value
+    }
 
-    const { data: publicKeyConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_public_key')
-      .single()
+    if (!clientId) {
+      const { data: clientIdConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_client_id')
+        .single()
+      clientId = clientIdConfig?.value
+    }
 
-    const botToken = botTokenConfig?.value
-    const clientId = clientIdConfig?.value
-    const publicKey = publicKeyConfig?.value
+    if (!publicKey) {
+      const { data: publicKeyConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_public_key')
+        .single()
+      publicKey = publicKeyConfig?.value
+    }
 
     if (!botToken || !clientId || !publicKey) {
-      throw new Error('Missing Discord configuration in database')
+      throw new Error('Missing Discord configuration. Please set DISCORD_BOT_TOKEN, DISCORD_CLIENT_ID, and DISCORD_PUBLIC_KEY in environment variables or database config.')
     }
 
     const commands = getSlashCommands()
@@ -2750,14 +2775,17 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Get Discord config from database
-    const { data: publicKeyConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_public_key')
-      .single()
-
-    const publicKey = publicKeyConfig?.value
+    // Get Discord public key from environment or database
+    let publicKey = Deno.env.get('DISCORD_PUBLIC_KEY')
+    
+    if (!publicKey) {
+      const { data: publicKeyConfig } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'discord_public_key')
+        .single()
+      publicKey = publicKeyConfig?.value
+    }
 
     const signature = req.headers.get('x-signature-ed25519')
     const timestamp = req.headers.get('x-signature-timestamp')
@@ -2805,13 +2833,57 @@ serve(async (req) => {
     // Handle other actions
     const { action } = body
     switch (action) {
-      case 'sync_commands':
-        const guildIds = body.guild_ids || []
-        const syncResults = await syncCommands(supabase, guildIds)
+    case 'sync_commands':
+      const guildIds = body.guild_ids || []
+      let targetGuildIds: string[] = []
+      
+      if (guildIds.length > 0) {
+        targetGuildIds = guildIds
+      } else {
+        // Try to get from environment
+        const envGuildIds = Deno.env.get('DISCORD_GUILD_IDS')
+        if (envGuildIds) {
+          try {
+            targetGuildIds = JSON.parse(envGuildIds)
+          } catch {
+            targetGuildIds = envGuildIds.split(',').map(id => id.trim()).filter(id => id)
+          }
+        } else {
+          // Try database as fallback
+          const { data: guildIdsConfig } = await supabase
+            .from('config')
+            .select('value')
+            .eq('key', 'discord_guild_ids')
+            .single()
+          
+          if (guildIdsConfig?.value) {
+            try {
+              targetGuildIds = JSON.parse(guildIdsConfig.value)
+            } catch {
+              targetGuildIds = guildIdsConfig.value.split(',').map(id => id.trim()).filter(id => id)
+            }
+          }
+        }
+      }
+      
+      if (targetGuildIds.length === 0) {
         return new Response(
-          JSON.stringify({ success: true, results: syncResults }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ 
+            error: 'No guild IDs provided. Set DISCORD_GUILD_IDS in environment variables or include guild_ids in request body',
+            details: {
+              env_guild_ids: Deno.env.get('DISCORD_GUILD_IDS'),
+              guild_ids_provided: guildIds.length
+            }
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
+      }
+      
+      const syncResults = await syncCommands(supabase, targetGuildIds)
+      return new Response(
+        JSON.stringify({ success: true, results: syncResults }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
 
       default:
         return new Response(
