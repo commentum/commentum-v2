@@ -1,4 +1,4 @@
-import { createDiscordResponse, createErrorResponse } from '../utils.ts'
+import { createDiscordResponse, createErrorResponse, createCommentEmbed, createUserEmbed, createModerationEmbed } from '../utils.ts'
 
 // Handle ban command
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -48,13 +48,12 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
 
     if (error) throw error
 
-    return createDiscordResponse(
-      `${shadow ? '👻' : '🔨'} **User ${shadow ? 'Shadow ' : ''}Banned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Admin:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n` +
-      `${shadow ? '👻 **Shadow Ban:** User can still post but others cannot see their content' : '🔨 **Permanent Ban:** User cannot post or interact'}`
+    return createModerationEmbed(
+      shadow ? 'shadow ban' : 'ban',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason,
+      shadow ? 'User can still post but others cannot see their content' : 'User cannot post or interact'
     )
 
   } catch (error) {
@@ -303,15 +302,12 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       .update({ user_role: newRole })
       .eq('platform_user_id', targetUserId)
 
-    return createDiscordResponse(
-      `⬆️ **User Promoted**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🎭 **New Role:** ${newRole}\n` +
-      `⬆️ **Previous Role:** ${targetUserComment.user_role}\n` +
-      `🛡️ **Promoted by:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `✅ **User now has ${newRole} permissions**`
+    return createModerationEmbed(
+      'promote',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason,
+      `From ${targetUserComment.user_role} to ${newRole}`
     )
 
   } catch (error) {
@@ -531,7 +527,6 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
     }
 
     const userComment = userComments[0]
-    const reports = JSON.parse(userComment.reports || '[]')
 
     // Get user's Discord registration if exists
     const { data: discordRegistration } = await supabase
@@ -541,37 +536,13 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
       .eq('is_active', true)
       .single()
 
-    // Get user statistics
+    // Get all user comments for statistics
     const { data: allUserComments } = await supabase
       .from('comments')
       .select('id, upvotes, downvotes, report_count, deleted, created_at')
       .eq('user_id', targetUserId)
 
-    const totalComments = allUserComments?.length || 0
-    const activeComments = allUserComments?.filter(c => !c.deleted).length || 0
-    const totalUpvotes = allUserComments?.reduce((sum, c) => sum + c.upvotes, 0) || 0
-    const totalDownvotes = allUserComments?.reduce((sum, c) => sum + c.downvotes, 0) || 0
-    const totalReports = allUserComments?.reduce((sum, c) => sum + c.report_count, 0) || 0
-
-    const userInfo = `👤 **User Information**\n\n` +
-      `🆔 **Platform ID:** ${targetUserId}\n` +
-      `👋 **Username:** ${userComment.username}\n` +
-      `🎭 **Role:** ${userComment.user_role}\n` +
-      `🎮 **Platform:** ${userComment.client_type}\n\n` +
-      `📊 **Statistics**\n` +
-      `💬 **Comments:** ${activeComments}/${totalComments} (active/total)\n` +
-      `👍 **Upvotes:** ${totalUpvotes}\n` +
-      `👎 **Downvotes:** ${totalDownvotes}\n` +
-      `🚨 **Reports:** ${totalReports}\n` +
-      `⚠️ **Warnings:** ${userComment.user_warnings || 0}\n\n` +
-      `🔐 **Account Status**\n` +
-      `${userComment.user_banned ? '🔨 **Banned**' : '✅ **Not Banned**'}\n` +
-      `${userComment.user_shadow_banned ? '👻 **Shadow Banned**' : '✅ **Not Shadow Banned**'}\n` +
-      `${userComment.user_muted_until && new Date(userComment.user_muted_until) > new Date() ? `🔇 **Muted until ${new Date(userComment.user_muted_until).toLocaleString()}**` : '✅ **Not Muted**'}\n\n` +
-      `🔗 **Discord Integration**\n` +
-      `${discordRegistration ? `✅ **Registered** as ${discordRegistration.discord_username}` : '❌ **Not Registered**'}`
-
-    return createDiscordResponse(userInfo)
+    return createUserEmbed(userComment, allUserComments || [], discordRegistration)
 
   } catch (error) {
     console.error('User command error:', error)
@@ -599,41 +570,7 @@ export async function handleCommentCommand(supabase: any, options: any, userRole
       return createErrorResponse('Comment not found.')
     }
 
-    const reports = JSON.parse(comment.reports || '[]')
-    const userVotes = JSON.parse(comment.user_votes || '{}')
-    const tags = JSON.parse(comment.tags || '[]')
-
-    const commentInfo = `💬 **Comment Information**\n\n` +
-      `🆔 **Comment ID:** ${comment.id}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🎭 **Author Role:** ${comment.user_role}\n` +
-      `🎮 **Platform:** ${comment.client_type}\n` +
-      `📅 **Created:** ${new Date(comment.created_at).toLocaleString()}\n\n` +
-      `📄 **Content**\n` +
-      `${comment.content.substring(0, 300)}${comment.content.length > 300 ? '...' : ''}\n\n` +
-      `📊 **Engagement**\n` +
-      `👍 **Upvotes:** ${comment.upvotes}\n` +
-      `👎 **Downvotes:** ${comment.downvotes}\n` +
-      `📈 **Score:** ${comment.vote_score}\n` +
-      `🗳️ **Total Votes:** ${Object.keys(userVotes).length}\n\n` +
-      `🚨 **Reports**\n` +
-      `📊 **Report Count:** ${comment.report_count}\n` +
-      `📋 **Report Status:** ${comment.report_status}\n` +
-      `${reports.length > 0 ? `📝 **Recent Reports:** ${reports.slice(-3).map((r: any) => `${r.reason} (${r.status})`).join(', ')}` : '✅ **No Reports**'}\n\n` +
-      `🏷️ **Tags:** ${tags.length > 0 ? tags.join(', ') : 'None'}\n\n` +
-      `🔐 **Moderation Status**\n` +
-      `${comment.deleted ? '🗑️ **Deleted**' : '✅ **Active**'}\n` +
-      `${comment.pinned ? '📌 **Pinned**' : ''}\n` +
-      `${comment.locked ? '🔒 **Locked**' : ''}\n` +
-      `${comment.edited ? '✏️ **Edited** (' + comment.edit_count + ' times)' : ''}\n\n` +
-      `🎬 **Media Information**\n` +
-      `📺 **Media ID:** ${comment.media_id}\n` +
-      `🎭 **Type:** ${comment.media_type}\n` +
-      `📝 **Title:** ${comment.media_title}\n` +
-      `📅 **Year:** ${comment.media_year || 'Unknown'}\n` +
-      `${comment.media_poster ? '🖼️ **Poster:** Available' : ''}`
-
-    return createDiscordResponse(commentInfo)
+    return createCommentEmbed(comment)
 
   } catch (error) {
     console.error('Comment command error:', error)

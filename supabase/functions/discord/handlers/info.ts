@@ -1,4 +1,4 @@
-import { createDiscordResponse, createErrorResponse } from '../utils.ts'
+import { createDiscordResponse, createErrorResponse, createStatsEmbed } from '../utils.ts'
 
 // Discord API configuration
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
@@ -310,7 +310,6 @@ export async function handleStatsCommand(supabase: any, userRole: string) {
       .select('server_name, is_active')
 
     const activeServers = servers?.filter(server => server.is_active).length || 0
-    const serverNames = servers?.filter(server => server.is_active).map(s => s.server_name).slice(0, 5).join(', ') || 'None'
 
     // Get system configuration
     const { data: configs } = await supabase
@@ -323,28 +322,26 @@ export async function handleStatsCommand(supabase: any, userRole: string) {
     const reportingEnabled = configs?.find(c => c.key === 'reporting_enabled')?.value === 'true'
     const discordEnabled = configs?.find(c => c.key === 'discord_notifications_enabled')?.value === 'true'
 
-    return createDiscordResponse(
-      `📊 **Commentum System Statistics**\n\n` +
-      `💬 **Comments:** ${totalComments} total (${activeComments} active)\n` +
-      `👍 **Upvotes:** ${totalUpvotes}\n` +
-      `👎 **Downvotes:** ${totalDownvotes}\n` +
-      `🚨 **Reports:** ${totalReports}\n\n` +
-      `🏢 **Active Servers:** ${activeServers}\n` +
-      `📋 **Server List:** ${serverNames}${servers?.length > 5 ? '...' : ''}\n\n` +
-      `👥 **Discord Users:** ${activeUsers}\n` +
-      `🛡️ **Mods:** ${mods}\n` +
-      `👑 **Admins:** ${admins}\n` +
-      `⚡ **Super Admins:** ${superAdmins}\n\n` +
-      `🎮 **Platform Breakdown:**\n` +
-      `• AniList: ${anilistUsers}\n` +
-      `• MyAnimeList: ${malUsers}\n` +
-      `• SIMKL: ${simklUsers}\n\n` +
-      `⚙️ **System Status:**\n` +
-      `• System: ${systemEnabled ? '✅' : '❌'}\n` +
-      `• Voting: ${votingEnabled ? '✅' : '❌'}\n` +
-      `• Reporting: ${reportingEnabled ? '✅' : '❌'}\n` +
-      `• Discord: ${discordEnabled ? '✅' : '❌'}`
-    )
+    const stats = {
+      totalComments,
+      activeComments,
+      totalUpvotes,
+      totalDownvotes,
+      totalReports,
+      activeServers,
+      mods,
+      admins,
+      superAdmins,
+      anilistUsers,
+      malUsers,
+      simklUsers,
+      systemEnabled,
+      votingEnabled,
+      reportingEnabled,
+      discordEnabled
+    }
+
+    return createStatsEmbed(stats)
 
   } catch (error) {
     console.error('Stats command error:', error)
