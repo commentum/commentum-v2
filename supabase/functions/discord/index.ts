@@ -2605,12 +2605,13 @@ async function handleCleanupAllCommands(supabase: any) {
 
   const cleanupResults = []
 
-  // 1. Clean up global commands first
+  // 1. Clean up global commands first - need to get them first, then delete individually
   try {
-    const globalDeleteResponse = await fetch(
+    // Get all global commands first
+    const getGlobalResponse = await fetch(
       `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/commands`,
       {
-        method: 'DELETE',
+        method: 'GET',
         headers: {
           'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
           'Content-Type': 'application/json'
@@ -2618,16 +2619,39 @@ async function handleCleanupAllCommands(supabase: any) {
       }
     )
     
-    if (globalDeleteResponse.ok) {
-      console.log('✅ Cleared all global commands')
+    if (getGlobalResponse.ok) {
+      const globalCommands = await getGlobalResponse.json()
+      console.log(`Found ${globalCommands.length} global commands to delete`)
+      
+      // Delete each global command individually
+      for (const command of globalCommands) {
+        const deleteResponse = await fetch(
+          `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/commands/${command.id}`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (deleteResponse.ok) {
+          console.log(`✅ Deleted global command: ${command.name}`)
+        } else {
+          const errorText = await deleteResponse.text()
+          console.log(`⚠️ Failed to delete global command ${command.name}: ${errorText}`)
+        }
+      }
+      
       cleanupResults.push({
         type: 'global',
         success: true,
-        message: 'All global commands cleared'
+        message: `Deleted ${globalCommands.length} global commands`
       })
     } else {
-      const errorText = await globalDeleteResponse.text()
-      console.log(`⚠️ Failed to clear global commands: ${errorText}`)
+      const errorText = await getGlobalResponse.text()
+      console.log(`⚠️ Failed to get global commands: ${errorText}`)
       cleanupResults.push({
         type: 'global',
         success: false,
@@ -2650,10 +2674,11 @@ async function handleCleanupAllCommands(supabase: any) {
     
     for (const guildId of guildIds) {
       try {
-        const deleteResponse = await fetch(
+        // Get all guild commands first
+        const getGuildResponse = await fetch(
           `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
           {
-            method: 'DELETE',
+            method: 'GET',
             headers: {
               'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
               'Content-Type': 'application/json'
@@ -2661,17 +2686,40 @@ async function handleCleanupAllCommands(supabase: any) {
           }
         )
         
-        if (deleteResponse.ok) {
-          console.log(`✅ Cleared commands from guild ${guildId}`)
+        if (getGuildResponse.ok) {
+          const guildCommands = await getGuildResponse.json()
+          console.log(`Found ${guildCommands.length} guild commands to delete for guild ${guildId}`)
+          
+          // Delete each guild command individually
+          for (const command of guildCommands) {
+            const deleteResponse = await fetch(
+              `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands/${command.id}`,
+              {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+                  'Content-Type': 'application/json'
+                }
+              }
+            )
+            
+            if (deleteResponse.ok) {
+              console.log(`✅ Deleted guild command: ${command.name} from guild ${guildId}`)
+            } else {
+              const errorText = await deleteResponse.text()
+              console.log(`⚠️ Failed to delete guild command ${command.name} from guild ${guildId}: ${errorText}`)
+            }
+          }
+          
           cleanupResults.push({
             type: 'guild',
             guildId,
             success: true,
-            message: 'Guild commands cleared'
+            message: `Deleted ${guildCommands.length} guild commands`
           })
         } else {
-          const errorText = await deleteResponse.text()
-          console.log(`⚠️ Failed to clear commands from guild ${guildId}: ${errorText}`)
+          const errorText = await getGuildResponse.text()
+          console.log(`⚠️ Failed to get guild commands for guild ${guildId}: ${errorText}`)
           cleanupResults.push({
             type: 'guild',
             guildId,
