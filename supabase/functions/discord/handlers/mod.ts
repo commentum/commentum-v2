@@ -11,10 +11,26 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
   }
 
   const commandName = data.name
-  const userId = user.id
-  const username = user.username
+  // Handle both guild and DM interactions - user info can be in different places
+  const userId = user?.id || member?.user?.id
+  const username = user?.username || member?.user?.username || 'Unknown'
   const guildId = guild_id
   const guildName = member?.guild?.name || 'Unknown Server'
+
+  // Validate we have a user ID
+  if (!userId) {
+    console.error('Could not extract user ID from interaction:', JSON.stringify(interaction, null, 2))
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Could not identify user. Please try again.',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
 
   // Get user registration and role
   const { data: registration } = await supabase
