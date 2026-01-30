@@ -106,7 +106,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'platform',
           description: 'Choose your platform',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'AniList', value: 'anilist' },
@@ -117,13 +117,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Your platform user ID',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'server',
           description: 'Server name to register with',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
@@ -135,13 +135,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID to report',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Report reason',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'Spam', value: 'spam' },
@@ -156,7 +156,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'notes',
           description: 'Additional notes',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -168,7 +168,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to lookup',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
@@ -180,7 +180,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID to lookup',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         }
       ]
@@ -200,13 +200,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to warn',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for warning',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
@@ -218,13 +218,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to unwarn',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for removing warning',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -236,28 +236,20 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to mute',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for muting',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'duration',
           description: 'Duration in hours (default: 24)',
-          type: 4, // INTEGER
+          type: 4,
           required: false
-        }
-      ]
-    },
-        {
-          name: 'reason',
-          description: 'Reason for muting',
-          type: 3, // STRING
-          required: true
         }
       ]
     },
@@ -268,13 +260,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to unmute',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for unmuting',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -286,13 +278,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID to pin',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for pinning',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -304,13 +296,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID to unpin',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for unpinning',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -322,13 +314,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID to lock',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for locking',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -340,13 +332,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID to unlock',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for unlocking',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -358,19 +350,19 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID with report',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         },
         {
           name: 'reporter_id',
           description: 'Reporter user ID',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'resolution',
           description: 'Resolution type',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'Resolved', value: 'resolved' },
@@ -380,7 +372,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'notes',
           description: 'Review notes',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -396,7 +388,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'comment_id',
           description: 'Comment ID to delete',
-          type: 4, // INTEGER
+          type: 4,
           required: true
         }
       ]
@@ -408,19 +400,19 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'shadow',
           description: 'Shadow ban (true/false)',
-          type: 5, // BOOLEAN
+          type: 5,
           required: false
         }
       ]
@@ -432,13 +424,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to unban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for unban',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -450,13 +442,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to shadow ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for shadow ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         }
       ]
@@ -468,13 +460,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to unshadow ban',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'reason',
           description: 'Reason for removing shadow ban',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -486,13 +478,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to promote',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'role',
           description: 'New role',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'Moderator', value: 'moderator' },
@@ -503,7 +495,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'reason',
           description: 'Reason for promotion',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -515,13 +507,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'user_id',
           description: 'Platform user ID to demote',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'role',
           description: 'New role',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'User', value: 'user' },
@@ -532,7 +524,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'reason',
           description: 'Reason for demotion',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -544,7 +536,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'action',
           description: 'Action to perform',
-          type: 3, // STRING
+          type: 3,
           required: true,
           choices: [
             { name: 'View Config', value: 'view' },
@@ -554,13 +546,13 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'key',
           description: 'Configuration key',
-          type: 3, // STRING
+          type: 3,
           required: false
         },
         {
           name: 'value',
           description: 'New configuration value',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
@@ -572,25 +564,25 @@ async function handleGlobalCommandSync(): Promise<Response> {
         {
           name: 'server_name',
           description: 'Server name',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'guild_id',
           description: 'Discord guild ID',
-          type: 3, // STRING
+          type: 3,
           required: true
         },
         {
           name: 'webhook_url',
           description: 'Discord webhook URL',
-          type: 3, // STRING
+          type: 3,
           required: false
         },
         {
           name: 'role_id',
           description: 'Discord role ID for auto-assignment',
-          type: 3, // STRING
+          type: 3,
           required: false
         }
       ]
