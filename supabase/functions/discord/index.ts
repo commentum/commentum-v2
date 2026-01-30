@@ -747,6 +747,138 @@ async function handleConfigCommand(supabase: any, options: any, registration: an
   return await handleConfigCommand_impl(supabase, options, registration)
 }
 
+async function handleCleanupCommand(supabase: any, registration: any) {
+  // Only Super Admins can cleanup commands
+  if (!['super_admin', 'owner'].includes(registration.user_role)) {
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: '❌ Only Super Admins can cleanup Discord commands',
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  try {
+    // Get Discord config from environment variables
+    const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+    const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
+
+    if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: '❌ Discord configuration missing',
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Get all guild IDs
+    const guildIds = await getAllGuildIds(supababase)
+    
+    if (guildIds.length === 0) {
+      return new Response(
+        JSON.stringify({
+          type: 4,
+          data: {
+            content: '⚠️ No guilds found in server_configs table',
+            flags: 64
+          }
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log(`🧹 Starting cleanup of ${guildIds.length} guilds...`)
+
+    const cleanupResults = []
+    
+    for (const guildId of guildIds) {
+      try {
+        const deleteResponse = await fetch(
+          `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+
+        if (deleteResponse.ok) {
+          const result = await deleteResponse.json()
+          cleanupResults.push({
+            guildId,
+            success: true,
+            deletedCommands: result.length || 0,
+            message: `Deleted ${result.length || 0} commands`
+          })
+          console.log(`✅ Cleaned up guild ${guildId}: ${result.length || 0} commands deleted`)
+        } else {
+          const errorText = await deleteResponse.text()
+          cleanupResults.push({
+            guildId,
+            success: false,
+            error: errorText,
+            message: 'Failed to delete commands'
+          })
+          console.log(`❌ Failed to clean guild ${guildId}: ${errorText}`)
+        }
+      } catch (error) {
+        cleanupResults.push({
+          guildId,
+          success: false,
+          error: error.message,
+          message: 'Error during cleanup'
+        })
+        console.log(`❌ Error cleaning guild ${guildId}:`, error.message)
+      }
+    }
+
+    const successfulCleanups = cleanupResults.filter(r => r.success)
+    const failedCleanups = cleanupResults.filter(r => !r.success)
+    const totalDeleted = successfulCleanups.reduce((sum, r) => sum + r.deletedCommands, 0)
+
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `🧹 **Command Cleanup Complete!**\n\n` +
+            `📊 **Summary:**\n` +
+            `• **Guilds processed:** ${guildIds.length}\n` +
+            `• **Successful:** ${successfulCleanups.length}\n` +
+            `• **Failed:** ${failedCleanups.length}\n` +
+            `• **Total commands deleted:** ${totalDeleted}\n\n` +
+            `✅ **All guild commands cleared!** Ready for clean global sync.`,
+          flags: 64
+        }
+      }),
+      { status: failedCleanups.length === 0 ? 200 : 207, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+
+  } catch (error) {
+    console.error('Cleanup command error:', error)
+    return new Response(
+      JSON.stringify({
+        type: 4,
+        data: {
+          content: `❌ Failed to cleanup commands: ${error.message}`,
+          flags: 64
+        }
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+}
+
 async function handleSyncCommand(supabase: any, registration: any) {
   // Only Super Admins can sync commands
   if (!['super_admin', 'owner'].includes(registration.user_role)) {
@@ -1401,6 +1533,36 @@ async function handleGlobalSyncCommands(supabase: any) {
 
   console.log('Syncing commands globally to application')
 
+  // First, delete all existing commands from all guilds to avoid conflicts
+  const guildIds = await getAllGuildIds(supabase)
+  if (guildIds.length > 0) {
+    console.log(`🧹 Cleaning up existing commands from ${guildIds.length} guilds...`)
+    
+    for (const guildId of guildIds) {
+      try {
+        const deleteResponse = await fetch(
+          `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (deleteResponse.ok) {
+          console.log(`✅ Cleared commands from guild ${guildId}`)
+        } else {
+          const errorText = await deleteResponse.text()
+          console.log(`⚠️ Failed to clear commands from guild ${guildId}: ${errorText}`)
+        }
+      } catch (error) {
+        console.log(`❌ Error clearing guild ${guildId}:`, error.message)
+      }
+    }
+  }
+
   // Define slash commands
   const commands = [
     {
@@ -1939,6 +2101,7 @@ async function handleGlobalSyncCommands(supabase: any) {
           type: 4,
           data: {
             content: `✅ **Global bot sync successful!**\n\n` +
+              `🧹 **Cleanup:** Cleared commands from ${guildIds.length} guild(s)\n` +
               `🤖 **Commands synced:** ${syncedCommands.length}\n` +
               `🌐 **Scope:** Application-wide (available in all servers)\n` +
               `📋 **Server-specific data:** Will use server_configs table\n\n` +
@@ -2876,6 +3039,83 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
       ]
     },
     {
+      name: 'shadowban',
+      description: 'Shadow ban a user (Admin/Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to shadow ban',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for shadow ban',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
+      name: 'unshadowban',
+      description: 'Remove shadow ban from user (Admin/Super Admin only)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID to unshadow ban',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'reason',
+          description: 'Reason for removing shadow ban',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
+      name: 'add',
+      description: 'Manage server configurations (Super Admin only)',
+      options: [
+        {
+          name: 'subcommand',
+          description: 'Add subcommand',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'Add Server', value: 'app' },
+            { name: 'List Servers', value: 'list' },
+            { name: 'Remove Server', value: 'remove' }
+          ]
+        },
+        {
+          name: 'guild_name',
+          description: 'Server name',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'guild_id',
+          description: 'Discord server ID',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'webhook_url',
+          description: 'Discord webhook URL',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'role_id',
+          description: 'Discord role ID for moderators',
+          type: 3,
+          required: false
+        }
+      ]
+    },
+    {
       name: 'stats',
       description: 'View comment system statistics'
     },
@@ -2884,12 +3124,12 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
       description: 'Show help information'
     },
     {
-      name: 'sync',
-      description: 'Sync Discord commands (Super Admin only)'
+      name: 'cleanup',
+      description: 'Delete all commands from all guilds (Super Admin only)'
     },
     {
-      name: 'sync-multi',
-      description: 'Sync Discord commands to multiple servers (Super Admin only)'
+      name: 'sync',
+      description: 'Sync Discord commands globally (Super Admin only)'
     },
     {
       name: 'webhooks',
@@ -3117,11 +3357,8 @@ async function handleDiscordInteraction(supabase: any, params: any) {
       case 'sync':
         return await handleSyncCommand(supabase, registration)
       
-      case 'sync-multi':
-        return await handleSyncCommands(supabase) // Will use configured guild IDs
-      
-      case 'sync-global':
-        return await handleGlobalSyncCommands(supabase) // Sync to application globally
+      case 'cleanup':
+        return await handleCleanupCommand(supabase, registration)
       
       case 'webhooks':
         return await handleWebhooksCommand(supabase, options, registration)

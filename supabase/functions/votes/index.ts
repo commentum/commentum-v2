@@ -159,6 +159,10 @@ serve(async (req) => {
     queueDiscordNotification({
       type: 'vote_cast',
       voteType: vote_type,
+      user: {
+        id: user_info.user_id,
+        username: user_info.username || `User ${user_info.user_id}`
+      },
       comment: {
         id: comment.id,
         username: comment.username,
