@@ -25,12 +25,12 @@ Commentum v2 is a **comment backend API service** that provides:
 ### Integration Model
 
 ```
-┌─────────────┐           API           ┌──────────────┐
-│   Your App  │ ◄──────────────────────► │ Commentum v2 │
-│ (Frontend)  │                           │ (Backend API)  │
-└─────────────┘                           └──────────────┘
+┌─────────────┐           API           ┌───────────────┐
+│   Your App  │ ◄──────────────────────►│ Commentum v2  │
+│ (Frontend)  │                         │ (Backend API) │
+└─────────────┘                         └───────────────┘
       │                                           │
-      │ Displays                                   │ Stores &
+      │ Displays                                  │ Stores &
       │ Comments                                  │ Moderates
       ▼                                           ▼
    Users                                    PostgreSQL DB
