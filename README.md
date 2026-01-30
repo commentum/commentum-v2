@@ -49,7 +49,7 @@ Commentum v2 serves as a **centralized comment infrastructure** that multiple ap
 │ (Frontend)  │                         │ (Backend API) │
 └─────────────┘                         └───────────────┘
       │                                       │
-      │ Displays                               │ Stores &
+      │ Displays                              │ Stores &
       │ Comments                              │ Moderates
       ▼                                       ▼
    Users                                PostgreSQL DB
