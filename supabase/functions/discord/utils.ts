@@ -319,6 +319,16 @@ function getRoleColor(role: string): number {
   }
 }
 
+// Simple embed for general messages
+export function createSimpleEmbed(title: string, description: string, color: number = 0x5865F2): Response {
+  return createEmbedResponse(
+    title,
+    description,
+    [],
+    color
+  )
+}
+
 // Moderation action embeds
 export function createModerationEmbed(action: string, target: string, moderator: string, reason: string, details?: string): Response {
   const fields = [

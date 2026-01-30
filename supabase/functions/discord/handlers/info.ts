@@ -1,4 +1,4 @@
-import { createDiscordResponse, createErrorResponse, createStatsEmbed } from '../utils.ts'
+import { createDiscordResponse, createErrorResponse, createStatsEmbed, createSimpleEmbed } from '../utils.ts'
 
 // Discord API configuration
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
@@ -74,12 +74,10 @@ export async function handleAddCommand(supabase: any, moderatorId: string, moder
       .single()
 
     if (existingServer) {
-      return createDiscordResponse(
-        `❌ Server **${serverName}** is already configured!\n**Server Name:** ${existingServer.server_name}\n**Configured by:** Server setup\n\n` +
-        `**Current Settings:**\n` +
-        `• Role ID: ${existingServer.role_id || 'Not set'}\n` +
-        `• Webhook: ${existingServer.webhook_url ? 'Configured' : 'Not set'}\n` +
-        `• Status: ${existingServer.is_active ? '✅ Active' : '❌ Inactive'}`
+      return createSimpleEmbed(
+        'Server Already Configured',
+        `Server ${serverName} is already configured!\n\nServer Name: ${existingServer.server_name}\nConfigured by: Server setup\n\nCurrent Settings:\n• Role ID: ${existingServer.role_id || 'Not set'}\n• Webhook: ${existingServer.webhook_url ? 'Configured' : 'Not set'}\n• Status: ${existingServer.is_active ? 'Active' : 'Inactive'}`,
+        0xFFA500
       )
     }
 
@@ -104,19 +102,11 @@ export async function handleAddCommand(supabase: any, moderatorId: string, moder
 
     if (error) throw error
 
-    return createDiscordResponse(
-      `✅ Server **${serverName}** has been successfully configured!\n\n` +
-      `📋 **Server ID:** ${guildId}\n` +
-      `👑 **Configured by:** <@${moderatorId}>\n` +
-      `📅 **Configured:** ${new Date().toLocaleDateString()}\n` +
-      `${roleId ? `🎭 **Role ID:** ${roleId}\n` : ''}` +
-      `${webhookUrl ? `🔗 **Webhook:** Configured\n` : ''}\n\n` +
-      `🔧 **Next Steps:**\n` +
-      `• Members can now use \`/register\` and select this server\n` +
-      `• Users will be auto-assigned the Discord role if configured\n` +
-      `• Use \`/config action:view\` to see all settings\n\n` +
-      `📝 **Note:** Server "${serverName}" is now available for registration.`
-    )
+    return createSimpleEmbed(
+        'Server Configured Successfully',
+        `Server ${serverName} has been successfully configured!\n\nServer ID: ${guildId}\nConfigured by: <@${moderatorId}>\nConfigured: ${new Date().toLocaleDateString()}\n${roleId ? `Role ID: ${roleId}\n` : ''}${webhookUrl ? `Webhook: Configured\n` : ''}\n\nNext Steps:\n• Members can now use /register and select this server\n• Users will be auto-assigned the Discord role if configured\n• Use /config action:view to see all settings\n\nNote: Server "${serverName}" is now available for registration.`,
+        0x00FF00
+      )
 
   } catch (error) {
     console.error('Add command error:', error)
@@ -236,22 +226,11 @@ export async function handleRegisterCommand(supabase: any, userId: string, usern
     // Create role-specific welcome message
     const rolePermissions = getRolePermissions(userRole)
     
-    return createDiscordResponse(
-      `✅ **Welcome to ${serverName}!**\n\n` +
-      `👤 **Discord:** ${username}\n` +
-      `🎮 **Platform:** ${platform}\n` +
-      `🆔 **Platform ID:** ${platformUserId}\n` +
-      `🏢 **Server:** ${serverName}\n` +
-      `🎭 **Role:** ${userRole}\n` +
-      `📅 **Registered:** ${new Date().toLocaleDateString()}\n` +
-      roleInfo +
-      `\n🛠️ **Your Permissions:**\n${rolePermissions}\n\n` +
-      `📚 **Getting Started:**\n` +
-      `• Use \`/help\` to see all available commands\n` +
-      `• Use \`/stats\` to view platform statistics\n` +
-      `• Check pinned messages for server rules\n\n` +
-      `🎉 You're ready to use the Commentum system on ${serverName}!`
-    )
+    return createSimpleEmbed(
+        'Welcome to ' + serverName + '!',
+        `Discord: ${username}\nPlatform: ${platform}\nPlatform ID: ${platformUserId}\nServer: ${serverName}\nRole: ${userRole}\nRegistered: ${new Date().toLocaleDateString()}\n${roleInfo}\n\nYour Permissions:\n${rolePermissions}\n\nGetting Started:\n• Use /help to see all available commands\n• Use /stats to view platform statistics\n• Check pinned messages for server rules\n\nYou're ready to use the Commentum system on ${serverName}!`,
+        0x00FF00
+      )
 
   } catch (error) {
     console.error('Register command error:', error)

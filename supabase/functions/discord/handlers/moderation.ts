@@ -1,4 +1,4 @@
-import { createDiscordResponse, createErrorResponse } from '../utils.ts'
+import { createDiscordResponse, createErrorResponse, createModerationEmbed } from '../utils.ts'
 
 // Handle warn command
 export async function handleWarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -84,7 +84,7 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
           moderation_action: 'auto_ban'
         })
         .eq('user_id', targetUserId)
-      autoAction = `\n⚠️ **AUTO-BANNED** - User exceeded ${banThreshold} warnings`
+      autoAction = `AUTO-BANNED - User exceeded ${banThreshold} warnings`
     } else if (newWarningCount >= muteThreshold) {
       // Auto-mute for 24 hours
       const muteUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
@@ -99,17 +99,15 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
           moderation_action: 'auto_mute'
         })
         .eq('user_id', targetUserId)
-      autoAction = `\n🔇 **AUTO-MUTED** - User exceeded ${muteThreshold} warnings (24 hours)`
+      autoAction = `AUTO-MUTED - User exceeded ${muteThreshold} warnings (24 hours)`
     }
 
-    return createDiscordResponse(
-      `✅ **User Warned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `⚠️ **Warning Count:** ${newWarningCount}\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}` +
-      autoAction
+    return createModerationEmbed(
+      'warn',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason,
+      `Warning Count: ${newWarningCount}${autoAction ? ' | ' + autoAction : ''}`
     )
 
   } catch (error) {
@@ -173,20 +171,18 @@ export async function handleUnwarnCommand(supabase: any, moderatorId: string, mo
     let liftedAction = ''
     if (targetUserComment.user_banned && newWarningCount < 5) {
       // Could add logic here to auto-unban if desired
-      liftedAction = '\n💡 Consider lifting ban as warnings are reduced'
+      liftedAction = 'Consider lifting ban as warnings are reduced'
     } else if (targetUserComment.user_muted_until && new Date(targetUserComment.user_muted_until) > new Date() && newWarningCount < 3) {
       // Could add logic here to auto-unmute if desired
-      liftedAction = '\n💡 Consider lifting mute as warnings are reduced'
+      liftedAction = 'Consider lifting mute as warnings are reduced'
     }
 
-    return createDiscordResponse(
-      `✅ **Warning Removed**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `⚠️ **New Warning Count:** ${newWarningCount}\n` +
-      `📝 **Reason:** ${reason || 'No reason provided'}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}` +
-      liftedAction
+    return createModerationEmbed(
+      'unwarn',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason || 'No reason provided',
+      `New Warning Count: ${newWarningCount}${liftedAction ? ' | ' + liftedAction : ''}`
     )
 
   } catch (error) {
@@ -243,13 +239,12 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
 
     if (error) throw error
 
-    return createDiscordResponse(
-      `🔇 **User Muted**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `⏰ **Duration:** ${duration} hours\n` +
-      `📅 **Muted Until:** ${new Date(muteUntil).toLocaleString()}\n` +
-      `📝 **Reason:** ${reason}`
+    return createModerationEmbed(
+      'mute',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason,
+      `Duration: ${duration} hours | Muted Until: ${new Date(muteUntil).toLocaleString()}`
     )
 
   } catch (error) {
@@ -287,12 +282,12 @@ export async function handleUnmuteCommand(supabase: any, moderatorId: string, mo
 
     if (error) throw error
 
-    return createDiscordResponse(
-      `🔊 **User Unmuted**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}`
+    return createModerationEmbed(
+      'unmute',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason,
+      'User can now post and interact normally'
     )
 
   } catch (error) {
@@ -351,14 +346,12 @@ export async function handlePinCommand(supabase: any, moderatorId: string, moder
 
     if (error) throw error
 
-    return createDiscordResponse(
-      `📌 **Comment Pinned**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `📄 **Content Preview:** ${comment.content.substring(0, 100)}${comment.content.length > 100 ? '...' : ''}`
+    return createModerationEmbed(
+      'pin',
+      `Comment ${commentId} by ${comment.username}`,
+      `<@${moderatorId}>`,
+      reason,
+      `Content: ${comment.content.substring(0, 100)}${comment.content.length > 100 ? '...' : ''}`
     )
 
   } catch (error) {
@@ -413,13 +406,12 @@ export async function handleUnpinCommand(supabase: any, moderatorId: string, mod
 
     if (error) throw error
 
-    return createDiscordResponse(
-      `📌 **Comment Unpinned**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}`
+    return createModerationEmbed(
+      'unpin',
+      `Comment ${commentId} by ${comment.username}`,
+      `<@${moderatorId}>`,
+      reason,
+      'Comment is no longer pinned'
     )
 
   } catch (error) {
