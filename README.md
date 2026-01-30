@@ -44,10 +44,10 @@ Commentum v2 serves as a **centralized comment infrastructure** that multiple ap
 4. **Commentum v2** handles moderation, voting, reporting, etc.
 
 ```
-┌─────────────┐           API           ┌──────────────┐
-│   Your App  │ ◄──────────────────────► │ Commentum v2 │
-│ (Frontend)  │                       │ (Backend API)  │
-└─────────────┘                       └──────────────┘
+┌─────────────┐           API           ┌───────────────┐
+│   Your App  │ ◄─────────────────────► │ Commentum v2  │
+│ (Frontend)  │                         │ (Backend API) │
+└─────────────┘                         └───────────────┘
       │                                       │
       │ Displays                               │ Stores &
       │ Comments                              │ Moderates
