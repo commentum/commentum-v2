@@ -760,3 +760,206 @@ function canModerate(moderatorRole: string, targetRole: string): boolean {
   
   return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
 }
+// Handle ban command
+export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
+  try {
+    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+      return createErrorResponse('Only admins can ban users.')
+    }
+
+    const targetUserId = options?.find((opt: any) => opt.name === 'user_id')?.value
+    const reason = options?.find((opt: any) => opt.name === 'reason')?.value
+
+    if (!targetUserId || !reason) {
+      return createErrorResponse('user_id and reason are required.')
+    }
+
+    // Get target user's current status
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
+      .eq('user_id', targetUserId)
+      .single()
+
+    if (!targetUserComment) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    if (!canModerate(userRole, targetUserComment.user_role)) {
+      return createErrorResponse('Cannot ban user with equal or higher role.')
+    }
+
+    // Update all user's comments
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_banned: true,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: moderatorId,
+        moderation_reason: reason,
+        moderation_action: 'ban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    return createDiscordResponse(
+      `🔨 **User Banned**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Moderator:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}`
+    )
+
+  } catch (error) {
+    console.error('Ban command error:', error)
+    return createErrorResponse(`Failed to ban user: ${error.message}`)
+  }
+}
+
+// Handle unban command
+export async function handleUnbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
+  try {
+    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+      return createErrorResponse('Only admins can unban users.')
+    }
+
+    const targetUserId = options?.find((opt: any) => opt.name === 'user_id')?.value
+    const reason = options?.find((opt: any) => opt.name === 'reason')?.value || 'Manual unban'
+
+    if (!targetUserId) {
+      return createErrorResponse('user_id is required.')
+    }
+
+    // Update all user's comments
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_banned: false,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: moderatorId,
+        moderation_reason: reason,
+        moderation_action: 'unban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    return createDiscordResponse(
+      `🔓 **User Unbanned**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Moderator:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}`
+    )
+
+  } catch (error) {
+    console.error('Unban command error:', error)
+    return createErrorResponse(`Failed to unban user: ${error.message}`)
+  }
+}
+
+// Handle shadowban command
+export async function handleShadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
+  try {
+    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+      return createErrorResponse('Only admins can shadowban users.')
+    }
+
+    const targetUserId = options?.find((opt: any) => opt.name === 'user_id')?.value
+    const reason = options?.find((opt: any) => opt.name === 'reason')?.value
+
+    if (!targetUserId || !reason) {
+      return createErrorResponse('user_id and reason are required.')
+    }
+
+    // Get target user's current status
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
+      .eq('user_id', targetUserId)
+      .single()
+
+    if (!targetUserComment) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    if (!canModerate(userRole, targetUserComment.user_role)) {
+      return createErrorResponse('Cannot shadowban user with equal or higher role.')
+    }
+
+    // Update all user's comments
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_shadowbanned: true,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: moderatorId,
+        moderation_reason: reason,
+        moderation_action: 'shadowban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    return createDiscordResponse(
+      `🕶️ **User Shadowbanned**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Moderator:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
+      `⚠️ **User's comments will be hidden from others but visible to themselves.**`
+    )
+
+  } catch (error) {
+    console.error('Shadowban command error:', error)
+    return createErrorResponse(`Failed to shadowban user: ${error.message}`)
+  }
+}
+
+// Handle unshadowban command
+export async function handleUnshadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
+  try {
+    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+      return createErrorResponse('Only admins can unshadowban users.')
+    }
+
+    const targetUserId = options?.find((opt: any) => opt.name === 'user_id')?.value
+    const reason = options?.find((opt: any) => opt.name === 'reason')?.value || 'Manual unshadowban'
+
+    if (!targetUserId) {
+      return createErrorResponse('user_id is required.')
+    }
+
+    // Update all user's comments
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_shadowbanned: false,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: moderatorId,
+        moderation_reason: reason,
+        moderation_action: 'unshadowban'
+      })
+      .eq('user_id', targetUserId)
+
+    if (error) throw error
+
+    return createDiscordResponse(
+      `🌟 **User Unshadowbanned**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Moderator:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
+      `✅ **User's comments will now be visible to everyone again.**`
+    )
+
+  } catch (error) {
+    console.error('Unshadowban command error:', error)
+    return createErrorResponse(`Failed to unshadowban user: ${error.message}`)
+  }
+}
