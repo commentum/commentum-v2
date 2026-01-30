@@ -102,32 +102,32 @@ export function createCommentEmbed(comment: any, showFullContent: boolean = fals
   
   const fields = [
     {
-      name: '👤 Author',
+      name: 'Author',
       value: `${comment.username} (${comment.user_id})`,
       inline: true
     },
     {
-      name: '🎭 Role',
+      name: 'Role',
       value: comment.user_role,
       inline: true
     },
     {
-      name: '🎮 Platform',
+      name: 'Platform',
       value: comment.client_type,
       inline: true
     },
     {
-      name: '📊 Engagement',
-      value: `👍 ${comment.upvotes} | 👎 ${comment.downvotes} | 📈 ${comment.vote_score}`,
+      name: 'Engagement',
+      value: `Up: ${comment.upvotes} | Down: ${comment.downvotes} | Score: ${comment.vote_score}`,
       inline: true
     },
     {
-      name: '🚨 Reports',
+      name: 'Reports',
       value: `${comment.report_count} | Status: ${comment.report_status}`,
       inline: true
     },
     {
-      name: '📅 Created',
+      name: 'Created',
       value: new Date(comment.created_at).toLocaleDateString(),
       inline: true
     }
@@ -135,14 +135,14 @@ export function createCommentEmbed(comment: any, showFullContent: boolean = fals
 
   // Add moderation status if applicable
   const statusFields = []
-  if (comment.deleted) statusFields.push('🗑️ Deleted')
-  if (comment.pinned) statusFields.push('📌 Pinned')
-  if (comment.locked) statusFields.push('🔒 Locked')
-  if (comment.edited) statusFields.push(`✏️ Edited (${comment.edit_count})`)
+  if (comment.deleted) statusFields.push('Deleted')
+  if (comment.pinned) statusFields.push('Pinned')
+  if (comment.locked) statusFields.push('Locked')
+  if (comment.edited) statusFields.push(`Edited (${comment.edit_count})`)
   
   if (statusFields.length > 0) {
     fields.push({
-      name: '🔐 Status',
+      name: 'Status',
       value: statusFields.join(' | '),
       inline: true
     })
@@ -150,7 +150,7 @@ export function createCommentEmbed(comment: any, showFullContent: boolean = fals
 
   // Add media info
   fields.push({
-    name: '🎬 Media',
+    name: 'Media',
     value: `${comment.media_title} (${comment.media_type})`,
     inline: true
   })
@@ -160,12 +160,12 @@ export function createCommentEmbed(comment: any, showFullContent: boolean = fals
     comment.content.length > 200 ? comment.content.substring(0, 200) + '...' : comment.content
 
   return createEmbedResponse(
-    `💬 Comment #${comment.id}`,
+    `Comment #${comment.id}`,
     content,
     fields,
     getStatusColor(comment),
     {
-      text: `Comment ID: ${comment.id}`
+      text: `ID: ${comment.id}`
     },
     comment.user_avatar
   )
@@ -180,27 +180,27 @@ export function createUserEmbed(user: any, comments: any[], discordRegistration?
 
   const fields = [
     {
-      name: '👤 User ID',
+      name: 'User ID',
       value: user.user_id,
       inline: true
     },
     {
-      name: '🎭 Role',
+      name: 'Role',
       value: user.user_role,
       inline: true
     },
     {
-      name: '🎮 Platform',
+      name: 'Platform',
       value: user.client_type,
       inline: true
     },
     {
-      name: '📊 Statistics',
-      value: `💬 ${totalComments} | 👍 ${totalUpvotes} | 👎 ${totalDownvotes} | 🚨 ${totalReports}`,
+      name: 'Statistics',
+      value: `Comments: ${totalComments} | Up: ${totalUpvotes} | Down: ${totalDownvotes} | Reports: ${totalReports}`,
       inline: true
     },
     {
-      name: '📅 Last Activity',
+      name: 'Last Activity',
       value: lastActivity,
       inline: true
     }
@@ -209,29 +209,29 @@ export function createUserEmbed(user: any, comments: any[], discordRegistration?
   // Add Discord info if available
   if (discordRegistration) {
     fields.push({
-      name: '🔗 Discord',
-      value: `${discordRegistration.discord_username} | ✅ Registered`,
+      name: 'Discord',
+      value: `${discordRegistration.discord_username} | Registered`,
       inline: true
     })
   }
 
   // Add user status
   const statusFields = []
-  if (user.user_banned) statusFields.push('🔨 Banned')
-  if (user.user_shadow_banned) statusFields.push('👻 Shadow Banned')
-  if (user.user_muted_until) statusFields.push(`🔇 Muted until ${new Date(user.user_muted_until).toLocaleDateString()}`)
-  if (user.user_warnings > 0) statusFields.push(`⚠️ ${user.user_warnings} warnings`)
+  if (user.user_banned) statusFields.push('Banned')
+  if (user.user_shadow_banned) statusFields.push('Shadow Banned')
+  if (user.user_muted_until) statusFields.push(`Muted until ${new Date(user.user_muted_until).toLocaleDateString()}`)
+  if (user.user_warnings > 0) statusFields.push(`${user.user_warnings} warnings`)
   
   if (statusFields.length > 0) {
     fields.push({
-      name: '⚖️ Status',
+      name: 'Status',
       value: statusFields.join(' | '),
       inline: true
     })
   }
 
   return createEmbedResponse(
-    `👤 User Profile: ${user.username}`,
+    `User Profile: ${user.username}`,
     `Platform user with ${totalComments} comments`,
     fields,
     getRoleColor(user.user_role),
@@ -245,52 +245,52 @@ export function createUserEmbed(user: any, comments: any[], discordRegistration?
 export function createStatsEmbed(stats: any): Response {
   const fields = [
     {
-      name: '💬 Comments',
+      name: 'Comments',
       value: `${stats.totalComments} total (${stats.activeComments} active)`,
       inline: true
     },
     {
-      name: '👍 Engagement',
-      value: `👍 ${stats.totalUpvotes} | 👎 ${stats.totalDownvotes}`,
+      name: 'Engagement',
+      value: `Up: ${stats.totalUpvotes} | Down: ${stats.totalDownvotes}`,
       inline: true
     },
     {
-      name: '🚨 Reports',
+      name: 'Reports',
       value: stats.totalReports.toString(),
       inline: true
     },
     {
-      name: '🏢 Servers',
+      name: 'Servers',
       value: stats.activeServers.toString(),
       inline: true
     },
     {
-      name: '👥 Users',
-      value: `🛡️ ${stats.mods} | 👑 ${stats.admins} | ⚡ ${stats.superAdmins}`,
+      name: 'Users',
+      value: `Mods: ${stats.mods} | Admins: ${stats.admins} | Super Admins: ${stats.superAdmins}`,
       inline: true
     },
     {
-      name: '🎮 Platforms',
+      name: 'Platforms',
       value: `AniList: ${stats.anilistUsers} | MAL: ${stats.malUsers} | SIMKL: ${stats.simklUsers}`,
       inline: true
     }
   ]
 
   const systemStatus = [
-    stats.systemEnabled ? '✅ System' : '❌ System',
-    stats.votingEnabled ? '✅ Voting' : '❌ Voting',
-    stats.reportingEnabled ? '✅ Reporting' : '❌ Reporting',
-    stats.discordEnabled ? '✅ Discord' : '❌ Discord'
+    stats.systemEnabled ? 'System: Online' : 'System: Offline',
+    stats.votingEnabled ? 'Voting: Online' : 'Voting: Offline',
+    stats.reportingEnabled ? 'Reporting: Online' : 'Reporting: Offline',
+    stats.discordEnabled ? 'Discord: Online' : 'Discord: Offline'
   ].join(' | ')
 
   fields.push({
-    name: '⚙️ System Status',
+    name: 'System Status',
     value: systemStatus,
     inline: false
   })
 
   return createEmbedResponse(
-    '📊 Commentum System Statistics',
+    'Commentum System Statistics',
     'Real-time system performance metrics',
     fields,
     0x00FF00,
@@ -323,17 +323,17 @@ function getRoleColor(role: string): number {
 export function createModerationEmbed(action: string, target: string, moderator: string, reason: string, details?: string): Response {
   const fields = [
     {
-      name: '👤 Target',
+      name: 'Target',
       value: target,
       inline: true
     },
     {
-      name: '🛡️ Moderator',
+      name: 'Moderator',
       value: moderator,
       inline: true
     },
     {
-      name: '📝 Reason',
+      name: 'Reason',
       value: reason,
       inline: false
     }
@@ -341,7 +341,7 @@ export function createModerationEmbed(action: string, target: string, moderator:
 
   if (details) {
     fields.push({
-      name: '📋 Details',
+      name: 'Details',
       value: details,
       inline: false
     })
@@ -361,8 +361,8 @@ export function createModerationEmbed(action: string, target: string, moderator:
   }
 
   return createEmbedResponse(
-    `⚖️ ${action.charAt(0).toUpperCase() + action.slice(1)}`,
-    `Moderation action completed`,
+    `${action.charAt(0).toUpperCase() + action.slice(1)}`,
+    'Moderation action completed',
     fields,
     colors[action as keyof typeof colors] || 0x5865F2,
     {
