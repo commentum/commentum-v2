@@ -240,11 +240,19 @@ async function handleGlobalCommandSync(): Promise<Response> {
           required: true
         },
         {
+          name: 'reason',
+          description: 'Reason for muting',
+          type: 3, // STRING
+          required: true
+        },
+        {
           name: 'duration',
           description: 'Duration in hours (default: 24)',
           type: 4, // INTEGER
           required: false
-        },
+        }
+      ]
+    },
         {
           name: 'reason',
           description: 'Reason for muting',
