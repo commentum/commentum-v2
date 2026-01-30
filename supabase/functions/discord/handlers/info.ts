@@ -386,7 +386,7 @@ function getHelpContent(role: string): string {
     `• \`/unban user_id:<id> reason:<reason>\` - Unban user\n` +
     `• \`/shadowban user_id:<id> reason:<reason>\` - Shadow ban\n` +
     `• \`/unshadowban user_id:<id> reason:<reason>\` - Remove shadow ban\n` +
-    `• \`/delete comment_id:<id>\` - Delete any comment\n` +
+    `• \`/delete comment_id:<id>\` - Delete any comment\n`;
 
   const superAdminCommands = `\n⚡ **Super Admin Commands**\n` +
     `• \`/promote user_id:<id> role:<role> [reason:<text>]\` - Promote user\n` +
