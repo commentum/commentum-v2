@@ -2440,6 +2440,9 @@ serve(async (req) => {
           discord_user_id
         })
       
+      case 'cleanup_all':
+        return await handleCleanupAllCommands(supabase)
+      
       case 'sync_commands':
         return await handleSyncCommands(supabase)
       
@@ -2577,6 +2580,130 @@ async function handleGetUserRole(supabase: any, params: any) {
       is_verified: registration.is_verified
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleCleanupAllCommands(supabase: any) {
+  // Get Discord config from environment variables
+  const DISCORD_BOT_TOKEN = Deno.env.get('DISCORD_BOT_TOKEN')
+  const DISCORD_CLIENT_ID = Deno.env.get('DISCORD_CLIENT_ID')
+
+  if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID) {
+    return new Response(
+      JSON.stringify({ 
+        error: 'Discord configuration missing',
+        details: {
+          bot_token: !!DISCORD_BOT_TOKEN,
+          client_id: !!DISCORD_CLIENT_ID
+        }
+      }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  console.log('🧹 Starting complete cleanup of all Discord commands...')
+
+  const cleanupResults = []
+
+  // 1. Clean up global commands first
+  try {
+    const globalDeleteResponse = await fetch(
+      `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/commands`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
+    
+    if (globalDeleteResponse.ok) {
+      console.log('✅ Cleared all global commands')
+      cleanupResults.push({
+        type: 'global',
+        success: true,
+        message: 'All global commands cleared'
+      })
+    } else {
+      const errorText = await globalDeleteResponse.text()
+      console.log(`⚠️ Failed to clear global commands: ${errorText}`)
+      cleanupResults.push({
+        type: 'global',
+        success: false,
+        error: errorText
+      })
+    }
+  } catch (error) {
+    console.log(`❌ Error clearing global commands:`, error.message)
+    cleanupResults.push({
+      type: 'global',
+      success: false,
+      error: error.message
+    })
+  }
+
+  // 2. Clean up guild commands
+  const guildIds = await getAllGuildIds(supabase)
+  if (guildIds.length > 0) {
+    console.log(`🧹 Cleaning up commands from ${guildIds.length} guilds...`)
+    
+    for (const guildId of guildIds) {
+      try {
+        const deleteResponse = await fetch(
+          `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
+          {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        )
+        
+        if (deleteResponse.ok) {
+          console.log(`✅ Cleared commands from guild ${guildId}`)
+          cleanupResults.push({
+            type: 'guild',
+            guildId,
+            success: true,
+            message: 'Guild commands cleared'
+          })
+        } else {
+          const errorText = await deleteResponse.text()
+          console.log(`⚠️ Failed to clear commands from guild ${guildId}: ${errorText}`)
+          cleanupResults.push({
+            type: 'guild',
+            guildId,
+            success: false,
+            error: errorText
+          })
+        }
+      } catch (error) {
+        console.log(`❌ Error clearing guild ${guildId}:`, error.message)
+        cleanupResults.push({
+          type: 'guild',
+          guildId,
+          success: false,
+          error: error.message
+        })
+      }
+    }
+  }
+
+  const successfulCleanups = cleanupResults.filter(r => r.success)
+  const failedCleanups = cleanupResults.filter(r => !r.success)
+
+  return new Response(
+    JSON.stringify({
+      success: failedCleanups.length === 0,
+      totalOperations: cleanupResults.length,
+      successful: successfulCleanups.length,
+      failed: failedCleanups.length,
+      results: cleanupResults,
+      message: `Cleaned up ${successfulCleanups.length}/${cleanupResults.length} command sets${failedCleanups.length > 0 ? ` (${failedCleanups.length} failed)` : ''}`
+    }),
+    { status: failedCleanups.length === 0 ? 200 : 207, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
