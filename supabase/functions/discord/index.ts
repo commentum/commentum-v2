@@ -780,8 +780,8 @@ async function handleCleanupCommand(supabase: any, registration: any) {
       )
     }
 
-    // Get all guild IDs
-    const guildIds = await getAllGuildIds(supababase)
+    // FIXED: Changed from 'supababase' to 'supabase'
+    const guildIds = await getAllGuildIds(supabase)
     
     if (guildIds.length === 0) {
       return new Response(
@@ -799,13 +799,15 @@ async function handleCleanupCommand(supabase: any, registration: any) {
     console.log(`🧹 Starting cleanup of ${guildIds.length} guilds...`)
 
     const cleanupResults = []
+    const DISCORD_API_BASE = 'https://discord.com/api/v10'
     
     for (const guildId of guildIds) {
       try {
-        const deleteResponse = await fetch(
+        // First, get all commands for this guild
+        const getResponse = await fetch(
           `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
           {
-            method: 'DELETE',
+            method: 'GET',
             headers: {
               'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
               'Content-Type': 'application/json'
@@ -813,15 +815,53 @@ async function handleCleanupCommand(supabase: any, registration: any) {
           }
         )
 
-        if (deleteResponse.ok) {
-          const result = await deleteResponse.json()
+        if (!getResponse.ok) {
+          const errorText = await getResponse.text()
+          cleanupResults.push({
+            guildId,
+            success: false,
+            error: errorText,
+            message: 'Failed to fetch commands'
+          })
+          console.log(`❌ Failed to fetch commands from guild ${guildId}: ${errorText}`)
+          continue
+        }
+
+        const commands = await getResponse.json()
+        console.log(`Found ${commands.length} commands in guild ${guildId}`)
+
+        if (commands.length === 0) {
           cleanupResults.push({
             guildId,
             success: true,
-            deletedCommands: result.length || 0,
-            message: `Deleted ${result.length || 0} commands`
+            deletedCommands: 0,
+            message: 'No commands to delete'
           })
-          console.log(`✅ Cleaned up guild ${guildId}: ${result.length || 0} commands deleted`)
+          console.log(`✅ No commands in guild ${guildId}`)
+          continue
+        }
+
+        // Delete all commands by setting empty array (bulk delete)
+        const deleteResponse = await fetch(
+          `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
+          {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify([]) // Empty array removes all commands
+          }
+        )
+
+        if (deleteResponse.ok) {
+          cleanupResults.push({
+            guildId,
+            success: true,
+            deletedCommands: commands.length,
+            message: `Deleted ${commands.length} commands`
+          })
+          console.log(`✅ Cleaned up guild ${guildId}: ${commands.length} commands deleted`)
         } else {
           const errorText = await deleteResponse.text()
           cleanupResults.push({
@@ -857,7 +897,9 @@ async function handleCleanupCommand(supabase: any, registration: any) {
             `• **Successful:** ${successfulCleanups.length}\n` +
             `• **Failed:** ${failedCleanups.length}\n` +
             `• **Total commands deleted:** ${totalDeleted}\n\n` +
-            `✅ **All guild commands cleared!** Ready for clean global sync.`,
+            `${failedCleanups.length > 0 ? 
+              `⚠️ **Failed guilds:**\n${failedCleanups.map(f => `• ${f.guildId}: ${f.message}`).join('\n')}\n\n` : 
+              '✅ **All guild commands cleared!** Ready for clean global sync.'}`,
           flags: 64
         }
       }),
