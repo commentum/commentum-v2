@@ -21,12 +21,12 @@
 ### How Integration Works
 
 ```
-┌─────────────────┐      HTTP API      ┌──────────────────┐
-│                 │ ◄─────────────────► │                  │
-│   Your App      │                   │ Commentum v2      │
-│   (Frontend)    │                   │ (Backend Service)  │
-│                 │                   │                  │
-└─────────────────┘                   └──────────────────┘
+┌─────────────────┐      HTTP API       ┌───────────────────┐
+│                 │ ◄─────────────────► │                   │
+│   Your App      │                     │   Commentum v2    │
+│   (Frontend)    │                     │ (Backend Service) │
+│                 │                     │                   │
+└─────────────────┘                     └───────────────────┘
         │                                     │
         │                                     │
         │ Displays                            │ Stores &
