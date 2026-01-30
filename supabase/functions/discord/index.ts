@@ -2610,6 +2610,33 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
 
   console.log(`Syncing commands to ${targetGuildIds.length} guilds:`, targetGuildIds)
 
+  // First, delete all existing commands from all target guilds to avoid conflicts with global commands
+  console.log(`🧹 Cleaning up existing commands from ${targetGuildIds.length} guilds...`)
+  
+  for (const guildId of targetGuildIds) {
+    try {
+      const deleteResponse = await fetch(
+        `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/guilds/${guildId}/commands`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bot ${DISCORD_BOT_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      
+      if (deleteResponse.ok) {
+        console.log(`✅ Cleared commands from guild ${guildId}`)
+      } else {
+        const errorText = await deleteResponse.text()
+        console.log(`⚠️ Failed to clear commands from guild ${guildId}: ${errorText}`)
+      }
+    } catch (error) {
+      console.log(`❌ Error clearing guild ${guildId}:`, error.message)
+    }
+  }
+
   // Define slash commands
   const commands = [
     {
@@ -3033,42 +3060,6 @@ async function handleSyncCommands(supabase: any, guildIds?: string[]) {
         {
           name: 'value',
           description: 'New configuration value',
-          type: 3,
-          required: false
-        }
-      ]
-    },
-    {
-      name: 'shadowban',
-      description: 'Shadow ban a user (Admin/Super Admin only)',
-      options: [
-        {
-          name: 'user_id',
-          description: 'Platform user ID to shadow ban',
-          type: 3,
-          required: true
-        },
-        {
-          name: 'reason',
-          description: 'Reason for shadow ban',
-          type: 3,
-          required: true
-        }
-      ]
-    },
-    {
-      name: 'unshadowban',
-      description: 'Remove shadow ban from user (Admin/Super Admin only)',
-      options: [
-        {
-          name: 'user_id',
-          description: 'Platform user ID to unshadow ban',
-          type: 3,
-          required: true
-        },
-        {
-          name: 'reason',
-          description: 'Reason for removing shadow ban',
           type: 3,
           required: false
         }
