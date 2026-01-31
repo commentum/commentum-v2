@@ -1,9 +1,19 @@
 // Authentication utilities for admin/moderator verification
+import { getUserDetails } from './userUtils.ts'
 
-// Check if user has admin/moderator role based on user_id only
-export async function verifyAdminAccess(supabase: any, userId: string) {
-  // Get user role from config
-  const userRole = await getUserRole(supabase, userId)
+// Check if user has admin/moderator role based on user_id and client_type
+export async function verifyAdminAccess(supabase: any, userId: string, clientType?: string) {
+  // For backward compatibility, if no client_type provided, check config
+  if (!clientType) {
+    const userRole = await getUserRoleFromConfig(supabase, userId)
+    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+      return { valid: false, reason: 'Insufficient permissions' }
+    }
+    return { valid: true, role: userRole }
+  }
+
+  // Get user role from users table
+  const userRole = await getUserRole(supabase, userId, clientType)
   if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
     return { valid: false, reason: 'Insufficient permissions' }
   }
@@ -11,8 +21,19 @@ export async function verifyAdminAccess(supabase: any, userId: string) {
   return { valid: true, role: userRole }
 }
 
-// Get user role from configuration
-export async function getUserRole(supabase: any, userId: string) {
+// Get user role from users table (preferred method)
+export async function getUserRole(supabase: any, userId: string, clientType: string) {
+  try {
+    const user = await getUserDetails(supabase, userId, clientType, true) // Include hidden for role check
+    return user ? user.user_role : 'user'
+  } catch (error) {
+    console.error('Get user role error:', error)
+    return 'user'
+  }
+}
+
+// Get user role from configuration (fallback for backward compatibility)
+export async function getUserRoleFromConfig(supabase: any, userId: string) {
   try {
     const { data: owners } = await supabase
       .from('config')
@@ -49,7 +70,7 @@ export async function getUserRole(supabase: any, userId: string) {
     if (moderatorList.includes(userId)) return 'moderator'
     return 'user'
   } catch (error) {
-    console.error('Get user role error:', error)
+    console.error('Get user role from config error:', error)
     return 'user'
   }
 }

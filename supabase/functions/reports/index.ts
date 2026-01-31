@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole } from '../shared/auth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { getOrCreateUser, updateUserStats, canUserAct } from '../shared/userUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,11 +20,11 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, comment_id, reporter_info, reason, notes, moderator_info, resolution, review_notes } = await req.json()
+    const { action, comment_id, reporter_info, reason, notes, moderator_info, resolution, review_notes, client_type } = await req.json()
 
     switch (action) {
       case 'create':
-        return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes })
+        return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes, client_type })
       
       case 'resolve':
         // Resolve requires admin authentication (no token needed)
@@ -51,7 +52,7 @@ serve(async (req) => {
           )
         }
 
-        const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+        const adminVerification = await verifyAdminAccess(supabase, moderator_id, client_type)
         if (!adminVerification.valid) {
           return new Response(
             JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
@@ -59,7 +60,7 @@ serve(async (req) => {
           )
         }
 
-        return await handleResolveReport(supabase, { comment_id, reporter_info, moderator_id, resolution, review_notes })
+        return await handleResolveReport(supabase, { comment_id, reporter_info, moderator_id, resolution, review_notes, client_type })
       
       case 'get_queue':
         // Get queue requires admin authentication (no token needed)
@@ -106,12 +107,12 @@ serve(async (req) => {
 })
 
 async function handleCreateReport(supabase: any, params: any) {
-  const { comment_id, reporter_info, reason, notes } = params
+  const { comment_id, reporter_info, reason, notes, client_type } = params
 
   // Validate required fields
-  if (!comment_id || !reporter_info || !reason) {
+  if (!comment_id || !reporter_info || !reason || !client_type) {
     return new Response(
-      JSON.stringify({ error: 'comment_id, reporter_info, and reason are required' }),
+      JSON.stringify({ error: 'comment_id, reporter_info, reason, and client_type are required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -154,6 +155,39 @@ async function handleCreateReport(supabase: any, params: any) {
       JSON.stringify({ error: 'Reporting system is disabled' }),
       { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
+  }
+
+  // Ensure reporter user record exists and check if user can act
+  const reporterRecord = await getOrCreateUser(supabase, reporter_id, client_type, reporter_info.username, reporter_info.avatar)
+  if (!reporterRecord) {
+    return new Response(
+      JSON.stringify({ error: 'Failed to create reporter user record' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Check if reporter can still act (in case status changed)
+  if (!canUserAct(reporterRecord)) {
+    if (reporterRecord.user_banned) {
+      return new Response(
+        JSON.stringify({ error: 'User is banned' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
+    if (reporterRecord.user_shadow_banned) {
+      return new Response(
+        JSON.stringify({ error: 'Access denied' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    
+    if (reporterRecord.user_muted_until && new Date(reporterRecord.user_muted_until) > new Date()) {
+      return new Response(
+        JSON.stringify({ error: 'User is muted' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
   }
 
   // Get comment
@@ -224,6 +258,12 @@ async function handleCreateReport(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Update reporter statistics in users table
+  await updateUserStats(supabase, reporter_id, client_type, 'report_filed', 1, 0)
+
+  // Update comment author statistics for received reports
+  await updateUserStats(supabase, comment.user_id, comment.client_type, 'report_received', 1, 0)
+
   // Queue Discord notification for new report in background - NON-BLOCKING
   queueDiscordNotification({
     type: 'report_filed',
@@ -237,7 +277,7 @@ async function handleCreateReport(supabase: any, params: any) {
     },
     user: {
       id: reporter_id,
-      username: `User ${reporter_id}` // We don't have reporter username without API call
+      username: reporterRecord.username
     },
     media: {
       id: comment.media_id,
@@ -259,7 +299,7 @@ async function handleCreateReport(supabase: any, params: any) {
 }
 
 async function handleResolveReport(supabase: any, params: any) {
-  const { comment_id, reporter_info, moderator_id, resolution, review_notes } = params
+  const { comment_id, reporter_info, moderator_id, resolution, review_notes, client_type } = params
 
   // Validate required fields
   if (!comment_id || !reporter_info || !moderator_id || !resolution) {

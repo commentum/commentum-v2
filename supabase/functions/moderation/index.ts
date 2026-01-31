@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { applyUserModeration, getUserDetails, updateUserStats } from '../shared/userUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,7 +20,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, moderator_info, target_user_id, comment_id, reason, severity, duration, shadow_ban } = await req.json()
+    const { action, moderator_info, target_user_id, comment_id, reason, severity, duration, shadow_ban, client_type } = await req.json()
 
     // All moderation actions require authentication (no token needed)
     if (!moderator_info) {
@@ -46,8 +47,8 @@ serve(async (req) => {
       )
     }
 
-    // Verify admin access with user_id only
-    const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+    // Verify admin access with user_id and client_type
+    const adminVerification = await verifyAdminAccess(supabase, moderator_id, client_type)
     if (!adminVerification.valid) {
       return new Response(
         JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
@@ -147,6 +148,9 @@ async function handlePinComment(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Update user statistics in users table
+  await updateUserStats(supabase, comment.user_id, comment.client_type, 'pin', 1, 0)
+
   // Queue Discord notification for pinned comment in background - NON-BLOCKING
   queueDiscordNotification({
     type: 'comment_pinned',
@@ -222,6 +226,9 @@ async function handleUnpinComment(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Update user statistics in users table
+  await updateUserStats(supabase, comment.user_id, comment.client_type, 'pin', 0, 1)
 
   return new Response(
     JSON.stringify({
@@ -364,14 +371,9 @@ async function handleUnlockThread(supabase: any, params: any) {
 async function handleWarnUser(supabase: any, params: any) {
   const { target_user_id, moderator_id, reason, severity, duration, moderatorRole } = params
 
-  // Get target user's current status
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('user_role, user_warnings')
-    .eq('user_id', target_user_id)
-    .single()
-
-  if (!targetUserComment) {
+  // Get target user's current status from users table
+  const targetUser = await getUserDetails(supabase, target_user_id, client_type, true)
+  if (!targetUser) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -379,13 +381,33 @@ async function handleWarnUser(supabase: any, params: any) {
   }
 
   // Check permissions (can't moderate users with equal or higher role)
-  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
+  if (!canModerate(moderatorRole, targetUser.user_role)) {
     return new Response(
       JSON.stringify({ error: 'Cannot moderate user with equal or higher role' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
+  // Apply moderation action using users table
+  const moderationAction = severity === 'mute' ? 'mute' : severity === 'ban' ? 'ban' : 'warn'
+  const success = await applyUserModeration(
+    supabase,
+    target_user_id,
+    client_type,
+    moderationAction,
+    duration,
+    reason,
+    moderator_id
+  )
+
+  if (!success) {
+    return new Response(
+      JSON.stringify({ error: 'Failed to apply moderation action' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Update all user's comments with new status (for backward compatibility)
   let updateData: any = {
     moderated: true,
     moderated_at: new Date().toISOString(),
@@ -404,10 +426,11 @@ async function handleWarnUser(supabase: any, params: any) {
   const { error } = await supabase
     .from('comments')
     .update({
-      user_warnings: targetUserComment.user_warnings + 1,
+      user_warnings: targetUser.user_warnings + 1,
       ...updateData
     })
     .eq('user_id', target_user_id)
+    .eq('client_type', client_type)
 
   if (error) throw error
 
@@ -416,7 +439,7 @@ async function handleWarnUser(supabase: any, params: any) {
     type: 'user_warned',
     user: {
       id: target_user_id,
-      username: `User ${target_user_id}`
+      username: targetUser.username
     },
     moderator: {
       id: moderator_id,
@@ -449,14 +472,9 @@ async function handleBanUser(supabase: any, params: any) {
     )
   }
 
-  // Get target user's current status
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('user_role')
-    .eq('user_id', target_user_id)
-    .single()
-
-  if (!targetUserComment) {
+  // Get target user's current status from users table
+  const targetUser = await getUserDetails(supabase, target_user_id, client_type, true)
+  if (!targetUser) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -464,14 +482,33 @@ async function handleBanUser(supabase: any, params: any) {
   }
 
   // Check permissions
-  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
+  if (!canModerate(moderatorRole, targetUser.user_role)) {
     return new Response(
       JSON.stringify({ error: 'Cannot ban user with equal or higher role' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Update all user's comments
+  // Apply ban using users table
+  const banAction = shadow_ban ? 'shadow_ban' : 'ban'
+  const success = await applyUserModeration(
+    supabase,
+    target_user_id,
+    client_type,
+    banAction,
+    undefined,
+    reason,
+    moderator_id
+  )
+
+  if (!success) {
+    return new Response(
+      JSON.stringify({ error: 'Failed to apply ban' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Update all user's comments (for backward compatibility)
   const { error } = await supabase
     .from('comments')
     .update({
@@ -484,6 +521,7 @@ async function handleBanUser(supabase: any, params: any) {
       moderation_action: shadow_ban ? 'shadow_ban' : 'ban'
     })
     .eq('user_id', target_user_id)
+    .eq('client_type', client_type)
 
   if (error) throw error
 
@@ -492,7 +530,7 @@ async function handleBanUser(supabase: any, params: any) {
     type: 'user_banned',
     user: {
       id: target_user_id,
-      username: `User ${target_user_id}`
+      username: targetUser.username
     },
     moderator: {
       id: moderator_id,
@@ -523,7 +561,25 @@ async function handleUnbanUser(supabase: any, params: any) {
     )
   }
 
-  // Update all user's comments
+  // Apply unban using users table
+  const success = await applyUserModeration(
+    supabase,
+    target_user_id,
+    client_type,
+    'unban',
+    undefined,
+    reason,
+    moderator_id
+  )
+
+  if (!success) {
+    return new Response(
+      JSON.stringify({ error: 'Failed to apply unban' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Update all user's comments (for backward compatibility)
   const { error } = await supabase
     .from('comments')
     .update({
@@ -537,6 +593,7 @@ async function handleUnbanUser(supabase: any, params: any) {
       moderation_action: 'unban'
     })
     .eq('user_id', target_user_id)
+    .eq('client_type', client_type)
 
   if (error) throw error
 
