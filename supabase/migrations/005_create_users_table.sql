@@ -119,7 +119,7 @@ CREATE POLICY "Admins can read all users" ON users
     FOR SELECT USING (
         is_user_in_role(auth.uid()::text, 'moderator_users') OR
         is_user_in_role(auth.uid()::text, 'admin_users') OR
-        is_user_in_role(auth.uid::::text, 'super_admin_users')
+        is_user_in_role(auth.uid()::text, 'super_admin_users')
     );
 
 -- Only system/moderators can insert/update user records
