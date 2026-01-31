@@ -334,29 +334,6 @@ async function handleCreateComment(supabase: any, params: any) {
     )
   }
 
-  // Ensure user record exists and update stats
-  try {
-    // Use the get_or_create_user function to create/update user record
-    const { data: userIdResult } = await supabase
-      .rpc('get_or_create_user', {
-        p_client_type: client_type,
-        p_user_id: userInfo.user_id,
-        p_user_avatar: userInfo.avatar
-      })
-
-    if (userIdResult) {
-      // Update user statistics
-      await supabase
-        .rpc('update_user_stats', {
-          p_user_id: userIdResult,
-          p_comment_increment: 1
-        })
-    }
-  } catch (error) {
-    console.error('Failed to update user record:', error)
-    // Continue anyway - don't block comment creation for user record issues
-  }
-
   const { data: comment, error } = await supabase
     .from('comments')
     .insert({
@@ -401,6 +378,49 @@ async function handleCreateComment(supabase: any, params: any) {
       poster: mediaInfo.poster
     }
   })
+
+  // Update user record in background - NON-BLOCKING (don't await)
+  ;(async () => {
+    try {
+      // Check if user exists
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('id, total_comments')
+        .eq('client_type', client_type)
+        .eq('user_id', userInfo.user_id)
+        .single()
+
+      if (existingUser) {
+        // Update existing user
+        await supabase
+          .from('users')
+          .update({
+            username: userInfo.username,
+            user_avatar: userInfo.avatar || existingUser.user_avatar,
+            total_comments: existingUser.total_comments + 1,
+            last_comment_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingUser.id)
+      } else {
+        // Create new user record
+        await supabase
+          .from('users')
+          .insert({
+            client_type: client_type,
+            user_id: userInfo.user_id,
+            username: userInfo.username,
+            user_avatar: userInfo.avatar,
+            user_role: userRole,
+            total_comments: 1,
+            last_comment_at: new Date().toISOString()
+          })
+      }
+    } catch (error) {
+      console.error('Failed to update user record (background):', error)
+      // Silently fail - don't impact comment creation
+    }
+  })() // Fire and forget - don't await
 
   return new Response(
     JSON.stringify({ success: true, comment }),
