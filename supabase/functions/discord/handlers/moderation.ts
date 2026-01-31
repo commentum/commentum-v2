@@ -20,7 +20,7 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
       .from('comments')
       .select('user_role, user_warnings, user_banned, user_muted_until')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -52,19 +52,19 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
       .from('config')
       .select('value')
       .eq('key', 'auto_warn_threshold')
-      .single()
+      .limit(1)
 
     const { data: autoMuteThreshold } = await supabase
       .from('config')
       .select('value')
       .eq('key', 'auto_mute_threshold')
-      .single()
+      .limit(1)
 
     const { data: autoBanThreshold } = await supabase
       .from('config')
       .select('value')
       .eq('key', 'auto_ban_threshold')
-      .single()
+      .limit(1)
 
     const warnThreshold = autoWarnThreshold ? parseInt(autoWarnThreshold.value) : 3
     const muteThreshold = autoMuteThreshold ? parseInt(autoMuteThreshold.value) : 5
@@ -136,7 +136,7 @@ export async function handleUnwarnCommand(supabase: any, moderatorId: string, mo
       .from('comments')
       .select('user_role, user_warnings, user_banned, user_muted_until')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -211,7 +211,7 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
       .from('comments')
       .select('user_role')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -315,7 +315,7 @@ export async function handlePinCommand(supabase: any, moderatorId: string, moder
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -379,7 +379,7 @@ export async function handleUnpinCommand(supabase: any, moderatorId: string, mod
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -439,7 +439,7 @@ export async function handleLockCommand(supabase: any, moderatorId: string, mode
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -500,7 +500,7 @@ export async function handleUnlockCommand(supabase: any, moderatorId: string, mo
     const { data: comment, error: fetchError } = await supabase
       .from('comments')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -556,7 +556,7 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -632,7 +632,7 @@ export async function handleResolveCommand(supabase: any, moderatorId: string, m
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -771,7 +771,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
       .from('comments')
       .select('user_role')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -872,7 +872,7 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
       .from('comments')
       .select('user_role')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
