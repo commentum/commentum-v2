@@ -9,27 +9,24 @@ const corsHeaders = {
 const ANIME_JSON_URL = 'https://raw.githubusercontent.com/anime-and-manga/lists/refs/heads/main/anime-full.json'
 const MANGA_JSON_URL = 'https://raw.githubusercontent.com/anime-and-manga/lists/refs/heads/main/manga-full.json'
 
-// Cache for mapping data (in-memory cache for the function instance)
+// Cache for mapping data
 let animeCache: any[] | null = null
 let mangaCache: any[] | null = null
 let cacheTimestamp = 0
-const CACHE_TTL = 3600000 // 1 hour in milliseconds
+const CACHE_TTL = 3600000 // 1 hour
 
 async function getMapping(mediaType: string): Promise<any[]> {
   const now = Date.now()
   
-  // Check if cache is still valid
   if (now - cacheTimestamp < CACHE_TTL) {
     if (mediaType === 'anime' && animeCache) return animeCache
     if (mediaType === 'manga' && mangaCache) return mangaCache
   }
   
-  // Fetch fresh data
   const url = mediaType === 'anime' ? ANIME_JSON_URL : MANGA_JSON_URL
   const response = await fetch(url)
   const data = await response.json()
   
-  // Update cache
   if (mediaType === 'anime') {
     animeCache = data
   } else {
@@ -43,10 +40,8 @@ async function getMapping(mediaType: string): Promise<any[]> {
 function findAllPlatformIds(mediaId: string, clientType: string, mediaType: string, mappingData: any[]): { media_id: string, client_type: string }[] {
   const results: { media_id: string, client_type: string }[] = []
   
-  // Always include the original
   results.push({ media_id: mediaId, client_type: clientType })
   
-  // Find the entry in mapping data
   const entry = mappingData.find((item: any) => {
     if (clientType === 'mal') {
       return item.mal_id?.toString() === mediaId
@@ -56,21 +51,14 @@ function findAllPlatformIds(mediaId: string, clientType: string, mediaType: stri
     return false
   })
   
-  if (!entry) {
-    console.log('No mapping found for:', { mediaId, clientType, mediaType })
-    return results
-  }
+  if (!entry) return results
   
-  console.log('Found mapping entry:', entry)
-  
-  // Add the other platform if it exists
   if (clientType === 'mal' && entry.anilist_id) {
     results.push({ media_id: entry.anilist_id.toString(), client_type: 'anilist' })
   } else if (clientType === 'anilist' && entry.mal_id) {
     results.push({ media_id: entry.mal_id.toString(), client_type: 'mal' })
   }
   
-  console.log('Platform IDs found:', results)
   return results
 }
 
@@ -92,7 +80,6 @@ serve(async (req) => {
     const limit = parseInt(url.searchParams.get('limit') || '50')
     const sort = url.searchParams.get('sort') || 'newest'
 
-    // Validate required parameters
     if (!media_id || !client_type) {
       return new Response(
         JSON.stringify({ error: 'media_id and client_type are required' }),
@@ -100,9 +87,7 @@ serve(async (req) => {
       )
     }
 
-    console.log('Request params:', { media_id, client_type, page, limit, sort })
-
-    // Get media type from first query (we'll determine it from existing comments or default to 'anime')
+    // Get media type
     const { data: sampleComment } = await supabase
       .from('comments')
       .select('media_type')
@@ -112,22 +97,16 @@ serve(async (req) => {
       .single()
     
     const mediaType = sampleComment?.media_type || 'anime'
-    console.log('Media type:', mediaType)
     
-    // Get mapping data and find all platform IDs
+    // Get all platform IDs
     const mappingData = await getMapping(mediaType)
-    console.log('Mapping data loaded, entries:', mappingData.length)
-    
     const platformIds = findAllPlatformIds(media_id, client_type, mediaType, mappingData)
-    console.log('Querying for platform IDs:', platformIds)
     
-    const offset = (page - 1) * limit
-
-    // Query each platform separately and combine results
+    // Fetch ALL comments from ALL platforms - NO RANGE/LIMIT
     let allComments: any[] = []
     
     for (const platform of platformIds) {
-      const { data: platformComments, error: platformError } = await supabase
+      const { data: platformComments, error } = await supabase
         .from('comments')
         .select('*')
         .eq('media_id', platform.media_id)
@@ -136,15 +115,12 @@ serve(async (req) => {
         .eq('user_banned', false)
         .eq('user_shadow_banned', false)
       
-      if (platformError) {
-        console.error(`Error fetching comments for ${platform.client_type} ${platform.media_id}:`, platformError)
-      } else if (platformComments) {
-        console.log(`Found ${platformComments.length} comments for ${platform.client_type} ${platform.media_id}`)
+      if (error) throw error
+      
+      if (platformComments) {
         allComments = [...allComments, ...platformComments]
       }
     }
-
-    console.log('Total comments across all platforms:', allComments.length)
 
     // Sort all comments
     allComments.sort((a, b) => {
@@ -158,24 +134,24 @@ serve(async (req) => {
     })
 
     // Apply pagination
+    const offset = (page - 1) * limit
     const paginatedComments = allComments.slice(offset, offset + limit)
     const totalCount = allComments.length
 
     // Build nested structure
     const nestedComments = buildNestedStructure(paginatedComments)
 
-    // Get media statistics across all platforms
+    // Calculate stats
     const totalUpvotes = allComments.reduce((sum, comment) => sum + comment.upvotes, 0)
     const totalDownvotes = allComments.reduce((sum, comment) => sum + comment.downvotes, 0)
 
-    // Get media info from first comment
+    // Get media info
     const mediaInfo = allComments.length > 0 ? {
       mediaId: allComments[0].media_id,
       mediaType: allComments[0].media_type,
       mediaTitle: allComments[0].media_title,
       mediaYear: allComments[0].media_year,
-      mediaPoster: allComments[0].media_poster,
-      platforms: platformIds // Include all platform IDs for reference
+      mediaPoster: allComments[0].media_poster
     } : null
 
     return new Response(
@@ -193,10 +169,6 @@ serve(async (req) => {
           limit,
           total: totalCount,
           totalPages: Math.ceil(totalCount / limit)
-        },
-        debug: {
-          platformIds,
-          totalCommentsFound: allComments.length
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -205,7 +177,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Media API error:', error)
     return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error.message }),
+      JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
