@@ -6,6 +6,68 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'content-type',
 }
 
+const ANIME_JSON_URL = 'https://raw.githubusercontent.com/anime-and-manga/lists/refs/heads/main/anime-full.json'
+const MANGA_JSON_URL = 'https://raw.githubusercontent.com/anime-and-manga/lists/refs/heads/main/manga-full.json'
+
+// Cache for mapping data (in-memory cache for the function instance)
+let animeCache: any[] | null = null
+let mangaCache: any[] | null = null
+let cacheTimestamp = 0
+const CACHE_TTL = 3600000 // 1 hour in milliseconds
+
+async function getMapping(mediaType: string): Promise<any[]> {
+  const now = Date.now()
+  
+  // Check if cache is still valid
+  if (now - cacheTimestamp < CACHE_TTL) {
+    if (mediaType === 'anime' && animeCache) return animeCache
+    if (mediaType === 'manga' && mangaCache) return mangaCache
+  }
+  
+  // Fetch fresh data
+  const url = mediaType === 'anime' ? ANIME_JSON_URL : MANGA_JSON_URL
+  const response = await fetch(url)
+  const data = await response.json()
+  
+  // Update cache
+  if (mediaType === 'anime') {
+    animeCache = data
+  } else {
+    mangaCache = data
+  }
+  cacheTimestamp = now
+  
+  return data
+}
+
+function findAllPlatformIds(mediaId: string, clientType: string, mediaType: string, mappingData: any[]): { media_id: string, client_type: string }[] {
+  const results: { media_id: string, client_type: string }[] = []
+  
+  // Always include the original
+  results.push({ media_id: mediaId, client_type: clientType })
+  
+  // Find the entry in mapping data
+  const entry = mappingData.find((item: any) => {
+    if (clientType === 'mal') {
+      return item.mal_id?.toString() === mediaId
+    } else if (clientType === 'anilist') {
+      return item.anilist_id?.toString() === mediaId
+    }
+    return false
+  })
+  
+  if (!entry) return results
+  
+  // Add the other platform if it exists
+  if (clientType === 'mal' && entry.anilist_id) {
+    results.push({ media_id: entry.anilist_id.toString(), client_type: 'anilist' })
+  } else if (clientType === 'anilist' && entry.mal_id) {
+    results.push({ media_id: entry.mal_id.toString(), client_type: 'mal' })
+  }
+  
+  return results
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -32,56 +94,68 @@ serve(async (req) => {
       )
     }
 
-    // Build order by
-    let orderBy = { created_at: 'desc' }
-    switch (sort) {
-      case 'oldest':
-        orderBy = { created_at: 'asc' }
-        break
-      case 'top':
-        orderBy = { vote_score: 'desc' }
-        break
-      case 'controversial':
-        orderBy = { upvotes: 'desc' }
-        break
-    }
-
-    const offset = (page - 1) * limit
-
-    // Get comments for this media
-    const { data: comments, error } = await supabase
+    // Get media type from first query (we'll determine it from existing comments or default to 'anime')
+    const { data: sampleComment } = await supabase
       .from('comments')
-      .select('*')
+      .select('media_type')
       .eq('media_id', media_id)
       .eq('client_type', client_type)
+      .limit(1)
+      .single()
+    
+    const mediaType = sampleComment?.media_type || 'anime'
+    
+    // Get mapping data and find all platform IDs
+    const mappingData = await getMapping(mediaType)
+    const platformIds = findAllPlatformIds(media_id, client_type, mediaType, mappingData)
+    
+    const offset = (page - 1) * limit
+
+    // Build query for all platforms
+    let query = supabase
+      .from('comments')
+      .select('*')
       .eq('deleted', false)
       .eq('user_banned', false)
       .eq('user_shadow_banned', false)
-      .order('created_at', { ascending: sort === 'oldest' })
-      .range(offset, offset + limit - 1)
+
+    // Add OR condition for all platform IDs
+    const orConditions = platformIds.map(p => 
+      `and(media_id.eq.${p.media_id},client_type.eq.${p.client_type})`
+    ).join(',')
+    
+    query = query.or(orConditions)
+    
+    // Apply sorting
+    query = query.order('created_at', { ascending: sort === 'oldest' })
+    query = query.range(offset, offset + limit - 1)
+
+    const { data: comments, error } = await query
 
     if (error) throw error
 
-    // Get total count
-    const { count } = await supabase
+    // Get total count across all platforms
+    let countQuery = supabase
       .from('comments')
       .select('*', { count: 'exact', head: true })
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
       .eq('deleted', false)
       .eq('user_banned', false)
       .eq('user_shadow_banned', false)
+      .or(orConditions)
+
+    const { count } = await countQuery
 
     // Build nested structure
     const nestedComments = buildNestedStructure(comments || [])
 
-    // Get media statistics
-    const { data: stats } = await supabase
+    // Get media statistics across all platforms
+    let statsQuery = supabase
       .from('comments')
       .select('upvotes, downvotes')
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
       .eq('deleted', false)
+      .or(orConditions)
+
+    const { data: stats } = await statsQuery
 
     const totalUpvotes = stats?.reduce((sum, comment) => sum + comment.upvotes, 0) || 0
     const totalDownvotes = stats?.reduce((sum, comment) => sum + comment.downvotes, 0) || 0
@@ -92,7 +166,8 @@ serve(async (req) => {
       mediaType: comments[0].media_type,
       mediaTitle: comments[0].media_title,
       mediaYear: comments[0].media_year,
-      mediaPoster: comments[0].media_poster
+      mediaPoster: comments[0].media_poster,
+      platforms: platformIds // Include all platform IDs for reference
     } : null
 
     return new Response(
@@ -118,7 +193,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Media API error:', error)
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
