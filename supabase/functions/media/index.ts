@@ -21,7 +21,8 @@ serve(async (req) => {
     const media_id = url.searchParams.get('media_id')
     const client_type = url.searchParams.get('client_type')
     const page = parseInt(url.searchParams.get('page') || '1')
-    const limit = parseInt(url.searchParams.get('limit') || '50')
+    const limitParam = url.searchParams.get('limit')
+    const limit = limitParam ? parseInt(limitParam) : null  // null = no limit
     const sort = url.searchParams.get('sort') || 'newest'
 
     // Validate required parameters
@@ -46,10 +47,10 @@ serve(async (req) => {
         break
     }
 
-    const offset = (page - 1) * limit
+    const offset = limit ? (page - 1) * limit : 0
 
     // Get comments for this media
-    const { data: comments, error } = await supabase
+    let query = supabase
       .from('comments')
       .select('*')
       .eq('media_id', media_id)
@@ -58,7 +59,13 @@ serve(async (req) => {
       .eq('user_banned', false)
       .eq('user_shadow_banned', false)
       .order('created_at', { ascending: sort === 'oldest' })
-      .range(offset, offset + limit - 1)
+
+    // Only apply range if limit is specified
+    if (limit) {
+      query = query.range(offset, offset + limit - 1)
+    }
+
+    const { data: comments, error } = await query
 
     if (error) throw error
 
@@ -107,9 +114,9 @@ serve(async (req) => {
         },
         pagination: {
           page,
-          limit,
+          limit: limit || null,
           total: count || 0,
-          totalPages: Math.ceil((count || 0) / limit)
+          totalPages: limit ? Math.ceil((count || 0) / limit) : 1
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
