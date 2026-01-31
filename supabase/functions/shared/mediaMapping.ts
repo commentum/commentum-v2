@@ -268,7 +268,7 @@ export async function fetchCrossPlatformComments(
 /**
  * Fallback function for single platform fetching
  */
-export async function fetchSinglePlatformComments(
+async function fetchSinglePlatformComments(
   supabase: any,
   mediaId: string,
   clientType: string,
