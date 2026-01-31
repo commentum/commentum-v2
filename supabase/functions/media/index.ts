@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { fetchCrossPlatformComments, fetchSinglePlatformComments } from '../shared/mediaMapping.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,6 +33,34 @@ serve(async (req) => {
       )
     }
 
+    // Only supported platforms can use cross-platform functionality
+    if (!['anilist', 'myanimelist', 'mal', 'simkl'].includes(client_type)) {
+      return new Response(
+        JSON.stringify({ error: 'client_type must be one of: anilist, myanimelist, mal, simkl' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Determine media type - try to detect from existing comments or default to anime
+    let mediaType = 'anime'; // default
+    
+    // Try to detect media type from existing comments
+    // Normalize MAL to myanimelist for database queries
+    const normalizedClientType = client_type === 'mal' ? 'myanimelist' : client_type;
+    
+    const { data: existingComment } = await supabase
+      .from('comments')
+      .select('media_type')
+      .eq('media_id', media_id)
+      .eq('client_type', normalizedClientType)
+      .eq('deleted', false)
+      .limit(1)
+      .single();
+    
+    if (existingComment?.media_type) {
+      mediaType = existingComment.media_type === 'manga' ? 'manga' : 'anime';
+    }
+
     // Build order by
     let orderBy = { created_at: 'desc' }
     switch (sort) {
@@ -48,59 +77,89 @@ serve(async (req) => {
 
     const offset = (page - 1) * limit
 
-    // Get comments for this media
-    const { data: comments, error } = await supabase
-      .from('comments')
-      .select('*')
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
-      .eq('deleted', false)
-      .eq('user_banned', false)
-      .eq('user_shadow_banned', false)
-      .order('created_at', { ascending: sort === 'oldest' })
-      .range(offset, offset + limit - 1)
+    // Automatically try cross-platform fetching for supported platforms
+    // This provides a unified comment experience without requiring users to opt-in
+    let commentsResult: {
+      comments: any[];
+      totalCount: number;
+      platforms: string[];
+    };
 
-    if (error) throw error
-
-    // Get total count
-    const { count } = await supabase
-      .from('comments')
-      .select('*', { count: 'exact', head: true })
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
-      .eq('deleted', false)
-      .eq('user_banned', false)
-      .eq('user_shadow_banned', false)
+    try {
+      // Always attempt cross-platform fetching for supported platforms
+      // The system will automatically fall back to single platform if mapping fails
+      commentsResult = await fetchCrossPlatformComments(
+        supabase,
+        media_id,
+        mediaType as 'anime' | 'manga',
+        client_type as 'anilist' | 'myanimelist' | 'mal' | 'simkl',
+        page,
+        limit,
+        sort
+      );
+      
+      // If we got comments from multiple platforms, it was successful
+      if (commentsResult.platforms.length > 1) {
+        console.log(`Auto cross-platform fetch for ${client_type} ${media_id}: found comments from ${commentsResult.platforms.join(', ')}`);
+      } else {
+        console.log(`Single platform fetch for ${client_type} ${media_id}: no cross-platform mapping found`);
+      }
+    } catch (error) {
+      console.error('Cross-platform fetch failed, falling back to single platform:', error);
+      // Fallback to single platform fetching
+      const singleResult = await fetchSinglePlatformComments(
+        supabase,
+        media_id,
+        normalizedClientType,
+        page,
+        limit,
+        sort
+      );
+      commentsResult = {
+        comments: singleResult.comments,
+        totalCount: singleResult.totalCount,
+        platforms: [client_type]
+      };
+    }
 
     // Build nested structure
-    const nestedComments = buildNestedStructure(comments || [])
+    const nestedComments = buildNestedStructure(commentsResult.comments || [])
 
-    // Get media statistics
-    const { data: stats } = await supabase
-      .from('comments')
-      .select('upvotes, downvotes')
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
-      .eq('deleted', false)
+    // Get media statistics from all fetched platforms
+    let totalUpvotes = 0;
+    let totalDownvotes = 0;
+    
+    // Calculate stats from fetched comments
+    commentsResult.comments.forEach(comment => {
+      totalUpvotes += comment.upvotes || 0;
+      totalDownvotes += comment.downvotes || 0;
+    });
 
-    const totalUpvotes = stats?.reduce((sum, comment) => sum + comment.upvotes, 0) || 0
-    const totalDownvotes = stats?.reduce((sum, comment) => sum + comment.downvotes, 0) || 0
-
-    // Get media info from first comment
-    const mediaInfo = comments && comments.length > 0 ? {
-      mediaId: comments[0].media_id,
-      mediaType: comments[0].media_type,
-      mediaTitle: comments[0].media_title,
-      mediaYear: comments[0].media_year,
-      mediaPoster: comments[0].media_poster
-    } : null
+    // Get media info from first comment (prioritize the source platform for consistency)
+    let mediaInfo = null;
+    if (commentsResult.comments.length > 0) {
+      // Try to find comment from the source platform first for consistent media info
+      const sourcePlatformComment = commentsResult.comments.find(c => 
+        c.client_type === normalizedClientType || 
+        (client_type === 'mal' && c.client_type === 'myanimelist')
+      );
+      const sourceComment = sourcePlatformComment || commentsResult.comments[0];
+      
+      mediaInfo = {
+        mediaId: sourceComment.media_id,
+        mediaType: sourceComment.media_type,
+        mediaTitle: sourceComment.media_title,
+        mediaYear: sourceComment.media_year,
+        mediaPoster: sourceComment.media_poster
+      };
+    }
 
     return new Response(
       JSON.stringify({
         media: mediaInfo,
         comments: nestedComments,
         stats: {
-          commentCount: count || 0,
+          commentCount: commentsResult.totalCount || 0,
           totalUpvotes,
           totalDownvotes,
           netScore: totalUpvotes - totalDownvotes
@@ -108,8 +167,13 @@ serve(async (req) => {
         pagination: {
           page,
           limit,
-          total: count || 0,
-          totalPages: Math.ceil((count || 0) / limit)
+          total: commentsResult.totalCount || 0,
+          totalPages: Math.ceil((commentsResult.totalCount || 0) / limit)
+        },
+        cross_platform: {
+          enabled: commentsResult.platforms.length > 1,
+          platforms: commentsResult.platforms,
+          count: commentsResult.platforms.length
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
