@@ -56,7 +56,12 @@ function findAllPlatformIds(mediaId: string, clientType: string, mediaType: stri
     return false
   })
   
-  if (!entry) return results
+  if (!entry) {
+    console.log('No mapping found for:', { mediaId, clientType, mediaType })
+    return results
+  }
+  
+  console.log('Found mapping entry:', entry)
   
   // Add the other platform if it exists
   if (clientType === 'mal' && entry.anilist_id) {
@@ -65,6 +70,7 @@ function findAllPlatformIds(mediaId: string, clientType: string, mediaType: stri
     results.push({ media_id: entry.mal_id.toString(), client_type: 'mal' })
   }
   
+  console.log('Platform IDs found:', results)
   return results
 }
 
@@ -94,6 +100,8 @@ serve(async (req) => {
       )
     }
 
+    console.log('Request params:', { media_id, client_type, page, limit, sort })
+
     // Get media type from first query (we'll determine it from existing comments or default to 'anime')
     const { data: sampleComment } = await supabase
       .from('comments')
@@ -104,69 +112,69 @@ serve(async (req) => {
       .single()
     
     const mediaType = sampleComment?.media_type || 'anime'
+    console.log('Media type:', mediaType)
     
     // Get mapping data and find all platform IDs
     const mappingData = await getMapping(mediaType)
+    console.log('Mapping data loaded, entries:', mappingData.length)
+    
     const platformIds = findAllPlatformIds(media_id, client_type, mediaType, mappingData)
+    console.log('Querying for platform IDs:', platformIds)
     
     const offset = (page - 1) * limit
 
-    // Build query for all platforms
-    let query = supabase
-      .from('comments')
-      .select('*')
-      .eq('deleted', false)
-      .eq('user_banned', false)
-      .eq('user_shadow_banned', false)
-
-    // Add OR condition for all platform IDs
-    const orConditions = platformIds.map(p => 
-      `and(media_id.eq.${p.media_id},client_type.eq.${p.client_type})`
-    ).join(',')
+    // Query each platform separately and combine results
+    let allComments: any[] = []
     
-    query = query.or(orConditions)
-    
-    // Apply sorting
-    query = query.order('created_at', { ascending: sort === 'oldest' })
-    query = query.range(offset, offset + limit - 1)
+    for (const platform of platformIds) {
+      const { data: platformComments, error: platformError } = await supabase
+        .from('comments')
+        .select('*')
+        .eq('media_id', platform.media_id)
+        .eq('client_type', platform.client_type)
+        .eq('deleted', false)
+        .eq('user_banned', false)
+        .eq('user_shadow_banned', false)
+      
+      if (platformError) {
+        console.error(`Error fetching comments for ${platform.client_type} ${platform.media_id}:`, platformError)
+      } else if (platformComments) {
+        console.log(`Found ${platformComments.length} comments for ${platform.client_type} ${platform.media_id}`)
+        allComments = [...allComments, ...platformComments]
+      }
+    }
 
-    const { data: comments, error } = await query
+    console.log('Total comments across all platforms:', allComments.length)
 
-    if (error) throw error
+    // Sort all comments
+    allComments.sort((a, b) => {
+      if (sort === 'oldest') {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      } else if (sort === 'top') {
+        return (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes)
+      } else {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      }
+    })
 
-    // Get total count across all platforms
-    let countQuery = supabase
-      .from('comments')
-      .select('*', { count: 'exact', head: true })
-      .eq('deleted', false)
-      .eq('user_banned', false)
-      .eq('user_shadow_banned', false)
-      .or(orConditions)
-
-    const { count } = await countQuery
+    // Apply pagination
+    const paginatedComments = allComments.slice(offset, offset + limit)
+    const totalCount = allComments.length
 
     // Build nested structure
-    const nestedComments = buildNestedStructure(comments || [])
+    const nestedComments = buildNestedStructure(paginatedComments)
 
     // Get media statistics across all platforms
-    let statsQuery = supabase
-      .from('comments')
-      .select('upvotes, downvotes')
-      .eq('deleted', false)
-      .or(orConditions)
-
-    const { data: stats } = await statsQuery
-
-    const totalUpvotes = stats?.reduce((sum, comment) => sum + comment.upvotes, 0) || 0
-    const totalDownvotes = stats?.reduce((sum, comment) => sum + comment.downvotes, 0) || 0
+    const totalUpvotes = allComments.reduce((sum, comment) => sum + comment.upvotes, 0)
+    const totalDownvotes = allComments.reduce((sum, comment) => sum + comment.downvotes, 0)
 
     // Get media info from first comment
-    const mediaInfo = comments && comments.length > 0 ? {
-      mediaId: comments[0].media_id,
-      mediaType: comments[0].media_type,
-      mediaTitle: comments[0].media_title,
-      mediaYear: comments[0].media_year,
-      mediaPoster: comments[0].media_poster,
+    const mediaInfo = allComments.length > 0 ? {
+      mediaId: allComments[0].media_id,
+      mediaType: allComments[0].media_type,
+      mediaTitle: allComments[0].media_title,
+      mediaYear: allComments[0].media_year,
+      mediaPoster: allComments[0].media_poster,
       platforms: platformIds // Include all platform IDs for reference
     } : null
 
@@ -175,7 +183,7 @@ serve(async (req) => {
         media: mediaInfo,
         comments: nestedComments,
         stats: {
-          commentCount: count || 0,
+          commentCount: totalCount,
           totalUpvotes,
           totalDownvotes,
           netScore: totalUpvotes - totalDownvotes
@@ -183,8 +191,12 @@ serve(async (req) => {
         pagination: {
           page,
           limit,
-          total: count || 0,
-          totalPages: Math.ceil((count || 0) / limit)
+          total: totalCount,
+          totalPages: Math.ceil(totalCount / limit)
+        },
+        debug: {
+          platformIds,
+          totalCommentsFound: allComments.length
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
