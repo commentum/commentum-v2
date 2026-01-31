@@ -21,7 +21,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
       .from('comments')
       .select('user_role')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -129,7 +129,7 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
       .from('comments')
       .select('user_role')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -245,7 +245,7 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       .from('comments')
       .select('user_role')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -262,7 +262,7 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       .from('config')
       .select('value')
       .eq('key', configKey)
-      .single()
+      .limit(1)
 
     const currentUsers = currentConfig ? JSON.parse(currentConfig.value) : []
     
@@ -341,7 +341,7 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       .from('comments')
       .select('user_role')
       .eq('user_id', targetUserId)
-      .single()
+      .limit(1)
 
     if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
@@ -362,7 +362,7 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
         .from('config')
         .select('value')
         .eq('key', configKey)
-        .single()
+        .limit(1)
 
       const currentUsers = currentConfig ? JSON.parse(currentConfig.value) : []
       if (!currentUsers.includes(targetUserId)) {
@@ -462,7 +462,7 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
         .from('config')
         .select('*')
         .eq('key', key)
-        .single()
+        .limit(1)
 
       if (!existingConfig) {
         return createErrorResponse(`Configuration key "${key}" not found.`)
@@ -534,7 +534,7 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
       .select('*')
       .eq('platform_user_id', targetUserId)
       .eq('is_active', true)
-      .single()
+      .limit(1)
 
     // Get all user comments for statistics
     const { data: allUserComments } = await supabase
@@ -564,7 +564,7 @@ export async function handleCommentCommand(supabase: any, options: any, userRole
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (error || !comment) {
       return createErrorResponse('Comment not found.')
@@ -603,7 +603,7 @@ export async function handleReportCommand(supabase: any, reporterId: string, rep
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .single()
+      .limit(1)
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -679,7 +679,7 @@ async function removeFromAllRoles(supabase: any, userId: string) {
       .from('config')
       .select('value')
       .eq('key', roleKey)
-      .single()
+      .limit(1)
 
     if (config) {
       const users = JSON.parse(config.value)
