@@ -191,15 +191,28 @@ serve(async (req) => {
       userRole = await getUserRole(supabase, user_id)
     }
 
-    const { data: existingUserComments } = await supabase
-      .from('comments')
+    // Get user status from users table first, fallback to comments
+    const { data: userRecord } = await supabase
+      .from('users')
       .select('user_banned, user_muted_until, user_shadow_banned, user_warnings')
-      .eq('user_id', user_id)
       .eq('client_type', client_type)
-      .order('created_at', { ascending: false })
-      .limit(1)
+      .eq('user_id', user_id)
+      .single()
 
-    const userStatus = existingUserComments?.[0]
+    let userStatus = userRecord
+
+    // If no user record found, check comments table for backwards compatibility
+    if (!userStatus) {
+      const { data: existingUserComments } = await supabase
+        .from('comments')
+        .select('user_banned, user_muted_until, user_shadow_banned, user_warnings')
+        .eq('user_id', user_id)
+        .eq('client_type', client_type)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      userStatus = existingUserComments?.[0]
+    }
 
     if (userStatus?.user_banned) {
       return new Response(
@@ -319,6 +332,29 @@ async function handleCreateComment(supabase: any, params: any) {
       JSON.stringify({ error: 'Comment contains prohibited content' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
+  }
+
+  // Ensure user record exists and update stats
+  try {
+    // Use the get_or_create_user function to create/update user record
+    const { data: userIdResult } = await supabase
+      .rpc('get_or_create_user', {
+        p_client_type: client_type,
+        p_user_id: userInfo.user_id,
+        p_user_avatar: userInfo.avatar
+      })
+
+    if (userIdResult) {
+      // Update user statistics
+      await supabase
+        .rpc('update_user_stats', {
+          p_user_id: userIdResult,
+          p_comment_increment: 1
+        })
+    }
+  } catch (error) {
+    console.error('Failed to update user record:', error)
+    // Continue anyway - don't block comment creation for user record issues
   }
 
   const { data: comment, error } = await supabase

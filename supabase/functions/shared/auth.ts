@@ -11,9 +11,41 @@ export async function verifyAdminAccess(supabase: any, userId: string) {
   return { valid: true, role: userRole }
 }
 
-// Get user role from configuration
-export async function getUserRole(supabase: any, userId: string) {
+// Get user information from users table
+export async function getUserInfo(supabase: any, userId: string, clientType: string) {
   try {
+    const { data: userRecord } = await supabase
+      .from('users')
+      .select('*')
+      .eq('client_type', clientType)
+      .eq('user_id', userId)
+      .single()
+
+    return userRecord
+  } catch (error) {
+    console.error('Get user info error:', error)
+    return null
+  }
+}
+
+// Get user role from configuration or users table
+export async function getUserRole(supabase: any, userId: string, clientType?: string) {
+  try {
+    // First try to get from users table if clientType is provided
+    if (clientType) {
+      const { data: userRecord } = await supabase
+        .from('users')
+        .select('user_role')
+        .eq('client_type', clientType)
+        .eq('user_id', userId)
+        .single()
+
+      if (userRecord) {
+        return userRecord.user_role
+      }
+    }
+
+    // Fallback to config-based role system
     const { data: owners } = await supabase
       .from('config')
       .select('value')
@@ -64,7 +96,11 @@ export function canModerate(moderatorRole: string, targetRole: string) {
     'owner': 4
   }
   
-  return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
+  // Handle null/undefined roles by treating them as 'user'
+  const moderatorLevel = roleHierarchy[moderatorRole] ?? 0
+  const targetLevel = roleHierarchy[targetRole] ?? 0
+  
+  return moderatorLevel > targetLevel
 }
 
 // Hide owner role by displaying it as super_admin in API responses
