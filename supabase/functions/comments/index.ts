@@ -221,6 +221,12 @@ serve(async (req) => {
       )
     }
 
+    if (userStatus?.user_shadow_banned) {
+      // Shadow banned users can post, but their comments will be hidden from others
+      // The comment will be created but won't appear in normal queries
+      console.log(`Shadow banned user ${user_id} attempting to post comment`)
+    }
+
     if (userStatus?.user_muted_until && new Date(userStatus.user_muted_until) > new Date()) {
       return new Response(
         JSON.stringify({ error: 'User is muted' }),
