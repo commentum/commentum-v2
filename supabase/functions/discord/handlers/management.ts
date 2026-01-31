@@ -112,13 +112,14 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
         last_moderation_reason: reason,
         last_moderation_action: shadow ? 'shadow_ban' : 'ban'
       })
-      .eq('id', targetUserInfo.id)
+      .eq('client_type', targetUserInfo.client_type)
+      .eq('user_id', targetUserId)
 
     if (userError) {
       console.error('Failed to update user record:', userError)
     }
 
-    // Update all user's comments
+    // Update all user's comments (backwards compatibility)
     const { error } = await supabase
       .from('comments')
       .update({
@@ -163,7 +164,33 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
       return createErrorResponse('user_id is required.')
     }
 
-    // Update all user's comments
+    // Get target user's info from users table
+    const targetUserInfo = await getUserInfoFromAnyClient(supabase, targetUserId)
+    
+    if (!targetUserInfo) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    // Update user record in users table
+    const { error: userError } = await supabase
+      .from('users')
+      .update({
+        user_banned: false,
+        user_shadow_banned: false,
+        user_muted_until: null,
+        last_moderation_at: new Date().toISOString(),
+        last_moderated_by: moderatorId,
+        last_moderation_reason: reason,
+        last_moderation_action: 'unban'
+      })
+      .eq('client_type', targetUserInfo.client_type)
+      .eq('user_id', targetUserId)
+
+    if (userError) {
+      console.error('Failed to update user record:', userError)
+    }
+
+    // Update all user's comments (backwards compatibility)
     const { error } = await supabase
       .from('comments')
       .update({
@@ -233,13 +260,14 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
         last_moderation_reason: reason,
         last_moderation_action: 'shadow_ban'
       })
-      .eq('id', targetUserInfo.id)
+      .eq('client_type', targetUserInfo.client_type)
+      .eq('user_id', targetUserId)
 
     if (userError) {
       console.error('Failed to update user record:', userError)
     }
 
-    // Update all user's comments
+    // Update all user's comments (backwards compatibility)
     const { error } = await supabase
       .from('comments')
       .update({
