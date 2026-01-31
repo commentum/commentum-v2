@@ -43,16 +43,15 @@ async function fetchMappingData(type: 'anime' | 'manga'): Promise<{ [anilistId: 
     const data = await response.json();
     const mapping: { [anilistId: string]: MediaMapping } = {};
     
-    // Process the mapping data - handle the actual structure
+    // Process the mapping data
     if (Array.isArray(data)) {
       data.forEach(item => {
-        // Handle the actual data structure with mal_id and anilist_id
-        if (item.anilist_id) {
-          const anilistId = item.anilist_id.toString();
+        if (item.anilist?.id) {
+          const anilistId = item.anilist.id.toString();
           mapping[anilistId] = {
-            anilist: { id: item.anilist_id, type: type },
-            myanimelist: item.mal_id ? { id: item.mal_id, type: type } : undefined,
-            simkl: item.kitsu_id ? { id: item.kitsu_id.toString(), type: type } : undefined
+            anilist: item.anilist,
+            myanimelist: item.myanimelist,
+            simkl: item.simkl
           };
         }
       });
