@@ -1,7 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
-import { getOrCreateUser, updateUserStats, canUserAct } from '../shared/userUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,12 +18,12 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { comment_id, user_info, vote_type, client_type } = await req.json()
+    const { comment_id, user_info, vote_type } = await req.json()
 
     // Validate required fields
-    if (!comment_id || !user_info || !vote_type || !client_type) {
+    if (!comment_id || !user_info || !vote_type) {
       return new Response(
-        JSON.stringify({ error: 'comment_id, user_info, vote_type, and client_type are required' }),
+        JSON.stringify({ error: 'comment_id, user_info, and vote_type are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -87,39 +86,6 @@ serve(async (req) => {
         JSON.stringify({ error: 'Cannot vote on deleted comment' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-    }
-
-    // Ensure user record exists and check if user can act
-    const userRecord = await getOrCreateUser(supabase, user_id, client_type, user_info.username, user_info.avatar)
-    if (!userRecord) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to create user record' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Check if user can still act (in case status changed)
-    if (!canUserAct(userRecord)) {
-      if (userRecord.user_banned) {
-        return new Response(
-          JSON.stringify({ error: 'User is banned' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      
-      if (userRecord.user_shadow_banned) {
-        return new Response(
-          JSON.stringify({ error: 'Access denied' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      
-      if (userRecord.user_muted_until && new Date(userRecord.user_muted_until) > new Date()) {
-        return new Response(
-          JSON.stringify({ error: 'User is muted' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
     }
 
 
@@ -187,9 +153,6 @@ serve(async (req) => {
       .single()
 
     if (updateError) throw updateError
-
-  // Update user statistics in users table
-  await updateUserStats(supabase, user_id, client_type, 'vote', 1, 0)
 
   // Queue Discord notification for vote in background (only for new votes, not removals) - NON-BLOCKING
   if (vote_type !== 'remove' && (!currentVote || currentVote !== vote_type)) {
