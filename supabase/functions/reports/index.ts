@@ -248,37 +248,6 @@ async function handleCreateReport(supabase: any, params: any) {
     reportReason: reason
   })
 
-  // Update comment author's user statistics in background - NON-BLOCKING
-  ;(async () => {
-    try {
-      // Get current user stats
-      const { data: currentUser } = await supabase
-        .from('users')
-        .select('total_reports_received')
-        .eq('client_type', comment.client_type)
-        .eq('user_id', comment.user_id)
-        .single()
-
-      if (currentUser) {
-        // Calculate new value
-        const newReportsCount = (currentUser.total_reports_received || 0) + 1
-
-        // Update user stats
-        await supabase
-          .from('users')
-          .update({
-            total_reports_received: newReportsCount,
-            updated_at: new Date().toISOString()
-          })
-          .eq('client_type', comment.client_type)
-          .eq('user_id', comment.user_id)
-      }
-    } catch (error) {
-      console.error('Failed to update user report statistics (background):', error)
-      // Silently fail - don't impact reporting
-    }
-  })() // Fire and forget - don't await
-
   return new Response(
     JSON.stringify({
       success: true,

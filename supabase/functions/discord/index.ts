@@ -27,7 +27,7 @@ serve(async (req) => {
         const cloneReq = req.clone()
         const body = await cloneReq.json()
         if (body.action === 'sync_global_commands' || body.action === 'sync_commands') {
-          console.log('Handling global command sync request')
+          console.log('🌍 Handling global command sync request')
           return await handleGlobalCommandSync()
         }
       } catch (syncError) {
@@ -73,7 +73,7 @@ serve(async (req) => {
       JSON.stringify({ 
         type: 4,
         data: {
-          content: 'An error occurred while processing your command.',
+          content: '❌ An error occurred while processing your command.',
           flags: 64
         }
       }),
@@ -590,7 +590,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
   ]
 
   try {
-    console.log(`Syncing ${globalCommands.length} global commands to Discord...`)
+    console.log(`🌍 Syncing ${globalCommands.length} global commands to Discord...`)
 
     const response = await fetch(
       `${DISCORD_API_BASE}/applications/${DISCORD_CLIENT_ID}/commands`,
@@ -606,7 +606,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
 
     if (!response.ok) {
       const errorData = await response.text()
-      console.error('Global command sync failed:', errorData)
+      console.error('❌ Global command sync failed:', errorData)
       return new Response(
         JSON.stringify({ 
           error: 'Failed to sync global commands',
@@ -618,7 +618,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
     }
 
     const result = await response.json()
-    console.log(`Successfully synced ${result.length} global commands!`)
+    console.log(`✅ Successfully synced ${result.length} global commands!`)
 
     return new Response(
       JSON.stringify({ 
@@ -634,7 +634,7 @@ async function handleGlobalCommandSync(): Promise<Response> {
     )
 
   } catch (error) {
-    console.error('Error syncing global commands:', error)
+    console.error('❌ Error syncing global commands:', error)
     return new Response(
       JSON.stringify({ 
         error: 'Internal server error during global command sync',

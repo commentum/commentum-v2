@@ -1,77 +1,4 @@
 import { createDiscordResponse, createErrorResponse, createCommentEmbed, createUserEmbed, createModerationEmbed } from '../utils.ts'
-import { getUserInfo } from '../../shared/auth.ts'
-
-// Helper function to get user role from users table or config
-async function getUserRole(supabase: any, userId: string, clientType?: string): Promise<string> {
-  try {
-    // Try to get from users table first if clientType is provided
-    if (clientType) {
-      const { data: userRecord } = await supabase
-        .from('users')
-        .select('user_role')
-        .eq('client_type', clientType)
-        .eq('user_id', userId)
-        .single()
-
-      if (userRecord) {
-        return userRecord.user_role
-      }
-    }
-
-    // Fallback to config-based role system
-    const { data: owners } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'owner_users')
-      .single()
-
-    const { data: superAdmins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'super_admin_users')
-      .single()
-
-    const { data: admins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'admin_users')
-      .single()
-
-    const { data: moderators } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'moderator_users')
-      .single()
-
-    const ownerList = owners ? JSON.parse(owners.value) : []
-    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
-    const adminList = admins ? JSON.parse(admins.value) : []
-    const moderatorList = moderators ? JSON.parse(moderators.value) : []
-
-    if (ownerList.includes(userId)) return 'owner'
-    if (superAdminList.includes(userId)) return 'super_admin'
-    if (adminList.includes(userId)) return 'admin'
-    if (moderatorList.includes(userId)) return 'moderator'
-    return 'user'
-  } catch (error) {
-    console.error('Get user role error:', error)
-    return 'user'
-  }
-}
-
-// Helper function to get user info from all possible client types
-async function getUserInfoFromAnyClient(supabase: any, userId: string) {
-  const clientTypes = ['anilist', 'myanimelist', 'simkl', 'other']
-  
-  for (const clientType of clientTypes) {
-    const userInfo = await getUserInfo(supabase, userId, clientType)
-    if (userInfo) {
-      return userInfo
-    }
-  }
-  
-  return null
-}
 
 // Handle ban command
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -89,37 +16,23 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's info from users table
-    const targetUserInfo = await getUserInfoFromAnyClient(supabase, targetUserId)
-    
-    if (!targetUserInfo) {
+    // Get target user's current status
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
+      .eq('user_id', targetUserId)
+      .single()
+
+    if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
     }
 
     // Check permissions
-    if (!canModerate(userRole, targetUserInfo.user_role)) {
+    if (!canModerate(userRole, targetUserComment.user_role)) {
       return createErrorResponse('Cannot ban user with equal or higher role.')
     }
 
-    // Update user record in users table
-    const { error: userError } = await supabase
-      .from('users')
-      .update({
-        user_banned: true,
-        user_shadow_banned: shadow,
-        last_moderation_at: new Date().toISOString(),
-        last_moderated_by: moderatorId,
-        last_moderation_reason: reason,
-        last_moderation_action: shadow ? 'shadow_ban' : 'ban'
-      })
-      .eq('client_type', targetUserInfo.client_type)
-      .eq('user_id', targetUserId)
-
-    if (userError) {
-      console.error('Failed to update user record:', userError)
-    }
-
-    // Update all user's comments (backwards compatibility)
+    // Update all user's comments
     const { error } = await supabase
       .from('comments')
       .update({
@@ -138,7 +51,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
     return createModerationEmbed(
       shadow ? 'shadow ban' : 'ban',
       targetUserId,
-      moderatorName,
+      `<@${moderatorId}>`,
       reason,
       shadow ? 'User can still post but others cannot see their content' : 'User cannot post or interact'
     )
@@ -164,33 +77,7 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
       return createErrorResponse('user_id is required.')
     }
 
-    // Get target user's info from users table
-    const targetUserInfo = await getUserInfoFromAnyClient(supabase, targetUserId)
-    
-    if (!targetUserInfo) {
-      return createErrorResponse('User not found in the system.')
-    }
-
-    // Update user record in users table
-    const { error: userError } = await supabase
-      .from('users')
-      .update({
-        user_banned: false,
-        user_shadow_banned: false,
-        user_muted_until: null,
-        last_moderation_at: new Date().toISOString(),
-        last_moderated_by: moderatorId,
-        last_moderation_reason: reason,
-        last_moderation_action: 'unban'
-      })
-      .eq('client_type', targetUserInfo.client_type)
-      .eq('user_id', targetUserId)
-
-    if (userError) {
-      console.error('Failed to update user record:', userError)
-    }
-
-    // Update all user's comments (backwards compatibility)
+    // Update all user's comments
     const { error } = await supabase
       .from('comments')
       .update({
@@ -208,12 +95,12 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
     if (error) throw error
 
     return createDiscordResponse(
-      `User Unbanned\n\n` +
-      `User: ${targetUserId}\n` +
-      `Admin: ${moderatorName}\n` +
-      `Reason: ${reason}\n` +
-      `Time: ${new Date().toLocaleString()}\n` +
-      `User can now post and interact normally`
+      `🔓 **User Unbanned**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Admin:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}\n` +
+      `✅ **User can now post and interact normally**`
     )
 
   } catch (error) {
@@ -237,37 +124,23 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's info from users table
-    const targetUserInfo = await getUserInfoFromAnyClient(supabase, targetUserId)
-    
-    if (!targetUserInfo) {
+    // Get target user's current status
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
+      .eq('user_id', targetUserId)
+      .single()
+
+    if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
     }
 
     // Check permissions
-    if (!canModerate(userRole, targetUserInfo.user_role)) {
+    if (!canModerate(userRole, targetUserComment.user_role)) {
       return createErrorResponse('Cannot shadow ban user with equal or higher role.')
     }
 
-    // Update user record in users table
-    const { error: userError } = await supabase
-      .from('users')
-      .update({
-        user_banned: false, // Shadow ban is separate from regular ban
-        user_shadow_banned: true,
-        last_moderation_at: new Date().toISOString(),
-        last_moderated_by: moderatorId,
-        last_moderation_reason: reason,
-        last_moderation_action: 'shadow_ban'
-      })
-      .eq('client_type', targetUserInfo.client_type)
-      .eq('user_id', targetUserId)
-
-    if (userError) {
-      console.error('Failed to update user record:', userError)
-    }
-
-    // Update all user's comments (backwards compatibility)
+    // Update all user's comments
     const { error } = await supabase
       .from('comments')
       .update({
@@ -284,12 +157,12 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
     if (error) throw error
 
     return createDiscordResponse(
-      `User Shadow Banned\n\n` +
-      `User: ${targetUserId}\n` +
-      `Admin: ${moderatorName}\n` +
-      `Reason: ${reason}\n` +
-      `Time: ${new Date().toLocaleString()}\n\n` +
-      `Shadow Ban Effect:\n` +
+      `👻 **User Shadow Banned**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Admin:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
+      `👻 **Shadow Ban Effect:**\n` +
       `• User can still see their own comments\n` +
       `• Other users cannot see their comments\n` +
       `• User is not notified of the ban\n` +
@@ -333,12 +206,12 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
     if (error) throw error
 
     return createDiscordResponse(
-      `Shadow Ban Removed\n\n` +
-      `User: ${targetUserId}\n` +
-      `Admin: ${moderatorName}\n` +
-      `Reason: ${reason}\n` +
-      `Time: ${new Date().toLocaleString()}\n\n` +
-      `User comments are now visible to everyone again`
+      `👻 **Shadow Ban Removed**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Admin:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
+      `✅ **User comments are now visible to everyone again**`
     )
 
   } catch (error) {
@@ -367,15 +240,19 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       return createErrorResponse('Role must be moderator, admin, or super_admin.')
     }
 
-    // Get target user's current role from users table
-    const targetUserInfo = await getUserInfoFromAnyClient(supabase, targetUserId)
-    
-    if (!targetUserInfo) {
+    // Get target user's current role
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
+      .eq('user_id', targetUserId)
+      .single()
+
+    if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
     }
 
     // Check permissions
-    if (!canModerate(userRole, targetUserInfo.user_role)) {
+    if (!canModerate(userRole, targetUserComment.user_role)) {
       return createErrorResponse('Cannot promote user with equal or higher role.')
     }
 
@@ -385,7 +262,7 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       .from('config')
       .select('value')
       .eq('key', configKey)
-      .limit(1)
+      .single()
 
     const currentUsers = currentConfig ? JSON.parse(currentConfig.value) : []
     
@@ -403,22 +280,6 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       .eq('key', configKey)
 
     if (updateError) throw updateError
-
-    // Update user's role in users table
-    const { error: userRoleError } = await supabase
-      .from('users')
-      .update({
-        user_role: newRole,
-        last_moderation_at: new Date().toISOString(),
-        last_moderated_by: moderatorId,
-        last_moderation_reason: reason,
-        last_moderation_action: 'promote'
-      })
-      .eq('id', targetUserInfo.id)
-
-    if (userRoleError) {
-      console.error('Failed to update user role:', userRoleError)
-    }
 
     // Update user's comments to reflect new role
     const { error: commentError } = await supabase
@@ -444,9 +305,9 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
     return createModerationEmbed(
       'promote',
       targetUserId,
-      moderatorName,
+      `<@${moderatorId}>`,
       reason,
-      `From ${targetUserInfo.user_role} to ${newRole}`
+      `From ${targetUserComment.user_role} to ${newRole}`
     )
 
   } catch (error) {
@@ -475,15 +336,19 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       return createErrorResponse('Role must be user, moderator, or admin.')
     }
 
-    // Get target user's current role from users table
-    const targetUserInfo = await getUserInfoFromAnyClient(supabase, targetUserId)
-    
-    if (!targetUserInfo) {
+    // Get target user's current role
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
+      .eq('user_id', targetUserId)
+      .single()
+
+    if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
     }
 
     // Check permissions
-    if (!canModerate(userRole, targetUserInfo.user_role)) {
+    if (!canModerate(userRole, targetUserComment.user_role)) {
       return createErrorResponse('Cannot demote user with equal or higher role.')
     }
 
@@ -497,7 +362,7 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
         .from('config')
         .select('value')
         .eq('key', configKey)
-        .limit(1)
+        .single()
 
       const currentUsers = currentConfig ? JSON.parse(currentConfig.value) : []
       if (!currentUsers.includes(targetUserId)) {
@@ -510,22 +375,6 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
         .eq('key', configKey)
 
       if (updateError) throw updateError
-    }
-
-    // Update user's role in users table
-    const { error: userRoleError } = await supabase
-      .from('users')
-      .update({
-        user_role: newRole,
-        last_moderation_at: new Date().toISOString(),
-        last_moderated_by: moderatorId,
-        last_moderation_reason: reason,
-        last_moderation_action: 'demote'
-      })
-      .eq('id', targetUserInfo.id)
-
-    if (userRoleError) {
-      console.error('Failed to update user role:', userRoleError)
     }
 
     // Update user's comments to reflect new role
@@ -550,14 +399,14 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       .eq('platform_user_id', targetUserId)
 
     return createDiscordResponse(
-      `User Demoted\n\n` +
-      `User: ${targetUserId}\n` +
-      `New Role: ${newRole}\n` +
-      `Previous Role: ${targetUserInfo.user_role}\n` +
-      `Demoted by: ${moderatorName}\n` +
-      `Reason: ${reason}\n` +
-      `Time: ${new Date().toLocaleString()}\n\n` +
-      `User now has ${newRole} permissions`
+      `⬇️ **User Demoted**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🎭 **New Role:** ${newRole}\n` +
+      `⬇️ **Previous Role:** ${targetUserComment.user_role}\n` +
+      `🛡️ **Demoted by:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
+      `✅ **User now has ${newRole} permissions**`
     )
 
   } catch (error) {
@@ -590,7 +439,7 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
         .order('key')
 
       if (!configs || configs.length === 0) {
-        return createDiscordResponse('System Configuration\n\nNo configuration found.')
+        return createDiscordResponse('⚙️ **System Configuration**\n\nNo configuration found.')
       }
 
       const configList = configs.map((config: any) => {
@@ -600,7 +449,7 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
         return `• **${config.key}:** ${displayValue}`
       }).join('\n')
 
-      return createDiscordResponse(`System Configuration\n\n${configList}`)
+      return createDiscordResponse(`⚙️ **System Configuration**\n\n${configList}`)
     }
 
     if (action === 'update') {
@@ -613,7 +462,7 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
         .from('config')
         .select('*')
         .eq('key', key)
-        .limit(1)
+        .single()
 
       if (!existingConfig) {
         return createErrorResponse(`Configuration key "${key}" not found.`)
@@ -640,11 +489,11 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
       if (error) throw error
 
       return createDiscordResponse(
-        `Configuration Updated\n\n` +
-        `Key: ${key}\n` +
-        `New Value: ${value}\n` +
-        `Updated by: ${moderatorName}\n` +
-        `Time: ${new Date().toLocaleString()}`
+        `⚙️ **Configuration Updated**\n\n` +
+        `🔑 **Key:** ${key}\n` +
+        `📝 **New Value:** ${value}\n` +
+        `🛡️ **Updated by:** <@${moderatorId}>\n` +
+        `📅 **Time:** ${new Date().toLocaleString()}`
       )
     }
 
@@ -685,7 +534,7 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
       .select('*')
       .eq('platform_user_id', targetUserId)
       .eq('is_active', true)
-      .limit(1)
+      .single()
 
     // Get all user comments for statistics
     const { data: allUserComments } = await supabase
@@ -715,7 +564,7 @@ export async function handleCommentCommand(supabase: any, options: any, userRole
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .limit(1)
+      .single()
 
     if (error || !comment) {
       return createErrorResponse('Comment not found.')
@@ -754,7 +603,7 @@ export async function handleReportCommand(supabase: any, reporterId: string, rep
       .from('comments')
       .select('*')
       .eq('id', commentId)
-      .limit(1)
+      .single()
 
     if (fetchError || !comment) {
       return createErrorResponse('Comment not found.')
@@ -804,15 +653,15 @@ export async function handleReportCommand(supabase: any, reporterId: string, rep
     if (error) throw error
 
     return createDiscordResponse(
-      `Comment Reported\n\n` +
-      `Comment ID: ${commentId}\n` +
-      `Author: ${comment.username} (${comment.user_id})\n` +
-      `Reported by: ${reporterName}\n` +
-      `Reason: ${reason}\n` +
-      `Notes: ${notes || 'No notes provided'}\n` +
-      `Time: ${new Date().toLocaleString()}\n\n` +
-      `Report submitted for moderation review\n` +
-      `Comment now has ${comment.report_count + 1} total reports`
+      `🚨 **Comment Reported**\n\n` +
+      `💬 **Comment ID:** ${commentId}\n` +
+      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
+      `🚨 **Reported by:** <@${reporterId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📋 **Notes:** ${notes || 'No notes provided'}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
+      `✅ **Report submitted for moderation review**\n` +
+      `📊 **Comment now has ${comment.report_count + 1} total reports**`
     )
 
   } catch (error) {
@@ -830,7 +679,7 @@ async function removeFromAllRoles(supabase: any, userId: string) {
       .from('config')
       .select('value')
       .eq('key', roleKey)
-      .limit(1)
+      .single()
 
     if (config) {
       const users = JSON.parse(config.value)
@@ -854,9 +703,5 @@ function canModerate(moderatorRole: string, targetRole: string): boolean {
     'owner': 4
   }
   
-  // Handle null/undefined roles by treating them as 'user'
-  const moderatorLevel = roleHierarchy[moderatorRole] ?? 0
-  const targetLevel = roleHierarchy[targetRole] ?? 0
-  
-  return moderatorLevel > targetLevel
+  return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
 }

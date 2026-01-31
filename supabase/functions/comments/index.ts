@@ -191,40 +191,21 @@ serve(async (req) => {
       userRole = await getUserRole(supabase, user_id)
     }
 
-    // Get user status from users table first, fallback to comments
-    const { data: userRecord } = await supabase
-      .from('users')
+    const { data: existingUserComments } = await supabase
+      .from('comments')
       .select('user_banned, user_muted_until, user_shadow_banned, user_warnings')
-      .eq('client_type', client_type)
       .eq('user_id', user_id)
-      .single()
+      .eq('client_type', client_type)
+      .order('created_at', { ascending: false })
+      .limit(1)
 
-    let userStatus = userRecord
-
-    // If no user record found, check comments table for backwards compatibility
-    if (!userStatus) {
-      const { data: existingUserComments } = await supabase
-        .from('comments')
-        .select('user_banned, user_muted_until, user_shadow_banned, user_warnings')
-        .eq('user_id', user_id)
-        .eq('client_type', client_type)
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      userStatus = existingUserComments?.[0]
-    }
+    const userStatus = existingUserComments?.[0]
 
     if (userStatus?.user_banned) {
       return new Response(
         JSON.stringify({ error: 'User is banned' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-    }
-
-    if (userStatus?.user_shadow_banned) {
-      // Shadow banned users can post, but their comments will be hidden from others
-      // The comment will be created but won't appear in normal queries
-      console.log(`Shadow banned user ${user_id} attempting to post comment`)
     }
 
     if (userStatus?.user_muted_until && new Date(userStatus.user_muted_until) > new Date()) {
@@ -384,49 +365,6 @@ async function handleCreateComment(supabase: any, params: any) {
       poster: mediaInfo.poster
     }
   })
-
-  // Update user record in background - NON-BLOCKING (don't await)
-  ;(async () => {
-    try {
-      // Check if user exists
-      const { data: existingUser } = await supabase
-        .from('users')
-        .select('id, total_comments')
-        .eq('client_type', client_type)
-        .eq('user_id', userInfo.user_id)
-        .single()
-
-      if (existingUser) {
-        // Update existing user
-        await supabase
-          .from('users')
-          .update({
-            username: userInfo.username,
-            user_avatar: userInfo.avatar || existingUser.user_avatar,
-            total_comments: existingUser.total_comments + 1,
-            last_comment_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', existingUser.id)
-      } else {
-        // Create new user record
-        await supabase
-          .from('users')
-          .insert({
-            client_type: client_type,
-            user_id: userInfo.user_id,
-            username: userInfo.username,
-            user_avatar: userInfo.avatar,
-            user_role: userRole,
-            total_comments: 1,
-            last_comment_at: new Date().toISOString()
-          })
-      }
-    } catch (error) {
-      console.error('Failed to update user record (background):', error)
-      // Silently fail - don't impact comment creation
-    }
-  })() // Fire and forget - don't await
 
   return new Response(
     JSON.stringify({ success: true, comment }),

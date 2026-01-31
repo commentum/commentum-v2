@@ -364,14 +364,14 @@ async function handleUnlockThread(supabase: any, params: any) {
 async function handleWarnUser(supabase: any, params: any) {
   const { target_user_id, moderator_id, reason, severity, duration, moderatorRole } = params
 
-  // Get target user's info from users table
-  const { data: targetUser } = await supabase
-    .from('users')
-    .select('user_role, user_warnings, client_type')
+  // Get target user's current status
+  const { data: targetUserComment } = await supabase
+    .from('comments')
+    .select('user_role, user_warnings')
     .eq('user_id', target_user_id)
     .single()
 
-  if (!targetUser) {
+  if (!targetUserComment) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -379,38 +379,14 @@ async function handleWarnUser(supabase: any, params: any) {
   }
 
   // Check permissions (can't moderate users with equal or higher role)
-  if (!canModerate(moderatorRole, targetUser.user_role)) {
+  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
     return new Response(
       JSON.stringify({ error: 'Cannot moderate user with equal or higher role' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Update user record in users table
-  let userUpdateData: any = {
-    last_moderation_at: new Date().toISOString(),
-    last_moderated_by: moderator_id,
-    last_moderation_reason: reason,
-    last_moderation_action: severity
-  }
-
-  if (severity === 'mute' && duration) {
-    userUpdateData.user_muted_until = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString() // duration in hours
-  } else if (severity === 'warn') {
-    userUpdateData.user_warnings = (targetUser.user_warnings || 0) + 1
-  }
-
-  const { error: userError } = await supabase
-    .from('users')
-    .update(userUpdateData)
-    .eq('user_id', target_user_id)
-
-  if (userError) {
-    console.error('Failed to update user record:', userError)
-  }
-
-  // Also update all user's comments for backwards compatibility
-  let commentUpdateData: any = {
+  let updateData: any = {
     moderated: true,
     moderated_at: new Date().toISOString(),
     moderated_by: moderator_id,
@@ -419,15 +395,18 @@ async function handleWarnUser(supabase: any, params: any) {
   }
 
   if (severity === 'mute' && duration) {
-    commentUpdateData.user_muted_until = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString()
-  } else if (severity === 'warn') {
-    commentUpdateData.user_warnings = (targetUser.user_warnings || 0) + 1
+    updateData.user_muted_until = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString() // duration in hours
+  } else if (severity === 'ban') {
+    updateData.user_banned = true
   }
 
   // Update all user's comments with new status
   const { error } = await supabase
     .from('comments')
-    .update(commentUpdateData)
+    .update({
+      user_warnings: targetUserComment.user_warnings + 1,
+      ...updateData
+    })
     .eq('user_id', target_user_id)
 
   if (error) throw error
@@ -470,14 +449,14 @@ async function handleBanUser(supabase: any, params: any) {
     )
   }
 
-  // Get target user's info from users table
-  const { data: targetUser } = await supabase
-    .from('users')
+  // Get target user's current status
+  const { data: targetUserComment } = await supabase
+    .from('comments')
     .select('user_role')
     .eq('user_id', target_user_id)
     .single()
 
-  if (!targetUser) {
+  if (!targetUserComment) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -485,31 +464,14 @@ async function handleBanUser(supabase: any, params: any) {
   }
 
   // Check permissions
-  if (!canModerate(moderatorRole, targetUser.user_role)) {
+  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
     return new Response(
       JSON.stringify({ error: 'Cannot ban user with equal or higher role' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Update user record in users table
-  const { error: userError } = await supabase
-    .from('users')
-    .update({
-      user_banned: true,
-      user_shadow_banned: shadow_ban || false,
-      last_moderation_at: new Date().toISOString(),
-      last_moderated_by: moderator_id,
-      last_moderation_reason: reason,
-      last_moderation_action: shadow_ban ? 'shadow_ban' : 'ban'
-    })
-    .eq('user_id', target_user_id)
-
-  if (userError) {
-    console.error('Failed to update user record:', userError)
-  }
-
-  // Also update all user's comments for backwards compatibility
+  // Update all user's comments
   const { error } = await supabase
     .from('comments')
     .update({
@@ -561,25 +523,7 @@ async function handleUnbanUser(supabase: any, params: any) {
     )
   }
 
-  // Update user record in users table
-  const { error: userError } = await supabase
-    .from('users')
-    .update({
-      user_banned: false,
-      user_shadow_banned: false,
-      user_muted_until: null,
-      last_moderation_at: new Date().toISOString(),
-      last_moderated_by: moderator_id,
-      last_moderation_reason: reason,
-      last_moderation_action: 'unban'
-    })
-    .eq('user_id', target_user_id)
-
-  if (userError) {
-    console.error('Failed to update user record:', userError)
-  }
-
-  // Also update all user's comments for backwards compatibility
+  // Update all user's comments
   const { error } = await supabase
     .from('comments')
     .update({

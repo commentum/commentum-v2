@@ -104,7 +104,7 @@ export async function handleAddCommand(supabase: any, moderatorId: string, moder
 
     return createSimpleEmbed(
         'Server Configured Successfully',
-        `Server ${serverName} has been successfully configured!\n\nServer ID: ${guildId}\nConfigured by: ${moderatorUsername}\nConfigured: ${new Date().toLocaleDateString()}\n${roleId ? `Role ID: ${roleId}\n` : ''}${webhookUrl ? `Webhook: Configured\n` : ''}\n\nNext Steps:\n• Members can now use /register and select this server\n• Users will be auto-assigned the Discord role if configured\n• Use /config action:view to see all settings\n\nNote: Server "${serverName}" is now available for registration.`,
+        `Server ${serverName} has been successfully configured!\n\nServer ID: ${guildId}\nConfigured by: <@${moderatorId}>\nConfigured: ${new Date().toLocaleDateString()}\n${roleId ? `Role ID: ${roleId}\n` : ''}${webhookUrl ? `Webhook: Configured\n` : ''}\n\nNext Steps:\n• Members can now use /register and select this server\n• Users will be auto-assigned the Discord role if configured\n• Use /config action:view to see all settings\n\nNote: Server "${serverName}" is now available for registration.`,
         0x00FF00
       )
 
@@ -141,13 +141,13 @@ export async function handleRegisterCommand(supabase: any, userId: string, usern
     // Check if user is already registered
     if (registration) {
       return createDiscordResponse(
-        `You are already registered!\n\n` +
-        `Discord: ${registration.discord_username}\n` +
-        `Platform: ${registration.platform_type}\n` +
-        `Platform ID: ${registration.platform_user_id}\n` +
-        `Role: ${registration.user_role}\n` +
-        `Registered: ${new Date(registration.registered_at).toLocaleDateString()}\n\n` +
-        `To change platforms or servers, contact an admin.`
+        `❌ You are already registered!\n\n` +
+        `👤 **Discord:** ${registration.discord_username}\n` +
+        `🎮 **Platform:** ${registration.platform_type}\n` +
+        `🆔 **Platform ID:** ${registration.platform_user_id}\n` +
+        `🎭 **Role:** ${registration.user_role}\n` +
+        `📅 **Registered:** ${new Date(registration.registered_at).toLocaleDateString()}\n\n` +
+        `⚠️ To change platforms or servers, contact an admin.`
       )
     }
 
@@ -213,14 +213,14 @@ export async function handleRegisterCommand(supabase: any, userId: string, usern
     if (server.role_id) {
       roleAssigned = await assignDiscordRole(server.guild_id, userId, server.role_id)
       if (roleAssigned) {
-        console.log(`Auto-assigned role ${server.role_id} to user ${userId} in guild ${server.guild_id}`)
-        roleInfo = `Discord Role: Auto-assigned (${server.role_id})\n`
+        console.log(`✅ Auto-assigned role ${server.role_id} to user ${userId} in guild ${server.guild_id}`)
+        roleInfo = `🎭 **Discord Role:** ✅ Auto-assigned (${server.role_id})\n`
       } else {
-        console.log(`Failed to assign role ${server.role_id} to user ${userId} in guild ${server.guild_id}`)
-        roleInfo = `Discord Role: Failed to assign (${server.role_id})\n`
+        console.log(`❌ Failed to assign role ${server.role_id} to user ${userId} in guild ${server.guild_id}`)
+        roleInfo = `🎭 **Discord Role:** ⚠️ Failed to assign (${server.role_id})\n`
       }
     } else {
-      roleInfo = `Discord Role: Not configured for this server\n`
+      roleInfo = `🎭 **Discord Role:** ⚠️ Not configured for this server\n`
     }
 
     // Create role-specific welcome message
@@ -335,8 +335,8 @@ export async function handleHelpCommand(userRole: string) {
 }
 
 function getHelpContent(role: string): string {
-  const baseCommands = `Commentum Bot Commands\n\n` +
-    `User Commands\n` +
+  const baseCommands = `🤖 **Commentum Bot Commands**\n\n` +
+    `📝 **User Commands**\n` +
     `• \`/register platform:<platform> user_id:<id> server:<name>\` - Register your platform account\n` +
     `• \`/report comment_id:<id> reason:<reason> [notes:<text>]\` - Report a comment\n` +
     `• \`/user user_id:<id>\` - Get user information\n` +
@@ -344,7 +344,7 @@ function getHelpContent(role: string): string {
     `• \`/stats\` - View system statistics\n` +
     `• \`/help\` - Show this help message\n`;
 
-  const modCommands = `\nModerator Commands\n` +
+  const modCommands = `\n🛡️ **Moderator Commands**\n` +
     `• \`/warn user_id:<id> reason:<reason>\` - Warn a user\n` +
     `• \`/unwarn user_id:<id> reason:<reason>\` - Remove warning\n` +
     `• \`/mute user_id:<id> [duration:<hours>] reason:<reason>\` - Mute user\n` +
