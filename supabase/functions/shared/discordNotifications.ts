@@ -266,7 +266,7 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
   switch (data.type) {
     case 'comment_created':
-      embed.title = '💬 New Comment'
+      embed.title = 'New Comment'
       embed.color = 0x00ff00 // Green
       embed.description = `**${data.comment.username}** posted a comment`
       
@@ -281,14 +281,14 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
       embed.fields = embed.fields || []
       embed.fields.push({
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Platform:** ${data.comment.client_type}`,
+        name: 'Details',
+        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Platform:** ${data.comment.client_type}\n**Media ID:** \`${data.comment.media_id}\``,
         inline: false
       })
 
       if (data.media) {
         embed.fields.push({
-          name: '🎬 Media',
+          name: 'Media',
           value: `**${data.media.title}** (${data.media.year || 'Unknown Year'})`,
           inline: true
         })
@@ -302,7 +302,7 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
       if (data.comment.parent_id) {
         embed.fields.push({
-          name: '💬 Reply To',
+          name: 'Reply To',
           value: `Comment #${data.comment.parent_id}`,
           inline: true
         })
@@ -350,17 +350,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       break
 
     case 'user_banned':
-      embed.title = '🔨 User Banned'
+      embed.title = 'User Banned'
       embed.color = 0xff0000 // Red
       embed.description = `**${data.user?.username || data.user?.id}** has been banned by **${data.moderator?.username || 'System'}**`
       embed.fields = [
         {
-          name: '👤 Banned User',
+          name: 'Banned User',
           value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
           inline: true
         },
         {
-          name: '🛡️ Banned By',
+          name: 'Banned By',
           value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
           inline: true
         }
@@ -368,24 +368,24 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
       if (data.reason) {
         embed.fields.push({
-          name: '📝 Reason',
+          name: 'Reason',
           value: data.reason
         })
       }
       break
 
     case 'user_warned':
-      embed.title = '⚠️ User Warned'
+      embed.title = 'User Warned'
       embed.color = 0xffa500 // Orange
       embed.description = `**${data.user?.username || data.user?.id}** has been warned by **${data.moderator?.username || 'System'}**`
       embed.fields = [
         {
-          name: '⚠️ Warned User',
+          name: 'Warned User',
           value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
           inline: true
         },
         {
-          name: '🛡️ Warned By',
+          name: 'Warned By',
           value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
           inline: true
         }
@@ -393,14 +393,14 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
       if (data.reason) {
         embed.fields.push({
-          name: '📝 Reason',
+          name: 'Reason',
           value: data.reason
         })
       }
 
       if (data.severity && data.severity !== 'warning') {
         embed.fields.push({
-          name: '🔧 Action',
+          name: 'Action',
           value: data.severity === 'mute' ? 'Muted' : data.severity === 'ban' ? 'Banned' : data.severity,
           inline: true
         })
@@ -408,13 +408,13 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       break
 
     case 'comment_pinned':
-      embed.title = '📌 Comment Pinned'
+      embed.title = 'Comment Pinned'
       embed.color = 0x00bfff // Deep Sky Blue
       embed.description = `**${data.moderator?.username}** pinned **${data.comment.username}**'s comment`
       
       if (data.comment.content) {
         embed.fields = [{
-          name: '📌 Pinned Comment',
+          name: 'Pinned Comment',
           value: data.comment.content.length > 150 
             ? data.comment.content.substring(0, 150) + '...' 
             : data.comment.content
@@ -423,14 +423,14 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
       embed.fields = embed.fields || []
       embed.fields.push({
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Pinned By:** ${data.moderator?.username} (\`${data.moderator?.id}\`)`,
+        name: 'Details',
+        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Pinned By:** ${data.moderator?.username} (\`${data.moderator?.id}\`)\n**Media ID:** \`${data.comment.media_id}\``,
         inline: false
       })
 
       if (data.reason) {
         embed.fields.push({
-          name: '📝 Reason',
+          name: 'Reason',
           value: data.reason,
           inline: true
         })
@@ -438,26 +438,26 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       break
 
     case 'comment_locked':
-      embed.title = '🔒 Thread Locked'
+      embed.title = 'Thread Locked'
       embed.color = 0x808080 // Gray
       embed.description = `**${data.moderator?.username}** locked **${data.comment.username}**'s comment thread`
       
       embed.fields = [{
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Locked By:** ${data.moderator?.username} (\`${data.moderator?.id}\`)`,
+        name: 'Details',
+        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Locked By:** ${data.moderator?.username} (\`${data.moderator?.id}\`)\n**Media ID:** \`${data.comment.media_id}\``,
         inline: false
       }]
 
       if (data.reason) {
         embed.fields.push({
-          name: '📝 Reason',
+          name: 'Reason',
           value: data.reason
         })
       }
       break
 
     case 'vote_cast':
-      embed.title = data.voteType === 'upvote' ? '👍 Upvote' : '👎 Downvote'
+      embed.title = data.voteType === 'upvote' ? 'Upvote' : 'Downvote'
       embed.color = data.voteType === 'upvote' ? 0x00ff00 : 0xff0000
       embed.description = `**${data.user?.username || 'Unknown'}** ${data.voteType}d **${data.comment.username}**'s comment`
       
@@ -472,8 +472,8 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
 
       embed.fields = embed.fields || []
       embed.fields.push({
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Voter:** ${data.user?.username || 'Unknown'} (\`${data.user?.id}\`)\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)`,
+        name: 'Details',
+        value: `**Comment:** #${data.comment.id}\n**Voter:** ${data.user?.username || 'Unknown'} (\`${data.user?.id}\`)\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Media ID:** \`${data.comment.media_id}\``,
         inline: false
       })
       break
@@ -527,7 +527,7 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
         },
         {
           name: 'IDs (Click to Copy)',
-          value: `**Comment ID:** \`${data.comment.id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
+          value: `**Comment ID:** \`${data.comment.id}\`\n**Moderator ID:** \`${data.moderator?.id}\`\n**Media ID:** \`${data.comment.media_id}\``,
           inline: false
         }
       ]

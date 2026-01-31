@@ -51,7 +51,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
     return createModerationEmbed(
       shadow ? 'shadow ban' : 'ban',
       targetUserId,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason,
       shadow ? 'User can still post but others cannot see their content' : 'User cannot post or interact'
     )
@@ -95,12 +95,12 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
     if (error) throw error
 
     return createDiscordResponse(
-      `🔓 **User Unbanned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Admin:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n` +
-      `✅ **User can now post and interact normally**`
+      `User Unbanned\n\n` +
+      `User: ${targetUserId}\n` +
+      `Admin: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}\n` +
+      `User can now post and interact normally`
     )
 
   } catch (error) {
@@ -157,12 +157,12 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
     if (error) throw error
 
     return createDiscordResponse(
-      `👻 **User Shadow Banned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Admin:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `👻 **Shadow Ban Effect:**\n` +
+      `User Shadow Banned\n\n` +
+      `User: ${targetUserId}\n` +
+      `Admin: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `Shadow Ban Effect:\n` +
       `• User can still see their own comments\n` +
       `• Other users cannot see their comments\n` +
       `• User is not notified of the ban\n` +
@@ -206,12 +206,12 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
     if (error) throw error
 
     return createDiscordResponse(
-      `👻 **Shadow Ban Removed**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Admin:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `✅ **User comments are now visible to everyone again**`
+      `Shadow Ban Removed\n\n` +
+      `User: ${targetUserId}\n` +
+      `Admin: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `User comments are now visible to everyone again`
     )
 
   } catch (error) {
@@ -305,7 +305,7 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
     return createModerationEmbed(
       'promote',
       targetUserId,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason,
       `From ${targetUserComment.user_role} to ${newRole}`
     )
@@ -399,14 +399,14 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       .eq('platform_user_id', targetUserId)
 
     return createDiscordResponse(
-      `⬇️ **User Demoted**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🎭 **New Role:** ${newRole}\n` +
-      `⬇️ **Previous Role:** ${targetUserComment.user_role}\n` +
-      `🛡️ **Demoted by:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `✅ **User now has ${newRole} permissions**`
+      `User Demoted\n\n` +
+      `User: ${targetUserId}\n` +
+      `New Role: ${newRole}\n` +
+      `Previous Role: ${targetUserComment.user_role}\n` +
+      `Demoted by: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `User now has ${newRole} permissions`
     )
 
   } catch (error) {
@@ -439,7 +439,7 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
         .order('key')
 
       if (!configs || configs.length === 0) {
-        return createDiscordResponse('⚙️ **System Configuration**\n\nNo configuration found.')
+        return createDiscordResponse('System Configuration\n\nNo configuration found.')
       }
 
       const configList = configs.map((config: any) => {
@@ -449,7 +449,7 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
         return `• **${config.key}:** ${displayValue}`
       }).join('\n')
 
-      return createDiscordResponse(`⚙️ **System Configuration**\n\n${configList}`)
+      return createDiscordResponse(`System Configuration\n\n${configList}`)
     }
 
     if (action === 'update') {
@@ -489,11 +489,11 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
       if (error) throw error
 
       return createDiscordResponse(
-        `⚙️ **Configuration Updated**\n\n` +
-        `🔑 **Key:** ${key}\n` +
-        `📝 **New Value:** ${value}\n` +
-        `🛡️ **Updated by:** <@${moderatorId}>\n` +
-        `📅 **Time:** ${new Date().toLocaleString()}`
+        `Configuration Updated\n\n` +
+        `Key: ${key}\n` +
+        `New Value: ${value}\n` +
+        `Updated by: ${moderatorName}\n` +
+        `Time: ${new Date().toLocaleString()}`
       )
     }
 
@@ -653,15 +653,15 @@ export async function handleReportCommand(supabase: any, reporterId: string, rep
     if (error) throw error
 
     return createDiscordResponse(
-      `🚨 **Comment Reported**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🚨 **Reported by:** <@${reporterId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📋 **Notes:** ${notes || 'No notes provided'}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `✅ **Report submitted for moderation review**\n` +
-      `📊 **Comment now has ${comment.report_count + 1} total reports**`
+      `Comment Reported\n\n` +
+      `Comment ID: ${commentId}\n` +
+      `Author: ${comment.username} (${comment.user_id})\n` +
+      `Reported by: ${reporterName}\n` +
+      `Reason: ${reason}\n` +
+      `Notes: ${notes || 'No notes provided'}\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `Report submitted for moderation review\n` +
+      `Comment now has ${comment.report_count + 1} total reports`
     )
 
   } catch (error) {

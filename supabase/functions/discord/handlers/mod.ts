@@ -24,7 +24,7 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
       JSON.stringify({
         type: 4,
         data: {
-          content: '❌ Could not identify user. Please try again.',
+          content: 'Could not identify user. Please try again.',
           flags: 64
         }
       }),
@@ -110,7 +110,7 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
           JSON.stringify({
             type: 4,
             data: {
-              content: '❌ Unknown command. Use `/help` to see available commands.',
+              content: 'Unknown command. Use `/help` to see available commands.',
               flags: 64
             }
           }),
@@ -123,7 +123,7 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
       JSON.stringify({
         type: 4,
         data: {
-          content: `❌ Error executing command: ${error.message}`,
+          content: `Error executing command: ${error.message}`,
           flags: 64
         }
       }),

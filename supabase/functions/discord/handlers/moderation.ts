@@ -105,7 +105,7 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
     return createModerationEmbed(
       'warn',
       targetUserId,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason,
       `Warning Count: ${newWarningCount}${autoAction ? ' | ' + autoAction : ''}`
     )
@@ -180,7 +180,7 @@ export async function handleUnwarnCommand(supabase: any, moderatorId: string, mo
     return createModerationEmbed(
       'unwarn',
       targetUserId,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason || 'No reason provided',
       `New Warning Count: ${newWarningCount}${liftedAction ? ' | ' + liftedAction : ''}`
     )
@@ -242,7 +242,7 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
     return createModerationEmbed(
       'mute',
       targetUserId,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason,
       `Duration: ${duration} hours | Muted Until: ${new Date(muteUntil).toLocaleString()}`
     )
@@ -285,7 +285,7 @@ export async function handleUnmuteCommand(supabase: any, moderatorId: string, mo
     return createModerationEmbed(
       'unmute',
       targetUserId,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason,
       'User can now post and interact normally'
     )
@@ -349,7 +349,7 @@ export async function handlePinCommand(supabase: any, moderatorId: string, moder
     return createModerationEmbed(
       'pin',
       `Comment ${commentId} by ${comment.username}`,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason,
       `Content: ${comment.content.substring(0, 100)}${comment.content.length > 100 ? '...' : ''}`
     )
@@ -409,7 +409,7 @@ export async function handleUnpinCommand(supabase: any, moderatorId: string, mod
     return createModerationEmbed(
       'unpin',
       `Comment ${commentId} by ${comment.username}`,
-      `<@${moderatorId}>`,
+      moderatorName,
       reason,
       'Comment is no longer pinned'
     )
@@ -467,13 +467,13 @@ export async function handleLockCommand(supabase: any, moderatorId: string, mode
     if (error) throw error
 
     return createDiscordResponse(
-      `🔒 **Thread Locked**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `📄 **Content Preview:** ${comment.content.substring(0, 100)}${comment.content.length > 100 ? '...' : ''}`
+      `Thread Locked\n\n` +
+      `Comment ID: ${commentId}\n` +
+      `Author: ${comment.username} (${comment.user_id})\n` +
+      `Moderator: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `Content Preview: ${comment.content.substring(0, 100)}${comment.content.length > 100 ? '...' : ''}`
     )
 
   } catch (error) {
@@ -528,12 +528,12 @@ export async function handleUnlockCommand(supabase: any, moderatorId: string, mo
     if (error) throw error
 
     return createDiscordResponse(
-      `🔓 **Thread Unlocked**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}`
+      `Thread Unlocked\n\n` +
+      `Comment ID: ${commentId}\n` +
+      `Author: ${comment.username} (${comment.user_id})\n` +
+      `Moderator: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}`
     )
 
   } catch (error) {
@@ -593,12 +593,12 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
     const deleterRole = comment.user_id === moderatorId ? 'Owner' : 'Moderator'
     
     return createDiscordResponse(
-      `🗑️ **Comment Deleted**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🛡️ **Deleted by:** <@${moderatorId}> (${deleterRole})\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `📄 **Deleted Content:** ${comment.content.substring(0, 200)}${comment.content.length > 200 ? '...' : ''}`
+      `Comment Deleted\n\n` +
+      `Comment ID: ${commentId}\n` +
+      `Author: ${comment.username} (${comment.user_id})\n` +
+      `Deleted by: ${moderatorName} (${deleterRole})\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `Deleted Content: ${comment.content.substring(0, 200)}${comment.content.length > 200 ? '...' : ''}`
     )
 
   } catch (error) {
@@ -675,14 +675,14 @@ export async function handleResolveCommand(supabase: any, moderatorId: string, m
     if (error) throw error
 
     return createDiscordResponse(
-      `✅ **Report ${resolution.charAt(0).toUpperCase() + resolution.slice(1)}**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Reporter:** ${reporterId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📋 **Resolution:** ${resolution}\n` +
-      `📝 **Notes:** ${notes || 'No notes provided'}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n` +
-      `📊 **Status:** ${allResolved ? 'All reports resolved' : 'Some reports still pending'}`
+      `Report ${resolution.charAt(0).toUpperCase() + resolution.slice(1)}\n\n` +
+      `Comment ID: ${commentId}\n` +
+      `Reporter: ${reporterId}\n` +
+      `Moderator: ${moderatorName}\n` +
+      `Resolution: ${resolution}\n` +
+      `Notes: ${notes || 'No notes provided'}\n` +
+      `Time: ${new Date().toLocaleString()}\n` +
+      `Status: ${allResolved ? 'All reports resolved' : 'Some reports still pending'}`
     )
 
   } catch (error) {
@@ -710,7 +710,7 @@ export async function handleQueueCommand(supabase: any, registration: any, userR
     if (error) throw error
 
     if (!comments || comments.length === 0) {
-      return createDiscordResponse('📋 **Moderation Queue**\n\n✅ No pending reports to review.')
+      return createDiscordResponse('Moderation Queue\n\nNo pending reports to review.')
     }
 
     // Format reports
@@ -720,18 +720,18 @@ export async function handleQueueCommand(supabase: any, registration: any, userR
       
       return (
         `**${index + 1}. Comment ${comment.id}**\n` +
-        `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-        `📊 **Reports:** ${pendingReports.length}\n` +
-        `🏷️ **Reasons:** ${pendingReports.map((r: any) => r.reason).join(', ')}\n` +
-        `📄 **Preview:** ${comment.content.substring(0, 100)}${comment.content.length > 100 ? '...' : ''}\n` +
-        `📅 **Created:** ${new Date(comment.created_at).toLocaleDateString()}\n`
+        `Author: ${comment.username} (${comment.user_id})\n` +
+        `Reports: ${pendingReports.length}\n` +
+        `Reasons: ${pendingReports.map((r: any) => r.reason).join(', ')}\n` +
+        `Preview: ${comment.content.substring(0, 100)}${comment.content.length > 100 ? '...' : ''}\n` +
+        `Created: ${new Date(comment.created_at).toLocaleDateString()}\n`
       )
     }).join('\n')
 
     return createDiscordResponse(
-      `📋 **Moderation Queue** (${comments.length} pending)\n\n` +
+      `Moderation Queue (${comments.length} pending)\n\n` +
       queueItems +
-      `\n🔧 **Use \`/resolve <comment_id> <reporter_id> <resolution>\` to handle reports**`
+      `\nUse \`/resolve <comment_id> <reporter_id> <resolution>\` to handle reports`
     )
 
   } catch (error) {
@@ -797,11 +797,11 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
     if (error) throw error
 
     return createDiscordResponse(
-      `🔨 **User Banned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}`
+      `User Banned\n\n` +
+      `User: ${targetUserId}\n` +
+      `Moderator: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}`
     )
 
   } catch (error) {
@@ -840,11 +840,11 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
     if (error) throw error
 
     return createDiscordResponse(
-      `🔓 **User Unbanned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}`
+      `User Unbanned\n\n` +
+      `User: ${targetUserId}\n` +
+      `Moderator: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}`
     )
 
   } catch (error) {
@@ -899,11 +899,11 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
 
     return createDiscordResponse(
       `🕶️ **User Shadowbanned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `⚠️ **User's comments will be hidden from others but visible to themselves.**`
+      `User: ${targetUserId}\n` +
+      `Moderator: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `User's comments will be hidden from others but visible to themselves.`
     )
 
   } catch (error) {
@@ -943,11 +943,11 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
 
     return createDiscordResponse(
       `🌟 **User Unshadowbanned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `✅ **User's comments will now be visible to everyone again.**`
+      `User: ${targetUserId}\n` +
+      `Moderator: ${moderatorName}\n` +
+      `Reason: ${reason}\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `User's comments will now be visible to everyone again.`
     )
 
   } catch (error) {
