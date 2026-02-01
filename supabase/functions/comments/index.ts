@@ -340,7 +340,12 @@ async function handleCreateComment(supabase: any, params: any) {
       ip_address: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip'),
       user_agent: req.headers.get('user-agent')
     })
-    .select()
+    .select(`
+      id, client_type, user_id, media_id, content, username, user_avatar, user_role,
+      media_type, media_title, media_year, media_poster, parent_id, created_at, updated_at,
+      deleted, pinned, locked, edited, edit_count, upvotes, downvotes, vote_score,
+      user_banned, user_shadow_banned, user_warnings, reported, report_count, tags
+    `)
     .single()
 
   if (error) throw error
@@ -355,11 +360,16 @@ async function handleCreateComment(supabase: any, params: any) {
       content: comment.content,
       client_type: comment.client_type,
       media_id: comment.media_id,
-      parent_id: comment.parent_id,
-      media_type: comment.media_type,
-      media_title: comment.media_title
+      parent_id: comment.parent_id
     },
-    user: userInfo
+    user: userInfo,
+    media: {
+      id: mediaInfo.media_id,
+      title: mediaInfo.title,
+      year: mediaInfo.year,
+      poster: mediaInfo.poster,
+      type: mediaInfo.type
+    }
   })
 
   return new Response(
@@ -437,9 +447,12 @@ async function handleEditComment(supabase: any, params: any) {
       user_id: updatedComment.user_id,
       content: updatedComment.content,
       client_type: updatedComment.client_type,
-      media_id: updatedComment.media_id,
-      media_type: updatedComment.media_type,
-      media_title: updatedComment.media_title
+      media_id: updatedComment.media_id
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      type: updatedComment.media_type
     }
   })
 
@@ -509,11 +522,14 @@ async function handleDeleteComment(supabase: any, params: any) {
         user_id: deletedComment.user_id,
         content: comment.content,
         client_type: deletedComment.client_type,
-        media_id: deletedComment.media_id,
-        media_type: deletedComment.media_type,
-        media_title: deletedComment.media_title
+        media_id: deletedComment.media_id
       },
-      moderator
+      moderator,
+      media: {
+        id: deletedComment.media_id,
+        title: deletedComment.media_title,
+        type: deletedComment.media_type
+      }
     })
 
   return new Response(

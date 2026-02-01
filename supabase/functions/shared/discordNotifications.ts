@@ -262,8 +262,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       message += `**New Comment (ID: ${data.comment?.id})**\n`
       message += `* Client Type: ${data.comment?.client_type}\n`
       message += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
-      message += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      message += `* Media Name: ${data.comment?.media_title}\n`
+      message += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      message += `* Media Name: ${data.media?.title}\n`
       message += `* Content: ${data.comment?.content}`
       message += "\n```"
       return message
@@ -273,8 +273,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       updateMessage += `**Comment Updated (ID: ${data.comment?.id})**\n`
       updateMessage += `* Client Type: ${data.comment?.client_type}\n`
       updateMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
-      updateMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      updateMessage += `* Media Name: ${data.comment?.media_title}\n`
+      updateMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      updateMessage += `* Media Name: ${data.media?.title}\n`
       updateMessage += `* Content: ${data.comment?.content}`
       updateMessage += "\n```"
       return updateMessage
@@ -284,8 +284,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       deleteMessage += `**Comment Deleted (ID: ${data.comment?.id})**\n`
       deleteMessage += `* Client Type: ${data.comment?.client_type}\n`
       deleteMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
-      deleteMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      deleteMessage += `* Media Name: ${data.comment?.media_title}\n`
+      deleteMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      deleteMessage += `* Media Name: ${data.media?.title}\n`
       deleteMessage += `* Deleted By: ${data.moderator?.username || data.comment?.username}`
       deleteMessage += "\n```"
       return deleteMessage
@@ -317,8 +317,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       pinMessage += `**Comment Pinned (ID: ${data.comment?.id})**\n`
       pinMessage += `* Client Type: ${data.comment?.client_type}\n`
       pinMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
-      pinMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      pinMessage += `* Media Name: ${data.comment?.media_title}\n`
+      pinMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      pinMessage += `* Media Name: ${data.media?.title}\n`
       pinMessage += `* Pinned By: ${data.moderator?.username}`
       pinMessage += "\n```"
       return pinMessage
@@ -328,8 +328,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       lockMessage += `**Comment Locked (ID: ${data.comment?.id})**\n`
       lockMessage += `* Client Type: ${data.comment?.client_type}\n`
       lockMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
-      lockMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      lockMessage += `* Media Name: ${data.comment?.media_title}\n`
+      lockMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      lockMessage += `* Media Name: ${data.media?.title}\n`
       lockMessage += `* Locked By: ${data.moderator?.username}`
       lockMessage += "\n```"
       return lockMessage
@@ -339,8 +339,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       voteMessage += `**Vote Cast (Comment ID: ${data.comment?.id})**\n`
       voteMessage += `* Client Type: ${data.comment?.client_type}\n`
       voteMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
-      voteMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      voteMessage += `* Media Name: ${data.comment?.media_title}\n`
+      voteMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      voteMessage += `* Media Name: ${data.media?.title}\n`
       voteMessage += `* Vote Type: ${data.voteType}`
       voteMessage += "\n```"
       return voteMessage
@@ -350,8 +350,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       reportMessage += `**Report Filed (Comment ID: ${data.comment?.id})**\n`
       reportMessage += `* Client Type: ${data.comment?.client_type}\n`
       reportMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
-      reportMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      reportMessage += `* Media Name: ${data.comment?.media_title}\n`
+      reportMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      reportMessage += `* Media Name: ${data.media?.title}\n`
       reportMessage += `* Report Reason: ${data.reportReason}`
       reportMessage += "\n```"
       return reportMessage
@@ -361,8 +361,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       resolveMessage += `**Report Resolved (Comment ID: ${data.comment?.id})**\n`
       resolveMessage += `* Client Type: ${data.comment?.client_type}\n`
       resolveMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
-      resolveMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.comment?.media_type}\n`
-      resolveMessage += `* Media Name: ${data.comment?.media_title}\n`
+      resolveMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      resolveMessage += `* Media Name: ${data.media?.title}\n`
       resolveMessage += `* Resolved By: ${data.moderator?.username}`
       resolveMessage += "\n```"
       return resolveMessage
