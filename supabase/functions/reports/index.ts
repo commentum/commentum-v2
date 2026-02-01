@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole } from '../shared/auth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { getOrCreateUser, updateUserStats } from '../shared/userUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -223,6 +224,12 @@ async function handleCreateReport(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Update user statistics (report filed)
+  await updateUserStats(supabase, reporter_id, comment.client_type, 'report_filed', 1, 0)
+  
+  // Update user statistics (report received)
+  await updateUserStats(supabase, comment.user_id, comment.client_type, 'report_received', 1, 0)
 
   // Queue Discord notification for new report in background - NON-BLOCKING
   queueDiscordNotification({

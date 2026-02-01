@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { getOrCreateUser, updateUserStats } from '../shared/userUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -88,6 +89,16 @@ serve(async (req) => {
       )
     }
 
+    // Get or create user record and update vote statistics
+    const userRecord = await getOrCreateUser(supabase, user_id, comment.client_type, user_info.username || `User ${user_id}`, user_info.avatar)
+    
+    if (!userRecord) {
+      return new Response(
+        JSON.stringify({ error: 'Failed to get or create user record' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
 
     // Parse current votes
     const userVotes = comment.user_votes ? JSON.parse(comment.user_votes) : {}
@@ -153,6 +164,16 @@ serve(async (req) => {
       .single()
 
     if (updateError) throw updateError
+
+    // Update user statistics
+    let voteIncrement = 0
+    if (vote_type !== 'remove' && (!currentVote || currentVote !== vote_type)) {
+      voteIncrement = 1
+    }
+    
+    if (voteIncrement > 0) {
+      await updateUserStats(supabase, user_id, comment.client_type, 'vote', voteIncrement, 0)
+    }
 
   // Queue Discord notification for vote in background (only for new votes, not removals) - NON-BLOCKING
   if (vote_type !== 'remove' && (!currentVote || currentVote !== vote_type)) {
