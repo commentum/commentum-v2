@@ -258,195 +258,237 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
 function createDiscordMessage(data: DiscordNotificationData): string {
   switch (data.type) {
     case 'comment_created':
-      let message = `**New Comment (ID: ${data.comment?.id || 'Unknown'})**\n`
-      message += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      message += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
-      message += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      message += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      message += `* Content: ${data.comment?.content || 'No content'}`
+      let message = "```\n"
+      message += `**New Comment (ID: ${data.comment?.id})**\n`
+      message += `* Client Type: ${data.comment?.client_type}\n`
+      message += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
+      message += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      message += `* Media Name: ${data.media?.title}\n`
+      message += `* Content: ${data.comment?.content}`
+      message += "\n```"
       return message
 
     case 'comment_updated':
-      let updateMessage = `**Comment Updated (ID: ${data.comment?.id || 'Unknown'})**\n`
-      updateMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      updateMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
-      updateMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      updateMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      updateMessage += `* Content: ${data.comment?.content || 'No content'}`
+      let updateMessage = "```\n"
+      updateMessage += `**Comment Updated (ID: ${data.comment?.id})**\n`
+      updateMessage += `* Client Type: ${data.comment?.client_type}\n`
+      updateMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
+      updateMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      updateMessage += `* Media Name: ${data.media?.title}\n`
+      updateMessage += `* Content: ${data.comment?.content}`
+      updateMessage += "\n```"
       return updateMessage
 
     case 'comment_deleted':
-      let deleteMessage = `**Comment Deleted (ID: ${data.comment?.id || 'Unknown'})**\n`
-      deleteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      deleteMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
-      deleteMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      deleteMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      deleteMessage += `* Deleted By: ${data.moderator?.username || data.comment?.username || 'Unknown'}`
+      let deleteMessage = "```\n"
+      deleteMessage += `**Comment Deleted (ID: ${data.comment?.id})**\n`
+      deleteMessage += `* Client Type: ${data.comment?.client_type}\n`
+      deleteMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
+      deleteMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      deleteMessage += `* Media Name: ${data.media?.title}\n`
+      deleteMessage += `* Deleted By: ${data.moderator?.username || data.comment?.username}`
+      deleteMessage += "\n```"
       return deleteMessage
 
     case 'user_banned':
-      let banMessage = `**User Banned**\n`
-      banMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      banMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      let banMessage = "```\n"
+      banMessage += `**User Banned**\n`
+      banMessage += `* Client Type: ${data.comment?.client_type}\n`
+      banMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
       banMessage += `* Media ID: N/A                  Media Type: N/A\n`
       banMessage += `* Media Name: N/A\n`
-      banMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      banMessage += `* Reason: ${data.reason}`
+      banMessage += "\n```"
       return banMessage
 
     case 'user_warned':
-      let warnMessage = `**User Warned**\n`
-      warnMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      warnMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      let warnMessage = "```\n"
+      warnMessage += `**User Warned**\n`
+      warnMessage += `* Client Type: ${data.comment?.client_type}\n`
+      warnMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
       warnMessage += `* Media ID: N/A                  Media Type: N/A\n`
       warnMessage += `* Media Name: N/A\n`
-      warnMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      warnMessage += `* Reason: ${data.reason}`
+      warnMessage += "\n```"
       return warnMessage
 
     case 'comment_pinned':
-      let pinMessage = `**Comment Pinned (ID: ${data.comment?.id || 'Unknown'})**\n`
-      pinMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      pinMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
-      pinMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      pinMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      pinMessage += `* Pinned By: ${data.moderator?.username || 'Unknown'}`
+      let pinMessage = "```\n"
+      pinMessage += `**Comment Pinned (ID: ${data.comment?.id})**\n`
+      pinMessage += `* Client Type: ${data.comment?.client_type}\n`
+      pinMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
+      pinMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      pinMessage += `* Media Name: ${data.media?.title}\n`
+      pinMessage += `* Pinned By: ${data.moderator?.username}`
+      pinMessage += "\n```"
       return pinMessage
 
     case 'comment_locked':
-      let lockMessage = `**Comment Locked (ID: ${data.comment?.id || 'Unknown'})**\n`
-      lockMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      lockMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
-      lockMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      lockMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      lockMessage += `* Locked By: ${data.moderator?.username || 'Unknown'}`
+      let lockMessage = "```\n"
+      lockMessage += `**Comment Locked (ID: ${data.comment?.id})**\n`
+      lockMessage += `* Client Type: ${data.comment?.client_type}\n`
+      lockMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
+      lockMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      lockMessage += `* Media Name: ${data.media?.title}\n`
+      lockMessage += `* Locked By: ${data.moderator?.username}`
+      lockMessage += "\n```"
       return lockMessage
 
     case 'vote_cast':
-      let voteMessage = `**Vote Cast (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
-      voteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      voteMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
-      voteMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      voteMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      voteMessage += `* Vote Type: ${data.voteType || 'Unknown'}`
+      let voteMessage = "```\n"
+      voteMessage += `**Vote Cast (Comment ID: ${data.comment?.id})**\n`
+      voteMessage += `* Client Type: ${data.comment?.client_type}\n`
+      voteMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
+      voteMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      voteMessage += `* Media Name: ${data.media?.title}\n`
+      voteMessage += `* Vote Type: ${data.voteType}`
+      voteMessage += "\n```"
       return voteMessage
 
     case 'report_filed':
-      let reportMessage = `**Report Filed (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
-      reportMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      reportMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
-      reportMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      reportMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      reportMessage += `* Report Reason: ${data.reportReason || 'Unknown'}`
+      let reportMessage = "```\n"
+      reportMessage += `**Report Filed (Comment ID: ${data.comment?.id})**\n`
+      reportMessage += `* Client Type: ${data.comment?.client_type}\n`
+      reportMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
+      reportMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      reportMessage += `* Media Name: ${data.media?.title}\n`
+      reportMessage += `* Report Reason: ${data.reportReason}`
+      reportMessage += "\n```"
       return reportMessage
 
     case 'report_resolved':
-      let resolveMessage = `**Report Resolved (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
-      resolveMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      resolveMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
-      resolveMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      resolveMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      resolveMessage += `* Resolved By: ${data.moderator?.username || 'Unknown'}`
+      let resolveMessage = "```\n"
+      resolveMessage += `**Report Resolved (Comment ID: ${data.comment?.id})**\n`
+      resolveMessage += `* Client Type: ${data.comment?.client_type}\n`
+      resolveMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
+      resolveMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      resolveMessage += `* Media Name: ${data.media?.title}\n`
+      resolveMessage += `* Resolved By: ${data.moderator?.username}`
+      resolveMessage += "\n```"
       return resolveMessage
 
     case 'user_muted':
-      let muteMessage = `**User Muted**\n`
-      muteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      muteMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      let muteMessage = "```\n"
+      muteMessage += `**User Muted**\n`
+      muteMessage += `* Client Type: ${data.comment?.client_type}\n`
+      muteMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
       muteMessage += `* Media ID: N/A                  Media Type: N/A\n`
       muteMessage += `* Media Name: N/A\n`
-      muteMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      muteMessage += `* Reason: ${data.reason}`
+      muteMessage += "\n```"
       return muteMessage
 
     case 'user_shadow_banned':
-      let shadowBanMessage = `**User Shadow Banned**\n`
-      shadowBanMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      shadowBanMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      let shadowBanMessage = "```\n"
+      shadowBanMessage += `**User Shadow Banned**\n`
+      shadowBanMessage += `* Client Type: ${data.comment?.client_type}\n`
+      shadowBanMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
       shadowBanMessage += `* Media ID: N/A                  Media Type: N/A\n`
       shadowBanMessage += `* Media Name: N/A\n`
-      shadowBanMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      shadowBanMessage += `* Reason: ${data.reason}`
+      shadowBanMessage += "\n```"
       return shadowBanMessage
 
     case 'comment_unlocked':
-      let unlockMessage = `**Comment Unlocked (ID: ${data.comment?.id || 'Unknown'})**\n`
-      unlockMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      unlockMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
-      unlockMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      unlockMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      unlockMessage += `* Unlocked By: ${data.moderator?.username || 'Unknown'}`
+      let unlockMessage = "```\n"
+      unlockMessage += `**Comment Unlocked (ID: ${data.comment?.id})**\n`
+      unlockMessage += `* Client Type: ${data.comment?.client_type}\n`
+      unlockMessage += `* UserID: ${data.comment?.user_id}           Username: ${data.comment?.username}\n`
+      unlockMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      unlockMessage += `* Media Name: ${data.media?.title}\n`
+      unlockMessage += `* Unlocked By: ${data.moderator?.username}`
+      unlockMessage += "\n```"
       return unlockMessage
 
     case 'moderation_action':
-      let modMessage = `**Moderation Action**\n`
-      modMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      modMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      let modMessage = "```\n"
+      modMessage += `**Moderation Action**\n`
+      modMessage += `* Client Type: ${data.comment?.client_type}\n`
+      modMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
       modMessage += `* Media ID: N/A                  Media Type: N/A\n`
       modMessage += `* Media Name: N/A\n`
-      modMessage += `* Action: ${data.metadata?.action || 'Unknown'} - ${data.reason || 'No reason provided'}`
+      modMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
+      modMessage += "\n```"
       return modMessage
 
     case 'user_unbanned':
-      let unbanMessage = `**User Unbanned**\n`
-      unbanMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      unbanMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      let unbanMessage = "```\n"
+      unbanMessage += `**User Unbanned**\n`
+      unbanMessage += `* Client Type: ${data.comment?.client_type}\n`
+      unbanMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
       unbanMessage += `* Media ID: N/A                  Media Type: N/A\n`
       unbanMessage += `* Media Name: N/A\n`
-      unbanMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      unbanMessage += `* Reason: ${data.reason}`
+      unbanMessage += "\n```"
       return unbanMessage
 
     case 'report_dismissed':
-      let dismissMessage = `**Report Dismissed (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
-      dismissMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      dismissMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
-      dismissMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      dismissMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      dismissMessage += `* Dismissed By: ${data.moderator?.username || 'Unknown'}`
+      let dismissMessage = "```\n"
+      dismissMessage += `**Report Dismissed (Comment ID: ${data.comment?.id})**\n`
+      dismissMessage += `* Client Type: ${data.comment?.client_type}\n`
+      dismissMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
+      dismissMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      dismissMessage += `* Media Name: ${data.media?.title}\n`
+      dismissMessage += `* Dismissed By: ${data.moderator?.username}`
+      dismissMessage += "\n```"
       return dismissMessage
 
     case 'vote_removed':
-      let removeVoteMessage = `**Vote Removed (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
-      removeVoteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      removeVoteMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
-      removeVoteMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
-      removeVoteMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
-      removeVoteMessage += `* Vote Type Removed: ${data.voteType || 'Unknown'}`
+      let removeVoteMessage = "```\n"
+      removeVoteMessage += `**Vote Removed (Comment ID: ${data.comment?.id})**\n`
+      removeVoteMessage += `* Client Type: ${data.comment?.client_type}\n`
+      removeVoteMessage += `* UserID: ${data.user?.id}           Username: ${data.user?.username}\n`
+      removeVoteMessage += `* Media ID: ${data.comment?.media_id}                  Media Type: ${data.media?.type}\n`
+      removeVoteMessage += `* Media Name: ${data.media?.title}\n`
+      removeVoteMessage += `* Vote Type Removed: ${data.voteType}`
+      removeVoteMessage += "\n```"
       return removeVoteMessage
 
     case 'config_updated':
-      let configMessage = `**Configuration Updated**\n`
+      let configMessage = "```\n"
+      configMessage += `**Configuration Updated**\n`
       configMessage += `* Client Type: System\n`
-      configMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      configMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
       configMessage += `* Media ID: N/A                  Media Type: N/A\n`
       configMessage += `* Media Name: N/A\n`
-      configMessage += `* Action: ${data.metadata?.action || 'Unknown'} - ${data.reason || 'No reason provided'}`
+      configMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
+      configMessage += "\n```"
       return configMessage
 
     case 'system_enabled':
-      let enableMessage = `**System Enabled**\n`
+      let enableMessage = "```\n"
+      enableMessage += `**System Enabled**\n`
       enableMessage += `* Client Type: System\n`
-      enableMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      enableMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
       enableMessage += `* Media ID: N/A                  Media Type: N/A\n`
       enableMessage += `* Media Name: N/A\n`
-      enableMessage += `* Action: System enabled by ${data.moderator?.username || 'Unknown'}`
+      enableMessage += `* Action: System enabled by ${data.moderator?.username}`
+      enableMessage += "\n```"
       return enableMessage
 
     case 'system_disabled':
-      let disableMessage = `**System Disabled**\n`
+      let disableMessage = "```\n"
+      disableMessage += `**System Disabled**\n`
       disableMessage += `* Client Type: System\n`
-      disableMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      disableMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
       disableMessage += `* Media ID: N/A                  Media Type: N/A\n`
       disableMessage += `* Media Name: N/A\n`
-      disableMessage += `* Action: System disabled by ${data.moderator?.username || 'Unknown'}`
+      disableMessage += `* Action: System disabled by ${data.moderator?.username}`
+      disableMessage += "\n```"
       return disableMessage
 
     case 'bulk_action':
-      let bulkMessage = `**Bulk Action Performed**\n`
-      bulkMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
-      bulkMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      let bulkMessage = "```\n"
+      bulkMessage += `**Bulk Action Performed**\n`
+      bulkMessage += `* Client Type: ${data.comment?.client_type}\n`
+      bulkMessage += `* UserID: ${data.moderator?.id}           Username: ${data.moderator?.username}\n`
       bulkMessage += `* Media ID: N/A                  Media Type: N/A\n`
       bulkMessage += `* Media Name: N/A\n`
-      bulkMessage += `* Action: ${data.metadata?.action || 'Unknown'} - ${data.reason || 'No reason provided'}`
+      bulkMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
+      bulkMessage += "\n```"
       return bulkMessage
 
     default:
-      return `**Unknown Notification Type: ${data.type}**`
+      return "```\n**Unknown Notification Type: " + data.type + "**\n```"
   }
 }

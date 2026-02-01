@@ -362,7 +362,8 @@ async function handleCreateComment(supabase: any, params: any) {
       id: mediaInfo.media_id,
       title: mediaInfo.title,
       year: mediaInfo.year,
-      poster: mediaInfo.poster
+      poster: mediaInfo.poster,
+      type: mediaInfo.type
     }
   })
 
@@ -442,6 +443,11 @@ async function handleEditComment(supabase: any, params: any) {
       content: updatedComment.content,
       client_type: updatedComment.client_type,
       media_id: updatedComment.media_id
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      type: updatedComment.media_type
     }
   })
 
@@ -513,7 +519,12 @@ async function handleDeleteComment(supabase: any, params: any) {
         client_type: deletedComment.client_type,
         media_id: deletedComment.media_id
       },
-      moderator
+      moderator,
+      media: {
+        id: deletedComment.media_id,
+        title: deletedComment.media_title,
+        type: deletedComment.media_type
+      }
     })
 
   return new Response(
