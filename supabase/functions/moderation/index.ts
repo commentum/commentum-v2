@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { getUserDetails, applyUserModeration, updateUserStats } from '../shared/userUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -146,6 +147,9 @@ async function handlePinComment(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Update user statistics in users table (increment pinned comments)
+  await updateUserStats(supabase, updatedComment.user_id, updatedComment.client_type, 'pin', 1, 0)
 
   // Queue Discord notification for pinned comment in background - NON-BLOCKING
   queueDiscordNotification({
@@ -364,14 +368,13 @@ async function handleUnlockThread(supabase: any, params: any) {
 async function handleWarnUser(supabase: any, params: any) {
   const { target_user_id, moderator_id, reason, severity, duration, moderatorRole } = params
 
-  // Get target user's current status
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('user_role, user_warnings')
+  // We need client_type to get user details, so we'll check all client types
+  const { data: userRecords } = await supabase
+    .from('users')
+    .select('*')
     .eq('user_id', target_user_id)
-    .single()
 
-  if (!targetUserComment) {
+  if (!userRecords || userRecords.length === 0) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -379,37 +382,37 @@ async function handleWarnUser(supabase: any, params: any) {
   }
 
   // Check permissions (can't moderate users with equal or higher role)
-  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
+  const targetUserRole = userRecords[0].user_role
+  if (!canModerate(moderatorRole, targetUserRole)) {
     return new Response(
       JSON.stringify({ error: 'Cannot moderate user with equal or higher role' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  let updateData: any = {
-    moderated: true,
-    moderated_at: new Date().toISOString(),
-    moderated_by: moderator_id,
-    moderation_reason: reason,
-    moderation_action: severity
-  }
+  // Apply moderation action to all client types for this user
+  const moderationPromises = userRecords.map(userRecord => {
+    let action = 'warn'
+    let durationHours = duration
+    
+    if (severity === 'mute' && duration) {
+      action = 'mute'
+    } else if (severity === 'ban') {
+      action = 'ban'
+    }
+    
+    return applyUserModeration(
+      supabase, 
+      target_user_id, 
+      userRecord.client_type, 
+      action as any, 
+      durationHours, 
+      reason, 
+      moderator_id
+    )
+  })
 
-  if (severity === 'mute' && duration) {
-    updateData.user_muted_until = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString() // duration in hours
-  } else if (severity === 'ban') {
-    updateData.user_banned = true
-  }
-
-  // Update all user's comments with new status
-  const { error } = await supabase
-    .from('comments')
-    .update({
-      user_warnings: targetUserComment.user_warnings + 1,
-      ...updateData
-    })
-    .eq('user_id', target_user_id)
-
-  if (error) throw error
+  await Promise.all(moderationPromises)
 
   // Queue Discord notification for user warning in background - NON-BLOCKING
   queueDiscordNotification({
@@ -449,14 +452,13 @@ async function handleBanUser(supabase: any, params: any) {
     )
   }
 
-  // Get target user's current status
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('user_role')
+  // Get target user's records across all client types
+  const { data: userRecords } = await supabase
+    .from('users')
+    .select('*')
     .eq('user_id', target_user_id)
-    .single()
 
-  if (!targetUserComment) {
+  if (!userRecords || userRecords.length === 0) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -464,28 +466,29 @@ async function handleBanUser(supabase: any, params: any) {
   }
 
   // Check permissions
-  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
+  const targetUserRole = userRecords[0].user_role
+  if (!canModerate(moderatorRole, targetUserRole)) {
     return new Response(
       JSON.stringify({ error: 'Cannot ban user with equal or higher role' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Update all user's comments
-  const { error } = await supabase
-    .from('comments')
-    .update({
-      user_banned: true,
-      user_shadow_banned: shadow_ban || false,
-      moderated: true,
-      moderated_at: new Date().toISOString(),
-      moderated_by: moderator_id,
-      moderation_reason: reason,
-      moderation_action: shadow_ban ? 'shadow_ban' : 'ban'
-    })
-    .eq('user_id', target_user_id)
+  // Apply ban to all client types for this user
+  const banAction = shadow_ban ? 'shadow_ban' : 'ban'
+  const moderationPromises = userRecords.map(userRecord => 
+    applyUserModeration(
+      supabase, 
+      target_user_id, 
+      userRecord.client_type, 
+      banAction, 
+      undefined, 
+      reason, 
+      moderator_id
+    )
+  )
 
-  if (error) throw error
+  await Promise.all(moderationPromises)
 
   // Queue Discord notification for user ban in background - NON-BLOCKING
   queueDiscordNotification({
@@ -523,22 +526,33 @@ async function handleUnbanUser(supabase: any, params: any) {
     )
   }
 
-  // Update all user's comments
-  const { error } = await supabase
-    .from('comments')
-    .update({
-      user_banned: false,
-      user_shadow_banned: false,
-      user_muted_until: null,
-      moderated: true,
-      moderated_at: new Date().toISOString(),
-      moderated_by: moderator_id,
-      moderation_reason: reason,
-      moderation_action: 'unban'
-    })
+  // Get target user's records across all client types
+  const { data: userRecords } = await supabase
+    .from('users')
+    .select('*')
     .eq('user_id', target_user_id)
 
-  if (error) throw error
+  if (!userRecords || userRecords.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'User not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Apply unban to all client types for this user
+  const moderationPromises = userRecords.map(userRecord => 
+    applyUserModeration(
+      supabase, 
+      target_user_id, 
+      userRecord.client_type, 
+      'unban', 
+      undefined, 
+      reason, 
+      moderator_id
+    )
+  )
+
+  await Promise.all(moderationPromises)
 
   return new Response(
     JSON.stringify({
