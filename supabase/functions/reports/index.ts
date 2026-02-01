@@ -242,6 +242,7 @@ async function handleCreateReport(supabase: any, params: any) {
     media: {
       id: comment.media_id,
       title: comment.media_title,
+      type: comment.media_type,
       year: comment.media_year,
       poster: comment.media_poster
     },
@@ -359,6 +360,7 @@ async function handleResolveReport(supabase: any, params: any) {
     media: {
       id: fullComment.media_id,
       title: fullComment.media_title,
+      type: fullComment.media_type,
       year: fullComment.media_year,
       poster: fullComment.media_poster
     },

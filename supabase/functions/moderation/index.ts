@@ -165,6 +165,7 @@ async function handlePinComment(supabase: any, params: any) {
     media: {
       id: updatedComment.media_id,
       title: updatedComment.media_title,
+      type: updatedComment.media_type,
       year: updatedComment.media_year,
       poster: updatedComment.media_poster
     },
@@ -293,6 +294,7 @@ async function handleLockThread(supabase: any, params: any) {
     media: {
       id: updatedComment.media_id,
       title: updatedComment.media_title,
+      type: updatedComment.media_type,
       year: updatedComment.media_year,
       poster: updatedComment.media_poster
     },

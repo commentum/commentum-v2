@@ -174,6 +174,7 @@ serve(async (req) => {
       media: {
         id: comment.media_id,
         title: comment.media_title,
+        type: comment.media_type,
         year: comment.media_year,
         poster: comment.media_poster
       }
