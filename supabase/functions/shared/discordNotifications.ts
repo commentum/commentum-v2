@@ -295,8 +295,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       banMessage += `**User Banned**\n`
       banMessage += `* Client Type: ${data.comment?.client_type}\n`
       banMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      banMessage += `* Media ID: N/A | Media Type: N/A\n`
-      banMessage += `* Media Name: N/A\n`
       banMessage += `* Reason: ${data.reason}`
       banMessage += "\n```"
       return banMessage
@@ -306,8 +304,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       warnMessage += `**User Warned**\n`
       warnMessage += `* Client Type: ${data.comment?.client_type}\n`
       warnMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      warnMessage += `* Media ID: N/A | Media Type: N/A\n`
-      warnMessage += `* Media Name: N/A\n`
       warnMessage += `* Reason: ${data.reason}`
       warnMessage += "\n```"
       return warnMessage
@@ -372,8 +368,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       muteMessage += `**User Muted**\n`
       muteMessage += `* Client Type: ${data.comment?.client_type}\n`
       muteMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      muteMessage += `* Media ID: N/A | Media Type: N/A\n`
-      muteMessage += `* Media Name: N/A\n`
       muteMessage += `* Reason: ${data.reason}`
       muteMessage += "\n```"
       return muteMessage
@@ -383,8 +377,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       shadowBanMessage += `**User Shadow Banned**\n`
       shadowBanMessage += `* Client Type: ${data.comment?.client_type}\n`
       shadowBanMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      shadowBanMessage += `* Media ID: N/A | Media Type: N/A\n`
-      shadowBanMessage += `* Media Name: N/A\n`
       shadowBanMessage += `* Reason: ${data.reason}`
       shadowBanMessage += "\n```"
       return shadowBanMessage
@@ -405,8 +397,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       modMessage += `**Moderation Action**\n`
       modMessage += `* Client Type: ${data.comment?.client_type}\n`
       modMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
-      modMessage += `* Media ID: N/A | Media Type: N/A\n`
-      modMessage += `* Media Name: N/A\n`
       modMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
       modMessage += "\n```"
       return modMessage
@@ -416,8 +406,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       unbanMessage += `**User Unbanned**\n`
       unbanMessage += `* Client Type: ${data.comment?.client_type}\n`
       unbanMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      unbanMessage += `* Media ID: N/A | Media Type: N/A\n`
-      unbanMessage += `* Media Name: N/A\n`
       unbanMessage += `* Reason: ${data.reason}`
       unbanMessage += "\n```"
       return unbanMessage
@@ -449,8 +437,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       configMessage += `**Configuration Updated**\n`
       configMessage += `* Client Type: System\n`
       configMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
-      configMessage += `* Media ID: N/A | Media Type: N/A\n`
-      configMessage += `* Media Name: N/A\n`
       configMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
       configMessage += "\n```"
       return configMessage
@@ -460,8 +446,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       enableMessage += `**System Enabled**\n`
       enableMessage += `* Client Type: System\n`
       enableMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
-      enableMessage += `* Media ID: N/A | Media Type: N/A\n`
-      enableMessage += `* Media Name: N/A\n`
       enableMessage += `* Action: System enabled by ${data.moderator?.username}`
       enableMessage += "\n```"
       return enableMessage
@@ -471,8 +455,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       disableMessage += `**System Disabled**\n`
       disableMessage += `* Client Type: System\n`
       disableMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
-      disableMessage += `* Media ID: N/A | Media Type: N/A\n`
-      disableMessage += `* Media Name: N/A\n`
       disableMessage += `* Action: System disabled by ${data.moderator?.username}`
       disableMessage += "\n```"
       return disableMessage
@@ -482,8 +464,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       bulkMessage += `**Bulk Action Performed**\n`
       bulkMessage += `* Client Type: ${data.comment?.client_type}\n`
       bulkMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
-      bulkMessage += `* Media ID: N/A | Media Type: N/A\n`
-      bulkMessage += `* Media Name: N/A\n`
       bulkMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
       bulkMessage += "\n```"
       return bulkMessage
