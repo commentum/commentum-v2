@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 import { validateUserInfo, validateMediaInfo, UserInfo, MediaInfo } from '../shared/clientAPIs.ts'
 import { verifyAdminAccess, getUserRole, canModerate, getDisplayRole } from '../shared/auth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { getOrCreateUser, getUserDetails, canUserAct, updateUserStats } from '../shared/userUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -191,26 +192,29 @@ serve(async (req) => {
       userRole = await getUserRole(supabase, user_id)
     }
 
-    const { data: existingUserComments } = await supabase
-      .from('comments')
-      .select('user_banned, user_muted_until, user_shadow_banned, user_warnings')
-      .eq('user_id', user_id)
-      .eq('client_type', client_type)
-      .order('created_at', { ascending: false })
-      .limit(1)
-
-    const userStatus = existingUserComments?.[0]
-
-    if (userStatus?.user_banned) {
+    // Get or create user record and check status using users table
+    const userRecord = await getOrCreateUser(supabase, user_id, client_type!, userInfo!.username, userInfo!.avatar)
+    
+    if (!userRecord) {
       return new Response(
-        JSON.stringify({ error: 'User is banned' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Failed to get or create user record' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    if (userStatus?.user_muted_until && new Date(userStatus.user_muted_until) > new Date()) {
+    // Check if user can perform actions (not banned, not muted, not shadow-banned)
+    if (!canUserAct(userRecord)) {
+      let errorMessage = 'User action restricted'
+      if (userRecord.user_banned) {
+        errorMessage = 'User is banned'
+      } else if (userRecord.user_shadow_banned) {
+        errorMessage = 'User is shadow banned'
+      } else if (userRecord.user_muted_until && new Date(userRecord.user_muted_until) > new Date()) {
+        errorMessage = 'User is muted'
+      }
+      
       return new Response(
-        JSON.stringify({ error: 'User is muted' }),
+        JSON.stringify({ error: errorMessage }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -344,6 +348,9 @@ async function handleCreateComment(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Update user statistics in users table
+  await updateUserStats(supabase, userInfo.user_id, client_type, 'comment', 1, 0)
 
   // Queue Discord notification in background - NON-BLOCKING
   queueDiscordNotification({
@@ -496,6 +503,9 @@ async function handleDeleteComment(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Update user statistics in users table (increment deleted comments)
+  await updateUserStats(supabase, deletedComment.user_id, deletedComment.client_type, 'delete', 1, 0)
 
   const moderator = comment.user_id !== user_id ? {
       username: user_id,
