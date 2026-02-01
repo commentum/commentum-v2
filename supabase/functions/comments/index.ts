@@ -355,16 +355,11 @@ async function handleCreateComment(supabase: any, params: any) {
       content: comment.content,
       client_type: comment.client_type,
       media_id: comment.media_id,
-      parent_id: comment.parent_id
+      parent_id: comment.parent_id,
+      media_type: comment.media_type,
+      media_title: comment.media_title
     },
-    user: userInfo,
-    media: {
-      id: mediaInfo.media_id,
-      title: mediaInfo.title,
-      year: mediaInfo.year,
-      poster: mediaInfo.poster,
-      type: mediaInfo.type
-    }
+    user: userInfo
   })
 
   return new Response(
@@ -442,12 +437,9 @@ async function handleEditComment(supabase: any, params: any) {
       user_id: updatedComment.user_id,
       content: updatedComment.content,
       client_type: updatedComment.client_type,
-      media_id: updatedComment.media_id
-    },
-    media: {
-      id: updatedComment.media_id,
-      title: updatedComment.media_title,
-      type: updatedComment.media_type
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title
     }
   })
 
@@ -517,14 +509,11 @@ async function handleDeleteComment(supabase: any, params: any) {
         user_id: deletedComment.user_id,
         content: comment.content,
         client_type: deletedComment.client_type,
-        media_id: deletedComment.media_id
+        media_id: deletedComment.media_id,
+        media_type: deletedComment.media_type,
+        media_title: deletedComment.media_title
       },
-      moderator,
-      media: {
-        id: deletedComment.media_id,
-        title: deletedComment.media_title,
-        type: deletedComment.media_type
-      }
+      moderator
     })
 
   return new Response(
