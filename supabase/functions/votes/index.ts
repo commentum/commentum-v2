@@ -1,6 +1,5 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
-import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -154,34 +153,7 @@ serve(async (req) => {
 
     if (updateError) throw updateError
 
-  // Queue Discord notification for vote in background (only for new votes, not removals) - NON-BLOCKING
-  if (vote_type !== 'remove' && (!currentVote || currentVote !== vote_type)) {
-    queueDiscordNotification({
-      type: 'vote_cast',
-      voteType: vote_type,
-      user: {
-        id: user_info.user_id,
-        username: user_info.username || `User ${user_info.user_id}`
-      },
-      comment: {
-        id: comment.id,
-        username: comment.username,
-        user_id: comment.user_id,
-        content: comment.content,
-        client_type: comment.client_type,
-        media_id: comment.media_id
-      },
-      media: {
-        id: comment.media_id,
-        title: comment.media_title,
-        type: comment.media_type,
-        year: comment.media_year,
-        poster: comment.media_poster
-      }
-    })
-  }
-
-  return new Response(
+    return new Response(
     JSON.stringify({
       success: true,
       voteScore: newVoteScore,

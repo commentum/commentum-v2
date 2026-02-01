@@ -2,14 +2,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
-  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'vote_cast' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
-        'vote_removed' | 'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action';
+  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
+        'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action';
   comment?: any;
   user?: any;
   media?: any;
   moderator?: any;
   reason?: string;
-  voteType?: string;
   reportReason?: string;
   actionedBy?: string;
   metadata?: any;
@@ -79,7 +78,7 @@ async function processNotificationInBackground(data: DiscordNotificationData) {
 // Internal Discord notification implementation - separated from public API
 async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotificationData) {
   try {
-    // Check if Discord notifications are enabled
+    // Check if Discord notifications are enabled (still use config table for this global setting)
     const { data: config } = await supabase
       .from('config')
       .select('value')
@@ -90,24 +89,17 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       return { success: false, reason: 'Discord notifications disabled' }
     }
 
-    // Get webhook URLs from server_configs table
-    const { data: serverConfigs } = await supabase
-      .from('server_configs')
-      .select('webhook_url')
-      .eq('is_active', true)
-      .not('webhook_url', 'is', null)
-
-    let webhookUrls: string[] = []
+    // Determine which channel to send to based on notification type
+    const channelType = getChannelForNotificationType(data.type)
     
-    if (serverConfigs && serverConfigs.length > 0) {
-      webhookUrls = serverConfigs.map(server => server.webhook_url).filter(url => url)
-    }
-
+    // Get ALL appropriate webhook URLs from ALL active servers
+    const webhookUrls = await getChannelWebhookUrls(supabase, channelType)
+    
     if (webhookUrls.length === 0) {
-      return { success: false, reason: 'Discord webhook URLs not configured in server_configs table' }
+      return { success: false, reason: `No webhook URLs configured for ${channelType} channel in any active server` }
     }
 
-    // Check if this notification type is enabled
+    // Check if this notification type is enabled (still use config table for this global setting)
     const { data: typesConfig } = await supabase
       .from('config')
       .select('value')
@@ -161,67 +153,24 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
           comment_data: data.comment ? JSON.stringify(data.comment) : null,
           user_data: data.user ? JSON.stringify(data.user) : null,
           media_data: data.media ? JSON.stringify(data.media) : null,
-          webhook_url: JSON.stringify(webhookUrls), // Store all webhook URLs
+          webhook_url: JSON.stringify(webhookUrls),
           delivery_status: 'pending'
         }, {
           onConflict: 'id'
         })
     }
 
-    // Send to all configured webhooks
+    // Send to ALL configured webhooks for this channel type
     const sendResults = []
     
     for (const webhookUrl of webhookUrls) {
-      try {
-        const response = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            username: 'Commentum Bot',
-            avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png', // Commentum logo
-            content: content
-          })
-        })
-
-        if (!response.ok) {
-          const errorText = await response.text()
-          console.error(`Discord webhook error for ${webhookUrl}:`, errorText)
-          sendResults.push({
-            webhookUrl,
-            success: false,
-            error: errorText
-          })
-          continue
-        }
-
-        // Parse Discord response (webhooks might return empty response on success)
-        let result = { id: null }
-        try {
-          const responseText = await response.text()
-          if (responseText && responseText.trim()) {
-            result = JSON.parse(responseText)
-          }
-        } catch (parseError) {
-          console.log('Discord webhook response parsing (this is normal for empty responses):', parseError.message)
-          // Use empty result object for empty responses
-        }
-
-        sendResults.push({
-          webhookUrl,
-          success: true,
-          messageId: result.id
-        })
-
-      } catch (error) {
-        console.error(`Failed to send to webhook ${webhookUrl}:`, error)
-        sendResults.push({
-          webhookUrl,
-          success: false,
-          error: error.message
-        })
-      }
+      const sendResult = await sendToWebhook(webhookUrl, content, data.type)
+      sendResults.push({
+        webhookUrl,
+        success: sendResult.success,
+        messageId: sendResult.messageId,
+        error: sendResult.error
+      })
     }
 
     const successfulSends = sendResults.filter(r => r.success)
@@ -234,7 +183,7 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
         .update({
           delivery_status: failedSends.length === 0 ? 'sent' : 'partial',
           delivery_error: failedSends.length > 0 ? JSON.stringify(failedSends.map(f => f.error)) : null,
-          webhook_url: JSON.stringify(webhookUrls), // Store all webhook URLs
+          webhook_url: JSON.stringify(webhookUrls),
           delivered_at: failedSends.length === 0 ? new Date().toISOString() : null
         })
         .eq('id', notificationId)
@@ -242,6 +191,7 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
 
     return { 
       success: failedSends.length === 0, 
+      channel: channelType,
       totalWebhooks: webhookUrls.length,
       successful: successfulSends.length,
       failed: failedSends.length,
@@ -252,6 +202,101 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
   } catch (error) {
     console.error('Error sending Discord notification:', error)
     return { success: false, reason: error.message }
+  }
+}
+
+// Determine which channel a notification type should go to
+function getChannelForNotificationType(notificationType: string): 'comments' | 'moderation' {
+  const commentsChannelTypes = [
+    'comment_created',
+    'comment_updated', 
+    'comment_deleted',
+    'comment_pinned',
+    'comment_locked',
+    'comment_unlocked'
+  ]
+  
+  return commentsChannelTypes.includes(notificationType) ? 'comments' : 'moderation'
+}
+
+// Get the webhook URLs for a specific channel from ALL active servers
+async function getChannelWebhookUrls(supabase: any, channelType: 'comments' | 'moderation'): Promise<string[]> {
+  try {
+    // Get ALL active server configurations
+    const { data: serverConfigs } = await supabase
+      .from('server_configs')
+      .select('*')
+      .eq('is_active', true)
+
+    if (!serverConfigs || serverConfigs.length === 0) {
+      console.error('No active server configurations found')
+      return []
+    }
+
+    const webhookUrls: string[] = []
+
+    // For each server, get the appropriate webhook URL
+    for (const serverConfig of serverConfigs) {
+      let webhookUrl: string | null = null
+
+      if (channelType === 'comments') {
+        // Use existing webhook_url for comments channel
+        webhookUrl = serverConfig.webhook_url
+      } else {
+        // Use new moderation_webhook_url for moderation channel
+        webhookUrl = serverConfig.moderation_webhook_url
+      }
+
+      if (webhookUrl) {
+        webhookUrls.push(webhookUrl)
+      }
+    }
+
+    return webhookUrls
+  } catch (error) {
+    console.error('Error fetching webhook URLs from server_configs:', error)
+    return []
+  }
+}
+
+// Send message to a specific webhook
+async function sendToWebhook(webhookUrl: string, content: string, notificationType: string) {
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username: 'Commentum Bot',
+        avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png', // Commentum logo
+        content: content
+      })
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`Discord webhook error for ${notificationType}:`, errorText)
+      return { success: false, error: errorText }
+    }
+
+    // Parse Discord response (webhooks might return empty response on success)
+    let result = { id: null }
+    try {
+      const responseText = await response.text()
+      if (responseText && responseText.trim()) {
+        result = JSON.parse(responseText)
+      }
+    } catch (parseError) {
+      console.log('Discord webhook response parsing (this is normal for empty responses):', parseError.message)
+      // Use empty result object for empty responses
+    }
+
+    return { success: true, messageId: result.id }
+
+  } catch (error) {
+    console.error(`Failed to send to webhook:`, error)
+    return { success: false, error: error.message }
   }
 }
 
@@ -330,17 +375,6 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       lockMessage += "\n```"
       return lockMessage
 
-    case 'vote_cast':
-      let voteMessage = "```\n"
-      voteMessage += `**Vote Cast (Comment ID: ${data.comment?.id})**\n`
-      voteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      voteMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
-      voteMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      voteMessage += `* Media Name: ${data.media?.title}\n`
-      voteMessage += `* Vote Type: ${data.voteType}`
-      voteMessage += "\n```"
-      return voteMessage
-
     case 'report_filed':
       let reportMessage = "```\n"
       reportMessage += `**Report Filed (Comment ID: ${data.comment?.id})**\n`
@@ -414,23 +448,12 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let dismissMessage = "```\n"
       dismissMessage += `**Report Dismissed (Comment ID: ${data.comment?.id})**\n`
       dismissMessage += `* Client Type: ${data.comment?.client_type}\n`
-      dismissMessage += `* UserID: ${data.moderator?.id} (data.moderator?.username})\n`
+      dismissMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
       dismissMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       dismissMessage += `* Media Name: ${data.media?.title}\n`
       dismissMessage += `* Dismissed By: ${data.moderator?.username}`
       dismissMessage += "\n```"
       return dismissMessage
-
-    case 'vote_removed':
-      let removeVoteMessage = "```\n"
-      removeVoteMessage += `**Vote Removed (Comment ID: ${data.comment?.id})**\n`
-      removeVoteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      removeVoteMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
-      removeVoteMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      removeVoteMessage += `* Media Name: ${data.media?.title}\n`
-      removeVoteMessage += `* Vote Type Removed: ${data.voteType}`
-      removeVoteMessage += "\n```"
-      return removeVoteMessage
 
     case 'config_updated':
       let configMessage = "```\n"

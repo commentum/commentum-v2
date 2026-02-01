@@ -20,6 +20,9 @@ CREATE TABLE server_configs (
     webhook_url TEXT,
     role_id TEXT,
     
+    -- Channel-specific webhooks for 2-channel system
+    moderation_webhook_url TEXT,
+    
     -- Server status
     is_active BOOLEAN DEFAULT TRUE,
     
@@ -59,7 +62,7 @@ CREATE POLICY "Super admins can manage server configs" ON server_configs
     );
 
 -- Insert default server configurations with your format
-INSERT INTO server_configs (server_name, guild_id, webhook_url, role_id) VALUES 
-    ('AnymeX', 'YOUR_ANYMEX_GUILD_ID', 'YOUR_ANYMEX_WEBHOOK_URL', 'YOUR_ANYMEX_ROLE_ID'),
-    ('ShonenX', 'YOUR_SHONENX_GUILD_ID', 'YOUR_SHONENX_WEBHOOK_URL', 'YOUR_SHONENX_ROLE_ID'),
-    ('animestream', 'YOUR_ANIMESTREAM_GUILD_ID', 'YOUR_ANIMESTREAM_WEBHOOK_URL', 'YOUR_ANIMESTREAM_ROLE_ID');
+INSERT INTO server_configs (server_name, guild_id, webhook_url, role_id, moderation_webhook_url) VALUES 
+    ('AnymeX', 'YOUR_ANYMEX_GUILD_ID', 'YOUR_ANYMEX_WEBHOOK_URL', 'YOUR_ANYMEX_ROLE_ID', 'YOUR_ANYMEX_MODERATION_WEBHOOK_URL'),
+    ('ShonenX', 'YOUR_SHONENX_GUILD_ID', 'YOUR_SHONENX_WEBHOOK_URL', 'YOUR_SHONENX_ROLE_ID', 'YOUR_SHONENX_MODERATION_WEBHOOK_URL'),
+    ('animestream', 'YOUR_ANIMESTREAM_GUILD_ID', 'YOUR_ANIMESTREAM_WEBHOOK_URL', 'YOUR_ANIMESTREAM_ROLE_ID', 'YOUR_ANIMESTREAM_MODERATION_WEBHOOK_URL');

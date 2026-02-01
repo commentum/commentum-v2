@@ -48,7 +48,7 @@ CREATE TABLE discord_notifications (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     
     -- Notification type and target
-    notification_type TEXT NOT NULL CHECK (notification_type IN ('comment_created', 'comment_updated', 'comment_deleted', 'user_banned', 'user_warned', 'comment_pinned', 'comment_locked', 'vote_cast', 'report_filed', 'vote_removed', 'user_muted', 'user_shadow_banned', 'user_unbanned', 'comment_unlocked', 'moderation_action', 'config_updated', 'system_enabled', 'system_disabled', 'bulk_action')),
+    notification_type TEXT NOT NULL CHECK (notification_type IN ('comment_created', 'comment_updated', 'comment_deleted', 'user_banned', 'user_warned', 'comment_pinned', 'comment_locked', 'report_filed', 'user_muted', 'user_shadow_banned', 'user_unbanned', 'comment_unlocked', 'moderation_action', 'config_updated', 'system_enabled', 'system_disabled', 'bulk_action')),
     target_id TEXT, -- Can be comment_id, user_id, etc.
     target_type TEXT, -- 'comment', 'user', 'media'
     
@@ -102,13 +102,11 @@ CREATE POLICY "System can manage discord users" ON discord_users
 CREATE POLICY "System can manage discord notifications" ON discord_notifications
     FOR ALL USING (false) WITH CHECK (false);
 
--- Add Discord configuration to config table
+-- Add Discord configuration to config table (only global settings)
 INSERT INTO config (key, value) VALUES 
-    ('discord_webhook_url', ''),
-    ('discord_webhook_urls', '[]'), -- JSON array for multiple webhook URLs
     ('discord_bot_token', ''),
     ('discord_client_id', ''),
     ('discord_guild_id', ''),
     ('discord_guild_ids', '[]'), -- JSON array for multiple guild IDs
     ('discord_notifications_enabled', 'true'),
-    ('discord_notification_types', '["comment_created", "comment_updated", "comment_deleted", "user_banned", "user_warned", "comment_pinned", "comment_locked", "vote_cast", "vote_removed", "user_muted", "user_shadow_banned", "user_unbanned", "comment_unlocked", "moderation_action", "config_updated", "system_enabled", "system_disabled", "bulk_action", "report_filed", "report_resolved", "report_dismissed"]');
+    ('discord_notification_types', '["comment_created", "comment_updated", "comment_deleted", "user_banned", "user_warned", "comment_pinned", "comment_locked", "user_muted", "user_shadow_banned", "user_unbanned", "comment_unlocked", "moderation_action", "config_updated", "system_enabled", "system_disabled", "bulk_action", "report_filed", "report_resolved", "report_dismissed"]');
