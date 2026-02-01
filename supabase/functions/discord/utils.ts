@@ -59,7 +59,7 @@ export function createDiscordResponse(content: string, ephemeral: boolean = fals
 }
 
 export function createErrorResponse(content: string, ephemeral: boolean = true): Response {
-  return createDiscordResponse(`Error: ${content}`, ephemeral)
+  return createDiscordResponse(`❌ ${content}`, ephemeral)
 }
 
 // Embed creation utilities

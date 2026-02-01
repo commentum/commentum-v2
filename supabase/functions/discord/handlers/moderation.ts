@@ -1,6 +1,4 @@
 import { createDiscordResponse, createErrorResponse, createModerationEmbed } from '../utils.ts'
-import { getUserDetails, applyUserModeration } from '../../shared/userUtils.ts'
-import { canModerate } from '../../shared/auth.ts'
 
 // Handle warn command
 export async function handleWarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -17,40 +15,37 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's records across all client types
-    const { data: userRecords } = await supabase
-      .from('users')
-      .select('*')
+    // Get target user's current status
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role, user_warnings, user_banned, user_muted_until')
       .eq('user_id', targetUserId)
+      .single()
 
-    if (!userRecords || userRecords.length === 0) {
+    if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
     }
 
     // Check permissions (can't moderate users with equal or higher role)
-    const targetUserRole = userRecords[0].user_role
-    if (!canModerate(userRole, targetUserRole)) {
+    if (!canModerate(userRole, targetUserComment.user_role)) {
       return createErrorResponse('Cannot moderate user with equal or higher role.')
     }
 
-    // Apply warning to all client types for this user
-    const moderationPromises = userRecords.map(userRecord => 
-      applyUserModeration(
-        supabase, 
-        targetUserId, 
-        userRecord.client_type, 
-        'warn', 
-        undefined, 
-        reason, 
-        moderatorId
-      )
-    )
+    // Update all user's comments with new warning
+    const newWarningCount = (targetUserComment.user_warnings || 0) + 1
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_warnings: newWarningCount,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: moderatorId,
+        moderation_reason: reason,
+        moderation_action: 'warn'
+      })
+      .eq('user_id', targetUserId)
 
-    await Promise.all(moderationPromises)
-
-    // Get updated user status
-    const { data: updatedUser } = await getUserDetails(supabase, targetUserId, userRecords[0].client_type, true)
-    const newWarningCount = updatedUser?.user_warnings || 1
+    if (error) throw error
 
     // Check for auto-mute/ban thresholds
     const { data: autoWarnThreshold } = await supabase
@@ -78,33 +73,32 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
     let autoAction = ''
     if (newWarningCount >= banThreshold) {
       // Auto-ban
-      const banPromises = userRecords.map(userRecord => 
-        applyUserModeration(
-          supabase, 
-          targetUserId, 
-          userRecord.client_type, 
-          'ban', 
-          undefined, 
-          `Auto-ban after ${newWarningCount} warnings: ${reason}`, 
-          moderatorId
-        )
-      )
-      await Promise.all(banPromises)
+      await supabase
+        .from('comments')
+        .update({
+          user_banned: true,
+          moderated: true,
+          moderated_at: new Date().toISOString(),
+          moderated_by: moderatorId,
+          moderation_reason: `Auto-ban after ${newWarningCount} warnings: ${reason}`,
+          moderation_action: 'auto_ban'
+        })
+        .eq('user_id', targetUserId)
       autoAction = `AUTO-BANNED - User exceeded ${banThreshold} warnings`
     } else if (newWarningCount >= muteThreshold) {
       // Auto-mute for 24 hours
-      const mutePromises = userRecords.map(userRecord => 
-        applyUserModeration(
-          supabase, 
-          targetUserId, 
-          userRecord.client_type, 
-          'mute', 
-          24, 
-          `Auto-mute after ${newWarningCount} warnings: ${reason}`, 
-          moderatorId
-        )
-      )
-      await Promise.all(mutePromises)
+      const muteUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      await supabase
+        .from('comments')
+        .update({
+          user_muted_until: muteUntil,
+          moderated: true,
+          moderated_at: new Date().toISOString(),
+          moderated_by: moderatorId,
+          moderation_reason: `Auto-mute after ${newWarningCount} warnings: ${reason}`,
+          moderation_action: 'auto_mute'
+        })
+        .eq('user_id', targetUserId)
       autoAction = `AUTO-MUTED - User exceeded ${muteThreshold} warnings (24 hours)`
     }
 
@@ -212,45 +206,45 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's records across all client types
-    const { data: userRecords } = await supabase
-      .from('users')
-      .select('*')
+    // Get target user's current status
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
       .eq('user_id', targetUserId)
+      .single()
 
-    if (!userRecords || userRecords.length === 0) {
+    if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
     }
 
-    // Check permissions
-    const targetUserRole = userRecords[0].user_role
-    if (!canModerate(userRole, targetUserRole)) {
+    if (!canModerate(userRole, targetUserComment.user_role)) {
       return createErrorResponse('Cannot moderate user with equal or higher role.')
     }
 
-    // Apply mute to all client types for this user
-    const moderationPromises = userRecords.map(userRecord => 
-      applyUserModeration(
-        supabase, 
-        targetUserId, 
-        userRecord.client_type, 
-        'mute', 
-        duration, 
-        reason, 
-        moderatorId
-      )
-    )
+    // Calculate mute end time
+    const muteUntil = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString()
 
-    await Promise.all(moderationPromises)
+    // Update all user's comments
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_muted_until: muteUntil,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: moderatorId,
+        moderation_reason: reason,
+        moderation_action: 'mute'
+      })
+      .eq('user_id', targetUserId)
 
-    const muteUntil = new Date(Date.now() + duration * 60 * 60 * 1000)
+    if (error) throw error
 
     return createModerationEmbed(
       'mute',
       targetUserId,
       `<@${moderatorId}>`,
       reason,
-      `Duration: ${duration} hours | Muted Until: ${muteUntil.toLocaleString()}`
+      `Duration: ${duration} hours | Muted Until: ${new Date(muteUntil).toLocaleString()}`
     )
 
   } catch (error) {
@@ -772,43 +766,42 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's records across all client types
-    const { data: userRecords } = await supabase
-      .from('users')
-      .select('*')
+    // Get target user's current status
+    const { data: targetUserComment } = await supabase
+      .from('comments')
+      .select('user_role')
       .eq('user_id', targetUserId)
+      .single()
 
-    if (!userRecords || userRecords.length === 0) {
+    if (!targetUserComment) {
       return createErrorResponse('User not found in the system.')
     }
 
-    // Check permissions
-    const targetUserRole = userRecords[0].user_role
-    if (!canModerate(userRole, targetUserRole)) {
+    if (!canModerate(userRole, targetUserComment.user_role)) {
       return createErrorResponse('Cannot ban user with equal or higher role.')
     }
 
-    // Apply ban to all client types for this user
-    const moderationPromises = userRecords.map(userRecord => 
-      applyUserModeration(
-        supabase, 
-        targetUserId, 
-        userRecord.client_type, 
-        'ban', 
-        undefined, 
-        reason, 
-        moderatorId
-      )
-    )
+    // Update all user's comments
+    const { error } = await supabase
+      .from('comments')
+      .update({
+        user_banned: true,
+        moderated: true,
+        moderated_at: new Date().toISOString(),
+        moderated_by: moderatorId,
+        moderation_reason: reason,
+        moderation_action: 'ban'
+      })
+      .eq('user_id', targetUserId)
 
-    await Promise.all(moderationPromises)
+    if (error) throw error
 
     return createDiscordResponse(
-      `**User Banned**\n\n` +
-      `* UserID: ${targetUserId}\n` +
-      `* Banned By: <@${moderatorId}>\n` +
-      `* Reason: ${reason}\n` +
-      `* Time: ${new Date().toLocaleString()}`
+      `🔨 **User Banned**\n\n` +
+      `👤 **User:** ${targetUserId}\n` +
+      `🛡️ **Moderator:** <@${moderatorId}>\n` +
+      `📝 **Reason:** ${reason}\n` +
+      `📅 **Time:** ${new Date().toLocaleString()}`
     )
 
   } catch (error) {
