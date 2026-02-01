@@ -261,8 +261,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let message = "```\n"
       message += `**New Comment (ID: ${data.comment?.id})**\n`
       message += `* Client Type: ${data.comment?.client_type}\n`
-      message += `* UserID: ${data.comment?.user_id} | Username: ${data.comment?.username}\n`
-      message += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      message += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
+      message += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       message += `* Media Name: ${data.media?.title}\n`
       message += `* Content: ${data.comment?.content}`
       message += "\n```"
@@ -272,8 +272,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let updateMessage = "```\n"
       updateMessage += `**Comment Updated (ID: ${data.comment?.id})**\n`
       updateMessage += `* Client Type: ${data.comment?.client_type}\n`
-      updateMessage += `* UserID: ${data.comment?.user_id} | Username: ${data.comment?.username}\n`
-      updateMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      updateMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
+      updateMessage += `* Media ID: ${data.comment?.media_id}(Type: ${data.media?.type})\n`
       updateMessage += `* Media Name: ${data.media?.title}\n`
       updateMessage += `* Content: ${data.comment?.content}`
       updateMessage += "\n```"
@@ -283,8 +283,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let deleteMessage = "```\n"
       deleteMessage += `**Comment Deleted (ID: ${data.comment?.id})**\n`
       deleteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      deleteMessage += `* UserID: ${data.comment?.user_id} | Username: ${data.comment?.username}\n`
-      deleteMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      deleteMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
+      deleteMessage += `* Media ID: ${data.comment?.media_id}(Type: ${data.media?.type})\n`
       deleteMessage += `* Media Name: ${data.media?.title}\n`
       deleteMessage += `* Deleted By: ${data.moderator?.username || data.comment?.username}`
       deleteMessage += "\n```"
@@ -294,7 +294,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let banMessage = "```\n"
       banMessage += `**User Banned**\n`
       banMessage += `* Client Type: ${data.comment?.client_type}\n`
-      banMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
+      banMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
       banMessage += `* Reason: ${data.reason}`
       banMessage += "\n```"
       return banMessage
@@ -303,7 +303,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let warnMessage = "```\n"
       warnMessage += `**User Warned**\n`
       warnMessage += `* Client Type: ${data.comment?.client_type}\n`
-      warnMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
+      warnMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
       warnMessage += `* Reason: ${data.reason}`
       warnMessage += "\n```"
       return warnMessage
@@ -312,8 +312,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let pinMessage = "```\n"
       pinMessage += `**Comment Pinned (ID: ${data.comment?.id})**\n`
       pinMessage += `* Client Type: ${data.comment?.client_type}\n`
-      pinMessage += `* UserID: ${data.comment?.user_id} | Username: ${data.comment?.username}\n`
-      pinMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      pinMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
+      pinMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       pinMessage += `* Media Name: ${data.media?.title}\n`
       pinMessage += `* Pinned By: ${data.moderator?.username}`
       pinMessage += "\n```"
@@ -323,8 +323,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let lockMessage = "```\n"
       lockMessage += `**Comment Locked (ID: ${data.comment?.id})**\n`
       lockMessage += `* Client Type: ${data.comment?.client_type}\n`
-      lockMessage += `* UserID: ${data.comment?.user_id} | Username: ${data.comment?.username}\n`
-      lockMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      lockMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
+      lockMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       lockMessage += `* Media Name: ${data.media?.title}\n`
       lockMessage += `* Locked By: ${data.moderator?.username}`
       lockMessage += "\n```"
@@ -334,8 +334,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let voteMessage = "```\n"
       voteMessage += `**Vote Cast (Comment ID: ${data.comment?.id})**\n`
       voteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      voteMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      voteMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      voteMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
+      voteMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       voteMessage += `* Media Name: ${data.media?.title}\n`
       voteMessage += `* Vote Type: ${data.voteType}`
       voteMessage += "\n```"
@@ -345,8 +345,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let reportMessage = "```\n"
       reportMessage += `**Report Filed (Comment ID: ${data.comment?.id})**\n`
       reportMessage += `* Client Type: ${data.comment?.client_type}\n`
-      reportMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      reportMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      reportMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
+      reportMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       reportMessage += `* Media Name: ${data.media?.title}\n`
       reportMessage += `* Report Reason: ${data.reportReason}`
       reportMessage += "\n```"
@@ -356,8 +356,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let resolveMessage = "```\n"
       resolveMessage += `**Report Resolved (Comment ID: ${data.comment?.id})**\n`
       resolveMessage += `* Client Type: ${data.comment?.client_type}\n`
-      resolveMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
-      resolveMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      resolveMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
+      resolveMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       resolveMessage += `* Media Name: ${data.media?.title}\n`
       resolveMessage += `* Resolved By: ${data.moderator?.username}`
       resolveMessage += "\n```"
@@ -367,7 +367,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let muteMessage = "```\n"
       muteMessage += `**User Muted**\n`
       muteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      muteMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
+      muteMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
       muteMessage += `* Reason: ${data.reason}`
       muteMessage += "\n```"
       return muteMessage
@@ -376,7 +376,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let shadowBanMessage = "```\n"
       shadowBanMessage += `**User Shadow Banned**\n`
       shadowBanMessage += `* Client Type: ${data.comment?.client_type}\n`
-      shadowBanMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
+      shadowBanMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
       shadowBanMessage += `* Reason: ${data.reason}`
       shadowBanMessage += "\n```"
       return shadowBanMessage
@@ -385,8 +385,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let unlockMessage = "```\n"
       unlockMessage += `**Comment Unlocked (ID: ${data.comment?.id})**\n`
       unlockMessage += `* Client Type: ${data.comment?.client_type}\n`
-      unlockMessage += `* UserID: ${data.comment?.user_id} | Username: ${data.comment?.username}\n`
-      unlockMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      unlockMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
+      unlockMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       unlockMessage += `* Media Name: ${data.media?.title}\n`
       unlockMessage += `* Unlocked By: ${data.moderator?.username}`
       unlockMessage += "\n```"
@@ -396,7 +396,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let modMessage = "```\n"
       modMessage += `**Moderation Action**\n`
       modMessage += `* Client Type: ${data.comment?.client_type}\n`
-      modMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
+      modMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
       modMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
       modMessage += "\n```"
       return modMessage
@@ -405,7 +405,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let unbanMessage = "```\n"
       unbanMessage += `**User Unbanned**\n`
       unbanMessage += `* Client Type: ${data.comment?.client_type}\n`
-      unbanMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
+      unbanMessage += `* UserID: ${data.user?.id} (${data.comment?.username})n`
       unbanMessage += `* Reason: ${data.reason}`
       unbanMessage += "\n```"
       return unbanMessage
@@ -414,8 +414,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let dismissMessage = "```\n"
       dismissMessage += `**Report Dismissed (Comment ID: ${data.comment?.id})**\n`
       dismissMessage += `* Client Type: ${data.comment?.client_type}\n`
-      dismissMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
-      dismissMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      dismissMessage += `* UserID: ${data.moderator?.id} (data.moderator?.username})\n`
+      dismissMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       dismissMessage += `* Media Name: ${data.media?.title}\n`
       dismissMessage += `* Dismissed By: ${data.moderator?.username}`
       dismissMessage += "\n```"
@@ -425,8 +425,8 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let removeVoteMessage = "```\n"
       removeVoteMessage += `**Vote Removed (Comment ID: ${data.comment?.id})**\n`
       removeVoteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      removeVoteMessage += `* UserID: ${data.user?.id} | Username: ${data.user?.username}\n`
-      removeVoteMessage += `* Media ID: ${data.comment?.media_id} | Media Type: ${data.media?.type}\n`
+      removeVoteMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
+      removeVoteMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
       removeVoteMessage += `* Media Name: ${data.media?.title}\n`
       removeVoteMessage += `* Vote Type Removed: ${data.voteType}`
       removeVoteMessage += "\n```"
@@ -436,7 +436,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let configMessage = "```\n"
       configMessage += `**Configuration Updated**\n`
       configMessage += `* Client Type: System\n`
-      configMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
+      configMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
       configMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
       configMessage += "\n```"
       return configMessage
@@ -445,7 +445,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let enableMessage = "```\n"
       enableMessage += `**System Enabled**\n`
       enableMessage += `* Client Type: System\n`
-      enableMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
+      enableMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
       enableMessage += `* Action: System enabled by ${data.moderator?.username}`
       enableMessage += "\n```"
       return enableMessage
@@ -454,7 +454,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let disableMessage = "```\n"
       disableMessage += `**System Disabled**\n`
       disableMessage += `* Client Type: System\n`
-      disableMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
+      disableMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
       disableMessage += `* Action: System disabled by ${data.moderator?.username}`
       disableMessage += "\n```"
       return disableMessage
@@ -463,7 +463,7 @@ function createDiscordMessage(data: DiscordNotificationData): string {
       let bulkMessage = "```\n"
       bulkMessage += `**Bulk Action Performed**\n`
       bulkMessage += `* Client Type: ${data.comment?.client_type}\n`
-      bulkMessage += `* UserID: ${data.moderator?.id} | Username: ${data.moderator?.username}\n`
+      bulkMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
       bulkMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
       bulkMessage += "\n```"
       return bulkMessage
