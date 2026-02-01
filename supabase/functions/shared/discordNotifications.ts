@@ -119,8 +119,8 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       return { success: false, reason: 'Notification type disabled' }
     }
 
-    // Create Discord embed
-    const embed = createDiscordEmbed(data)
+    // Create Discord message content
+    const content = createDiscordMessage(data)
 
     // Log notification for tracking using comment ID if available
     let notificationId = null
@@ -181,7 +181,7 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
           body: JSON.stringify({
             username: 'Commentum Bot',
             avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png', // Commentum logo
-            embeds: [embed]
+            content: content
           })
         })
 
@@ -255,326 +255,198 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
   }
 }
 
-function createDiscordEmbed(data: DiscordNotificationData): any {
-  const embed: any = {
-    timestamp: new Date().toISOString(),
-    footer: {
-      text: 'Commentum v2',
-      icon_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-    }
-  }
-
+function createDiscordMessage(data: DiscordNotificationData): string {
   switch (data.type) {
     case 'comment_created':
-      embed.title = '💬 New Comment'
-      embed.color = 0x00ff00 // Green
-      embed.description = `**${data.comment.username}** posted a comment`
-      
-      if (data.comment.content) {
-        embed.fields = [{
-          name: 'Comment',
-          value: data.comment.content.length > 200 
-            ? data.comment.content.substring(0, 200) + '...' 
-            : data.comment.content
-        }]
-      }
-
-      embed.fields = embed.fields || []
-      embed.fields.push({
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Platform:** ${data.comment.client_type}`,
-        inline: false
-      })
-
-      if (data.media) {
-        embed.fields.push({
-          name: '🎬 Media',
-          value: `**${data.media.title}** (${data.media.year || 'Unknown Year'})`,
-          inline: true
-        })
-
-        if (data.media.poster) {
-          embed.thumbnail = {
-            url: data.media.poster
-          }
-        }
-      }
-
-      if (data.comment.parent_id) {
-        embed.fields.push({
-          name: '💬 Reply To',
-          value: `Comment #${data.comment.parent_id}`,
-          inline: true
-        })
-      }
-      break
+      let message = `**New Comment (ID: ${data.comment?.id || 'Unknown'})**\n`
+      message += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      message += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
+      message += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      message += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      message += `* Content: ${data.comment?.content || 'No content'}`
+      return message
 
     case 'comment_updated':
-      embed.title = 'Comment Edited'
-      embed.color = 0xffff00 // Yellow
-      embed.description = `**${data.comment.username}** edited their comment`
-      
-      if (data.comment.content) {
-        embed.fields = [{
-          name: 'Updated Content',
-          value: data.comment.content.length > 300 
-            ? data.comment.content.substring(0, 300) + '...' 
-            : data.comment.content
-        }]
-      }
-
-      embed.fields = embed.fields || []
-      embed.fields.push({
-        name: 'IDs (Click to Copy)',
-        value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\``,
-        inline: false
-      })
-      break
+      let updateMessage = `**Comment Updated (ID: ${data.comment?.id || 'Unknown'})**\n`
+      updateMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      updateMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
+      updateMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      updateMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      updateMessage += `* Content: ${data.comment?.content || 'No content'}`
+      return updateMessage
 
     case 'comment_deleted':
-      embed.title = 'Comment Deleted'
-      embed.color = 0xff0000 // Red
-      embed.description = `**${data.comment.username}** deleted their comment`
-      embed.fields = [
-        {
-          name: 'Deleted By',
-          value: data.moderator ? `${data.moderator.username} (Mod)` : `${data.comment.username} (Self)`,
-          inline: true
-        },
-        {
-          name: 'IDs (Click to Copy)',
-          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\``,
-          inline: false
-        }
-      ]
-      break
+      let deleteMessage = `**Comment Deleted (ID: ${data.comment?.id || 'Unknown'})**\n`
+      deleteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      deleteMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
+      deleteMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      deleteMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      deleteMessage += `* Deleted By: ${data.moderator?.username || data.comment?.username || 'Unknown'}`
+      return deleteMessage
 
     case 'user_banned':
-      embed.title = '🔨 User Banned'
-      embed.color = 0xff0000 // Red
-      embed.description = `**${data.user?.username || data.user?.id}** has been banned by **${data.moderator?.username || 'System'}**`
-      embed.fields = [
-        {
-          name: '👤 Banned User',
-          value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
-          inline: true
-        },
-        {
-          name: '🛡️ Banned By',
-          value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
-          inline: true
-        }
-      ]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: '📝 Reason',
-          value: data.reason
-        })
-      }
-      break
+      let banMessage = `**User Banned**\n`
+      banMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      banMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      banMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      banMessage += `* Media Name: N/A\n`
+      banMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      return banMessage
 
     case 'user_warned':
-      embed.title = '⚠️ User Warned'
-      embed.color = 0xffa500 // Orange
-      embed.description = `**${data.user?.username || data.user?.id}** has been warned by **${data.moderator?.username || 'System'}**`
-      embed.fields = [
-        {
-          name: '⚠️ Warned User',
-          value: `${data.user?.username || data.user?.id} (\`${data.user?.id}\`)`,
-          inline: true
-        },
-        {
-          name: '🛡️ Warned By',
-          value: `${data.moderator?.username || 'System'} (\`${data.moderator?.id}\`)`,
-          inline: true
-        }
-      ]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: '📝 Reason',
-          value: data.reason
-        })
-      }
-
-      if (data.severity && data.severity !== 'warning') {
-        embed.fields.push({
-          name: '🔧 Action',
-          value: data.severity === 'mute' ? 'Muted' : data.severity === 'ban' ? 'Banned' : data.severity,
-          inline: true
-        })
-      }
-      break
+      let warnMessage = `**User Warned**\n`
+      warnMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      warnMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      warnMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      warnMessage += `* Media Name: N/A\n`
+      warnMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      return warnMessage
 
     case 'comment_pinned':
-      embed.title = '📌 Comment Pinned'
-      embed.color = 0x00bfff // Deep Sky Blue
-      embed.description = `**${data.moderator?.username}** pinned **${data.comment.username}**'s comment`
-      
-      if (data.comment.content) {
-        embed.fields = [{
-          name: '📌 Pinned Comment',
-          value: data.comment.content.length > 150 
-            ? data.comment.content.substring(0, 150) + '...' 
-            : data.comment.content
-        }]
-      }
-
-      embed.fields = embed.fields || []
-      embed.fields.push({
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Pinned By:** ${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-        inline: false
-      })
-
-      if (data.reason) {
-        embed.fields.push({
-          name: '📝 Reason',
-          value: data.reason,
-          inline: true
-        })
-      }
-      break
+      let pinMessage = `**Comment Pinned (ID: ${data.comment?.id || 'Unknown'})**\n`
+      pinMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      pinMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
+      pinMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      pinMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      pinMessage += `* Pinned By: ${data.moderator?.username || 'Unknown'}`
+      return pinMessage
 
     case 'comment_locked':
-      embed.title = '🔒 Thread Locked'
-      embed.color = 0x808080 // Gray
-      embed.description = `**${data.moderator?.username}** locked **${data.comment.username}**'s comment thread`
-      
-      embed.fields = [{
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)\n**Locked By:** ${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-        inline: false
-      }]
-
-      if (data.reason) {
-        embed.fields.push({
-          name: '📝 Reason',
-          value: data.reason
-        })
-      }
-      break
+      let lockMessage = `**Comment Locked (ID: ${data.comment?.id || 'Unknown'})**\n`
+      lockMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      lockMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
+      lockMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      lockMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      lockMessage += `* Locked By: ${data.moderator?.username || 'Unknown'}`
+      return lockMessage
 
     case 'vote_cast':
-      embed.title = data.voteType === 'upvote' ? '👍 Upvote' : '👎 Downvote'
-      embed.color = data.voteType === 'upvote' ? 0x00ff00 : 0xff0000
-      embed.description = `**${data.user?.username || 'Unknown'}** ${data.voteType}d **${data.comment.username}**'s comment`
-      
-      if (data.comment.content) {
-        embed.fields = [{
-          name: 'Comment',
-          value: data.comment.content.length > 150 
-            ? data.comment.content.substring(0, 150) + '...' 
-            : data.comment.content
-        }]
-      }
-
-      embed.fields = embed.fields || []
-      embed.fields.push({
-        name: '📋 Details',
-        value: `**Comment:** #${data.comment.id}\n**Voter:** ${data.user?.username || 'Unknown'} (\`${data.user?.id}\`)\n**Author:** ${data.comment.username} (\`${data.comment.user_id}\`)`,
-        inline: false
-      })
-      break
+      let voteMessage = `**Vote Cast (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
+      voteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      voteMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      voteMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      voteMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      voteMessage += `* Vote Type: ${data.voteType || 'Unknown'}`
+      return voteMessage
 
     case 'report_filed':
-      embed.title = 'Comment Reported'
-      embed.color = 0xff4500 // Orange Red
-      embed.description = `A comment by **${data.comment.username}** was reported`
-      embed.fields = [
-        {
-          name: 'Report Reason',
-          value: data.reportReason || 'Unknown',
-          inline: true
-        },
-        {
-          name: 'Reported User',
-          value: data.comment.username,
-          inline: true
-        },
-        {
-          name: 'IDs (Click to Copy)',
-          value: `**Comment ID:** \`${data.comment.id}\`\n**User ID:** \`${data.comment.user_id}\`\n**Media ID:** \`${data.comment.media_id}\`\n**Reporter ID:** \`${data.user?.id}\``,
-          inline: false
-        }
-      ]
-
-      if (data.comment.content) {
-        embed.fields.push({
-          name: 'Reported Comment',
-          value: data.comment.content.length > 200 
-            ? data.comment.content.substring(0, 200) + '...' 
-            : data.comment.content
-        })
-      }
-      break
+      let reportMessage = `**Report Filed (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
+      reportMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      reportMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      reportMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      reportMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      reportMessage += `* Report Reason: ${data.reportReason || 'Unknown'}`
+      return reportMessage
 
     case 'report_resolved':
-      embed.title = 'Report Resolved'
-      embed.color = 0x00ff00 // Green
-      embed.description = `**${data.moderator?.username}** resolved a report on a comment by **${data.comment.username}**`
-      embed.fields = [
-        {
-          name: 'Moderator',
-          value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-          inline: true
-        },
-        {
-          name: 'Comment Author',
-          value: `${data.comment.username} (\`${data.comment.user_id}\`)`,
-          inline: true
-        },
-        {
-          name: 'IDs (Click to Copy)',
-          value: `**Comment ID:** \`${data.comment.id}\`\n**Moderator ID:** \`${data.moderator?.id}\``,
-          inline: false
-        }
-      ]
-      break
+      let resolveMessage = `**Report Resolved (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
+      resolveMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      resolveMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      resolveMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      resolveMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      resolveMessage += `* Resolved By: ${data.moderator?.username || 'Unknown'}`
+      return resolveMessage
+
+    case 'user_muted':
+      let muteMessage = `**User Muted**\n`
+      muteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      muteMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      muteMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      muteMessage += `* Media Name: N/A\n`
+      muteMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      return muteMessage
+
+    case 'user_shadow_banned':
+      let shadowBanMessage = `**User Shadow Banned**\n`
+      shadowBanMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      shadowBanMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      shadowBanMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      shadowBanMessage += `* Media Name: N/A\n`
+      shadowBanMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      return shadowBanMessage
+
+    case 'comment_unlocked':
+      let unlockMessage = `**Comment Unlocked (ID: ${data.comment?.id || 'Unknown'})**\n`
+      unlockMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      unlockMessage += `* UserID: ${data.comment?.user_id || 'Unknown'}                      Username: ${data.comment?.username || 'Unknown'}\n`
+      unlockMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      unlockMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      unlockMessage += `* Unlocked By: ${data.moderator?.username || 'Unknown'}`
+      return unlockMessage
 
     case 'moderation_action':
-      embed.title = 'Moderation Action'
-      embed.color = 0x9932cc // Dark Orchid
-      embed.description = `**${data.moderator?.username}** performed a moderation action`
-      
-      if (data.metadata?.action) {
-        embed.fields = [{
-          name: 'Action',
-          value: data.metadata.action,
-          inline: true
-        }]
-      }
+      let modMessage = `**Moderation Action**\n`
+      modMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      modMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      modMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      modMessage += `* Media Name: N/A\n`
+      modMessage += `* Action: ${data.metadata?.action || 'Unknown'} - ${data.reason || 'No reason provided'}`
+      return modMessage
 
-      embed.fields = embed.fields || []
-      embed.fields.push({
-        name: 'Moderator',
-        value: `${data.moderator?.username} (\`${data.moderator?.id}\`)`,
-        inline: true
-      })
+    case 'user_unbanned':
+      let unbanMessage = `**User Unbanned**\n`
+      unbanMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      unbanMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      unbanMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      unbanMessage += `* Media Name: N/A\n`
+      unbanMessage += `* Reason: ${data.reason || 'No reason provided'}`
+      return unbanMessage
 
-      if (data.user) {
-        embed.fields.push({
-          name: 'Target User',
-          value: `${data.user.username || data.user.id} (\`${data.user.id}\`)`,
-          inline: true
-        })
-      }
+    case 'report_dismissed':
+      let dismissMessage = `**Report Dismissed (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
+      dismissMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      dismissMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      dismissMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      dismissMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      dismissMessage += `* Dismissed By: ${data.moderator?.username || 'Unknown'}`
+      return dismissMessage
 
-      if (data.reason) {
-        embed.fields.push({
-          name: 'Reason',
-          value: data.reason
-        })
-      }
-      break
+    case 'vote_removed':
+      let removeVoteMessage = `**Vote Removed (Comment ID: ${data.comment?.id || 'Unknown'})**\n`
+      removeVoteMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      removeVoteMessage += `* UserID: ${data.user?.id || 'Unknown'}                      Username: ${data.user?.username || 'Unknown'}\n`
+      removeVoteMessage += `* Media ID: ${data.comment?.media_id || 'Unknown'}                  Media Type: ${data.media?.type || 'Unknown'}\n`
+      removeVoteMessage += `* Media Name: ${data.media?.title || 'Unknown'}\n`
+      removeVoteMessage += `* Vote Type Removed: ${data.voteType || 'Unknown'}`
+      return removeVoteMessage
+
+    case 'config_updated':
+      let configMessage = `**Configuration Updated**\n`
+      configMessage += `* Client Type: System\n`
+      configMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      configMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      configMessage += `* Media Name: N/A\n`
+      configMessage += `* Action: ${data.metadata?.action || 'Unknown'} - ${data.reason || 'No reason provided'}`
+      return configMessage
+
+    case 'system_enabled':
+      let enableMessage = `**System Enabled**\n`
+      enableMessage += `* Client Type: System\n`
+      enableMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      enableMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      enableMessage += `* Media Name: N/A\n`
+      enableMessage += `* Action: System enabled by ${data.moderator?.username || 'Unknown'}`
+      return enableMessage
+
+    case 'system_disabled':
+      let disableMessage = `**System Disabled**\n`
+      disableMessage += `* Client Type: System\n`
+      disableMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      disableMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      disableMessage += `* Media Name: N/A\n`
+      disableMessage += `* Action: System disabled by ${data.moderator?.username || 'Unknown'}`
+      return disableMessage
+
+    case 'bulk_action':
+      let bulkMessage = `**Bulk Action Performed**\n`
+      bulkMessage += `* Client Type: ${data.comment?.client_type || 'Unknown'}\n`
+      bulkMessage += `* UserID: ${data.moderator?.id || 'Unknown'}                      Username: ${data.moderator?.username || 'Unknown'}\n`
+      bulkMessage += `* Media ID: N/A                  Media Type: N/A\n`
+      bulkMessage += `* Media Name: N/A\n`
+      bulkMessage += `* Action: ${data.metadata?.action || 'Unknown'} - ${data.reason || 'No reason provided'}`
+      return bulkMessage
 
     default:
-      embed.title = 'Notification'
-      embed.color = 0x0000ff // Blue
-      embed.description = `A ${data.type} event occurred`
-      break
+      return `**Unknown Notification Type: ${data.type}**`
   }
-
-  return embed
 }
