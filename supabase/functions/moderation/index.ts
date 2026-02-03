@@ -366,52 +366,98 @@ async function handleUnlockThread(supabase: any, params: any) {
 async function handleWarnUser(supabase: any, params: any) {
   const { target_user_id, moderator_id, reason, severity, duration, moderatorRole } = params
 
-  // Get target user's current status
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('user_role, user_warnings')
-    .eq('user_id', target_user_id)
-    .single()
+  // Need client_type to identify user in commentum_users table
+  // For now, we'll update all platforms - this could be enhanced to accept client_type parameter
+  const { data: targetUsers } = await supabase
+    .from('commentum_users')
+    .select('commentum_client_type, commentum_user_role, commentum_user_warnings')
+    .eq('commentum_user_id', target_user_id)
 
-  if (!targetUserComment) {
+  if (!targetUsers || targetUsers.length === 0) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Check permissions (can't moderate users with equal or higher role)
-  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
-    return new Response(
-      JSON.stringify({ error: 'Cannot moderate user with equal or higher role' }),
-      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  // Check permissions across all platforms (can't moderate users with equal or higher role)
+  for (const user of targetUsers) {
+    if (!canModerate(moderatorRole, user.commentum_user_role)) {
+      return new Response(
+        JSON.stringify({ error: 'Cannot moderate user with equal or higher role' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
   }
 
-  let updateData: any = {
-    moderated: true,
-    moderated_at: new Date().toISOString(),
-    moderated_by: moderator_id,
-    moderation_reason: reason,
-    moderation_action: severity
+  // Use the helper function to add warning to user table
+  let warningCount = 0
+  for (const user of targetUsers) {
+    const { data: newCount } = await supabase
+      .rpc('add_user_warning', {
+        p_client_type: user.commentum_client_type,
+        p_user_id: target_user_id,
+        p_warning_reason: reason,
+        p_warned_by: moderator_id
+      })
+    
+    if (newCount) {
+      warningCount = Math.max(warningCount, newCount)
+    }
   }
 
-  if (severity === 'mute' && duration) {
-    updateData.user_muted_until = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString() // duration in hours
-  } else if (severity === 'ban') {
-    updateData.user_banned = true
+  // Check for auto-mute/ban thresholds
+  const { data: autoMuteThreshold } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', 'user_max_warnings_before_auto_mute')
+    .single()
+
+  const { data: autoBanThreshold } = await supabase
+    .from('config')
+    .select('value')
+    .eq('key', 'user_max_warnings_before_auto_ban')
+    .single()
+
+  const muteThreshold = autoMuteThreshold ? parseInt(autoMuteThreshold.value) : 5
+  const banThreshold = autoBanThreshold ? parseInt(autoBanThreshold.value) : 10
+
+  let autoAction = ''
+  if (warningCount >= banThreshold) {
+    // Auto-ban across all platforms
+    for (const user of targetUsers) {
+      await supabase
+        .rpc('ban_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: target_user_id,
+          p_ban_reason: `Auto-ban after ${warningCount} warnings: ${reason}`,
+          p_banned_by: moderator_id,
+          p_shadow_ban: false
+        })
+    }
+    autoAction = `AUTO-BANNED - User exceeded ${banThreshold} warnings`
+  } else if (warningCount >= muteThreshold) {
+    // Auto-mute for default duration
+    const { data: defaultMuteDuration } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'user_default_mute_duration_hours')
+      .single()
+
+    const muteDuration = defaultMuteDuration ? parseInt(defaultMuteDuration.value) : 24
+    
+    for (const user of targetUsers) {
+      await supabase
+        .rpc('mute_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: target_user_id,
+          p_mute_duration_hours: muteDuration,
+          p_mute_reason: `Auto-mute after ${warningCount} warnings: ${reason}`,
+          p_muted_by: moderator_id
+        })
+    }
+    autoAction = `AUTO-MUTED - User exceeded ${muteThreshold} warnings (${muteDuration} hours)`
   }
-
-  // Update all user's comments with new status
-  const { error } = await supabase
-    .from('comments')
-    .update({
-      user_warnings: targetUserComment.user_warnings + 1,
-      ...updateData
-    })
-    .eq('user_id', target_user_id)
-
-  if (error) throw error
 
   // Queue Discord notification for user warning in background - NON-BLOCKING
   queueDiscordNotification({
@@ -434,7 +480,9 @@ async function handleWarnUser(supabase: any, params: any) {
       action: severity,
       targetUserId: target_user_id,
       reason,
-      duration: duration || null
+      duration: duration || null,
+      warningCount,
+      autoAction
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
@@ -451,43 +499,40 @@ async function handleBanUser(supabase: any, params: any) {
     )
   }
 
-  // Get target user's current status
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('user_role')
-    .eq('user_id', target_user_id)
-    .single()
+  // Get target user's current status from commentum_users table
+  const { data: targetUsers } = await supabase
+    .from('commentum_users')
+    .select('commentum_client_type, commentum_user_role')
+    .eq('commentum_user_id', target_user_id)
 
-  if (!targetUserComment) {
+  if (!targetUsers || targetUsers.length === 0) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Check permissions
-  if (!canModerate(moderatorRole, targetUserComment.user_role)) {
-    return new Response(
-      JSON.stringify({ error: 'Cannot ban user with equal or higher role' }),
-      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  // Check permissions across all platforms
+  for (const user of targetUsers) {
+    if (!canModerate(moderatorRole, user.commentum_user_role)) {
+      return new Response(
+        JSON.stringify({ error: 'Cannot ban user with equal or higher role' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
   }
 
-  // Update all user's comments
-  const { error } = await supabase
-    .from('comments')
-    .update({
-      user_banned: true,
-      user_shadow_banned: shadow_ban || false,
-      moderated: true,
-      moderated_at: new Date().toISOString(),
-      moderated_by: moderator_id,
-      moderation_reason: reason,
-      moderation_action: shadow_ban ? 'shadow_ban' : 'ban'
-    })
-    .eq('user_id', target_user_id)
-
-  if (error) throw error
+  // Ban user across all platforms using helper function
+  for (const user of targetUsers) {
+    await supabase
+      .rpc('ban_commentum_user', {
+        p_client_type: user.commentum_client_type,
+        p_user_id: target_user_id,
+        p_ban_reason: reason,
+        p_banned_by: moderator_id,
+        p_shadow_ban: shadow_ban || false
+      })
+  }
 
   // Queue Discord notification for user ban in background - NON-BLOCKING
   queueDiscordNotification({
@@ -525,22 +570,33 @@ async function handleUnbanUser(supabase: any, params: any) {
     )
   }
 
-  // Update all user's comments
-  const { error } = await supabase
-    .from('comments')
-    .update({
-      user_banned: false,
-      user_shadow_banned: false,
-      user_muted_until: null,
-      moderated: true,
-      moderated_at: new Date().toISOString(),
-      moderated_by: moderator_id,
-      moderation_reason: reason,
-      moderation_action: 'unban'
-    })
-    .eq('user_id', target_user_id)
+  // Get target users from commentum_users table
+  const { data: targetUsers } = await supabase
+    .from('commentum_users')
+    .select('commentum_client_type')
+    .eq('commentum_user_id', target_user_id)
 
-  if (error) throw error
+  if (!targetUsers || targetUsers.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'User not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Unban user across all platforms by updating the user table
+  for (const user of targetUsers) {
+    await supabase
+      .from('commentum_users')
+      .update({
+        commentum_user_banned: false,
+        commentum_user_shadow_banned: false,
+        commentum_user_muted: false,
+        commentum_user_muted_until: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('commentum_client_type', user.commentum_client_type)
+      .eq('commentum_user_id', target_user_id)
+  }
 
   return new Response(
     JSON.stringify({
