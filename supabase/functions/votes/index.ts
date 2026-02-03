@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -152,6 +153,70 @@ serve(async (req) => {
       .single()
 
     if (updateError) throw updateError
+
+    // Get media information for Discord notification
+    let mediaInfo = null
+    if (comment.media_id && comment.client_type) {
+      // Try to get media info from the media column if it exists
+      if (comment.media) {
+        try {
+          mediaInfo = typeof comment.media === 'string' ? JSON.parse(comment.media) : comment.media
+        } catch (e) {
+          console.log('Could not parse media info from comment')
+        }
+      }
+      
+      // If no media info, create basic media info from available data
+      if (!mediaInfo) {
+        mediaInfo = {
+          id: comment.media_id,
+          type: 'unknown',
+          title: `Media ID: ${comment.media_id}`,
+          year: null,
+          poster: null
+        }
+      }
+    }
+
+    // Determine vote action for notification
+    let voteAction = null
+    let voteTypeForNotification = null
+    
+    if (vote_type === 'remove') {
+      if (currentVote) {
+        voteAction = 'vote_removed'
+        voteTypeForNotification = currentVote
+      }
+    } else {
+      voteAction = 'vote_cast'
+      voteTypeForNotification = vote_type
+    }
+
+    // Send Discord notification if vote action occurred
+    if (voteAction && currentVote !== voteTypeForNotification) {
+      const notificationData = {
+        type: voteAction,
+        comment: {
+          id: comment.id,
+          content: comment.content,
+          user_id: comment.user_id,
+          username: comment.username,
+          client_type: comment.client_type,
+          media_id: comment.media_id
+        },
+        user: {
+          id: user_id,
+          username: user_info.username || `User ${user_id}`,
+          avatar: user_info.avatar
+        },
+        media: mediaInfo,
+        voteType: voteTypeForNotification,
+        voteScore: newVoteScore
+      }
+
+      // Queue Discord notification (non-blocking)
+      queueDiscordNotification(notificationData)
+    }
 
     return new Response(
     JSON.stringify({

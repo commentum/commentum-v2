@@ -1,9 +1,9 @@
-// Discord notification utilities for Commentum v2
+// Enhanced Discord notification utilities for Commentum v2
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
   type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
-        'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action';
+        'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed';
   comment?: any;
   user?: any;
   media?: any;
@@ -12,6 +12,8 @@ export interface DiscordNotificationData {
   reportReason?: string;
   actionedBy?: string;
   metadata?: any;
+  voteType?: 'upvote' | 'downvote';
+  voteScore?: number;
 }
 
 // Background notification queue - stores notifications for async processing
@@ -111,8 +113,8 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       return { success: false, reason: 'Notification type disabled' }
     }
 
-    // Create Discord message content
-    const content = createDiscordMessage(data)
+    // Create Discord embed content
+    const embedData = createDiscordEmbed(data)
 
     // Log notification for tracking using comment ID if available
     let notificationId = null
@@ -164,7 +166,7 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
     const sendResults = []
     
     for (const webhookUrl of webhookUrls) {
-      const sendResult = await sendToWebhook(webhookUrl, content, data.type)
+      const sendResult = await sendToWebhook(webhookUrl, embedData, data.type)
       sendResults.push({
         webhookUrl,
         success: sendResult.success,
@@ -213,7 +215,9 @@ function getChannelForNotificationType(notificationType: string): 'comments' | '
     'comment_deleted',
     'comment_pinned',
     'comment_locked',
-    'comment_unlocked'
+    'comment_unlocked',
+    'vote_cast',
+    'vote_removed'
   ]
   
   return commentsChannelTypes.includes(notificationType) ? 'comments' : 'moderation'
@@ -260,7 +264,7 @@ async function getChannelWebhookUrls(supabase: any, channelType: 'comments' | 'm
 }
 
 // Send message to a specific webhook
-async function sendToWebhook(webhookUrl: string, content: string, notificationType: string) {
+async function sendToWebhook(webhookUrl: string, embedData: any, notificationType: string) {
   try {
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -270,7 +274,7 @@ async function sendToWebhook(webhookUrl: string, content: string, notificationTy
       body: JSON.stringify({
         username: 'Commentum Bot',
         avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png', // Commentum logo
-        content: content
+        embeds: [embedData]
       })
     })
 
@@ -300,198 +304,487 @@ async function sendToWebhook(webhookUrl: string, content: string, notificationTy
   }
 }
 
-function createDiscordMessage(data: DiscordNotificationData): string {
+function createDiscordEmbed(data: DiscordNotificationData): any {
+  const baseEmbed = {
+    timestamp: new Date().toISOString(),
+    footer: {
+      text: 'Commentum v2',
+      icon_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+    }
+  }
+
   switch (data.type) {
     case 'comment_created':
-      let message = "```\n"
-      message += `**New Comment (ID: ${data.comment?.id})**\n`
-      message += `* Client Type: ${data.comment?.client_type}\n`
-      message += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
-      message += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      message += `* Media Name: ${data.media?.title}\n`
-      message += `* Content: ${data.comment?.content}`
-      message += "\n```"
-      return message
+      return {
+        ...baseEmbed,
+        title: '💬 New Comment Posted',
+        description: `A new comment was posted by **${data.comment?.username}**`,
+        color: 0x00FF00, // Green
+        fields: [
+          {
+            name: '📝 Comment Details',
+            value: `**ID:** ${data.comment?.id}\n**Content:** ${data.comment?.content || 'No content'}`,
+            inline: false
+          },
+          {
+            name: '👤 User Info',
+            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Info',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
     case 'comment_updated':
-      let updateMessage = "```\n"
-      updateMessage += `**Comment Updated (ID: ${data.comment?.id})**\n`
-      updateMessage += `* Client Type: ${data.comment?.client_type}\n`
-      updateMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
-      updateMessage += `* Media ID: ${data.comment?.media_id}(Type: ${data.media?.type})\n`
-      updateMessage += `* Media Name: ${data.media?.title}\n`
-      updateMessage += `* Content: ${data.comment?.content}`
-      updateMessage += "\n```"
-      return updateMessage
+      return {
+        ...baseEmbed,
+        title: '✏️ Comment Edited',
+        description: `Comment **${data.comment?.id}** was edited by **${data.comment?.username}**`,
+        color: 0x9B59B6, // Purple
+        fields: [
+          {
+            name: '📝 Updated Content',
+            value: `**ID:** ${data.comment?.id}\n**New Content:** ${data.comment?.content || 'No content'}`,
+            inline: false
+          },
+          {
+            name: '👤 User Info',
+            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Info',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
     case 'comment_deleted':
-      let deleteMessage = "```\n"
-      deleteMessage += `**Comment Deleted (ID: ${data.comment?.id})**\n`
-      deleteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      deleteMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
-      deleteMessage += `* Media ID: ${data.comment?.media_id}(Type: ${data.media?.type})\n`
-      deleteMessage += `* Media Name: ${data.media?.title}\n`
-      deleteMessage += `* Deleted By: ${data.moderator?.username || data.comment?.username}`
-      deleteMessage += "\n```"
-      return deleteMessage
+      return {
+        ...baseEmbed,
+        title: '🗑️ Comment Deleted',
+        description: `Comment **${data.comment?.id}** was deleted by **${data.moderator?.username || data.comment?.username}**`,
+        color: 0xFF0000, // Red
+        fields: [
+          {
+            name: '📝 Deleted Comment',
+            value: `**ID:** ${data.comment?.id}\n**Original Content:** ${data.comment?.content || 'No content'}`,
+            inline: false
+          },
+          {
+            name: '👤 User Info',
+            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Info',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          },
+          {
+            name: '🔨 Deleted By',
+            value: data.moderator?.username || 'Original Author',
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
-    case 'user_banned':
-      let banMessage = "```\n"
-      banMessage += `**User Banned**\n`
-      banMessage += `* Client Type: ${data.comment?.client_type}\n`
-      banMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
-      banMessage += `* Reason: ${data.reason}`
-      banMessage += "\n```"
-      return banMessage
+    case 'vote_cast':
+      return {
+        ...baseEmbed,
+        title: `🗳️ ${data.voteType === 'upvote' ? '⬆️ Upvote' : '⬇️ Downvote'} Cast`,
+        description: `**${data.user?.username}** cast a ${data.voteType} on comment **${data.comment?.id}**`,
+        color: 0xFFA500, // Orange
+        fields: [
+          {
+            name: '📊 Vote Details',
+            value: `**Vote Type:** ${data.voteType === 'upvote' ? '⬆️ Upvote' : '⬇️ Downvote'}\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
+            inline: true
+          },
+          {
+            name: '👤 Voter Info',
+            value: `**ID:** ${data.user?.id} (${data.user?.username})`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          },
+          {
+            name: '📝 Comment Content',
+            value: data.comment?.content || 'No content',
+            inline: false
+          }
+        ],
+        thumbnail: {
+          url: data.user?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
-    case 'user_warned':
-      let warnMessage = "```\n"
-      warnMessage += `**User Warned**\n`
-      warnMessage += `* Client Type: ${data.comment?.client_type}\n`
-      warnMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
-      warnMessage += `* Reason: ${data.reason}`
-      warnMessage += "\n```"
-      return warnMessage
-
-    case 'comment_pinned':
-      let pinMessage = "```\n"
-      pinMessage += `**Comment Pinned (ID: ${data.comment?.id})**\n`
-      pinMessage += `* Client Type: ${data.comment?.client_type}\n`
-      pinMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
-      pinMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      pinMessage += `* Media Name: ${data.media?.title}\n`
-      pinMessage += `* Pinned By: ${data.moderator?.username}`
-      pinMessage += "\n```"
-      return pinMessage
-
-    case 'comment_locked':
-      let lockMessage = "```\n"
-      lockMessage += `**Comment Locked (ID: ${data.comment?.id})**\n`
-      lockMessage += `* Client Type: ${data.comment?.client_type}\n`
-      lockMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
-      lockMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      lockMessage += `* Media Name: ${data.media?.title}\n`
-      lockMessage += `* Locked By: ${data.moderator?.username}`
-      lockMessage += "\n```"
-      return lockMessage
+    case 'vote_removed':
+      return {
+        ...baseEmbed,
+        title: '🗳️ Vote Removed',
+        description: `**${data.user?.username}** removed their vote from comment **${data.comment?.id}**`,
+        color: 0xFFA500, // Orange
+        fields: [
+          {
+            name: '📊 Vote Details',
+            value: `**Action:** Vote Removed\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
+            inline: true
+          },
+          {
+            name: '👤 User Info',
+            value: `**ID:** ${data.user?.id} (${data.user?.username})`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.user?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
     case 'report_filed':
-      let reportMessage = "```\n"
-      reportMessage += `**Report Filed (Comment ID: ${data.comment?.id})**\n`
-      reportMessage += `* Client Type: ${data.comment?.client_type}\n`
-      reportMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
-      reportMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      reportMessage += `* Media Name: ${data.media?.title}\n`
-      reportMessage += `* Report Reason: ${data.reportReason}`
-      reportMessage += "\n```"
-      return reportMessage
+      return {
+        ...baseEmbed,
+        title: '🚨 Comment Reported',
+        description: `Comment **${data.comment?.id}** was reported by **${data.user?.username}**`,
+        color: 0xFF8C00, // Dark Orange
+        fields: [
+          {
+            name: '🚨 Report Details',
+            value: `**Reason:** ${data.reportReason}\n**Comment ID:** ${data.comment?.id}\n**Reported By:** ${data.user?.username}`,
+            inline: false
+          },
+          {
+            name: '📝 Reported Comment',
+            value: data.comment?.content || 'No content',
+            inline: false
+          },
+          {
+            name: '👤 Comment Author',
+            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.user?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
-    case 'report_resolved':
-      let resolveMessage = "```\n"
-      resolveMessage += `**Report Resolved (Comment ID: ${data.comment?.id})**\n`
-      resolveMessage += `* Client Type: ${data.comment?.client_type}\n`
-      resolveMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
-      resolveMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      resolveMessage += `* Media Name: ${data.media?.title}\n`
-      resolveMessage += `* Resolved By: ${data.moderator?.username}`
-      resolveMessage += "\n```"
-      return resolveMessage
+    case 'user_banned':
+      return {
+        ...baseEmbed,
+        title: '🔨 User Banned',
+        description: `**${data.comment?.username}** has been banned from the system`,
+        color: 0x8B0000, // Dark Red
+        fields: [
+          {
+            name: '🔨 Ban Details',
+            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
+            inline: false
+          },
+          {
+            name: '⚖️ Client Type',
+            value: data.comment?.client_type || 'Unknown',
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        }
+      }
+
+    case 'user_warned':
+      return {
+        ...baseEmbed,
+        title: '⚠️ User Warned',
+        description: `**${data.comment?.username}** has received a warning`,
+        color: 0xFFD700, // Gold
+        fields: [
+          {
+            name: '⚠️ Warning Details',
+            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Warned By:** ${data.moderator?.username || 'System'}`,
+            inline: false
+          },
+          {
+            name: '⚖️ Client Type',
+            value: data.comment?.client_type || 'Unknown',
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        }
+      }
 
     case 'user_muted':
-      let muteMessage = "```\n"
-      muteMessage += `**User Muted**\n`
-      muteMessage += `* Client Type: ${data.comment?.client_type}\n`
-      muteMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
-      muteMessage += `* Reason: ${data.reason}`
-      muteMessage += "\n```"
-      return muteMessage
+      return {
+        ...baseEmbed,
+        title: '🔇 User Muted',
+        description: `**${data.comment?.username}** has been muted`,
+        color: 0x808080, // Gray
+        fields: [
+          {
+            name: '🔇 Mute Details',
+            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Muted By:** ${data.moderator?.username || 'System'}`,
+            inline: false
+          },
+          {
+            name: '⚖️ Client Type',
+            value: data.comment?.client_type || 'Unknown',
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        }
+      }
 
     case 'user_shadow_banned':
-      let shadowBanMessage = "```\n"
-      shadowBanMessage += `**User Shadow Banned**\n`
-      shadowBanMessage += `* Client Type: ${data.comment?.client_type}\n`
-      shadowBanMessage += `* UserID: ${data.user?.id} (${data.comment?.username})\n`
-      shadowBanMessage += `* Reason: ${data.reason}`
-      shadowBanMessage += "\n```"
-      return shadowBanMessage
+      return {
+        ...baseEmbed,
+        title: '👤 User Shadow Banned',
+        description: `**${data.comment?.username}** has been shadow banned`,
+        color: 0x4B0082, // Indigo
+        fields: [
+          {
+            name: '👤 Shadow Ban Details',
+            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
+            inline: false
+          },
+          {
+            name: '⚖️ Client Type',
+            value: data.comment?.client_type || 'Unknown',
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        }
+      }
+
+    case 'comment_pinned':
+      return {
+        ...baseEmbed,
+        title: '📌 Comment Pinned',
+        description: `Comment **${data.comment?.id}** has been pinned by **${data.moderator?.username}**`,
+        color: 0x00BFFF, // Deep Sky Blue
+        fields: [
+          {
+            name: '📌 Pin Details',
+            value: `**Comment ID:** ${data.comment?.id}\n**Pinned By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
+            inline: false
+          },
+          {
+            name: '📝 Pinned Comment',
+            value: data.comment?.content || 'No content',
+            inline: false
+          },
+          {
+            name: '👤 Comment Author',
+            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
+
+    case 'comment_locked':
+      return {
+        ...baseEmbed,
+        title: '🔒 Comment Thread Locked',
+        description: `Comment **${data.comment?.id}** thread has been locked by **${data.moderator?.username}**`,
+        color: 0x8B4513, // Saddle Brown
+        fields: [
+          {
+            name: '🔒 Lock Details',
+            value: `**Comment ID:** ${data.comment?.id}\n**Locked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
+            inline: false
+          },
+          {
+            name: '📝 Locked Comment',
+            value: data.comment?.content || 'No content',
+            inline: false
+          },
+          {
+            name: '👤 Comment Author',
+            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
     case 'comment_unlocked':
-      let unlockMessage = "```\n"
-      unlockMessage += `**Comment Unlocked (ID: ${data.comment?.id})**\n`
-      unlockMessage += `* Client Type: ${data.comment?.client_type}\n`
-      unlockMessage += `* UserID: ${data.comment?.user_id} (${data.comment?.username})\n`
-      unlockMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      unlockMessage += `* Media Name: ${data.media?.title}\n`
-      unlockMessage += `* Unlocked By: ${data.moderator?.username}`
-      unlockMessage += "\n```"
-      return unlockMessage
+      return {
+        ...baseEmbed,
+        title: '🔓 Comment Thread Unlocked',
+        description: `Comment **${data.comment?.id}** thread has been unlocked by **${data.moderator?.username}**`,
+        color: 0x32CD32, // Lime Green
+        fields: [
+          {
+            name: '🔓 Unlock Details',
+            value: `**Comment ID:** ${data.comment?.id}\n**Unlocked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
+            inline: false
+          },
+          {
+            name: '👤 Comment Author',
+            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            inline: true
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
-    case 'moderation_action':
-      let modMessage = "```\n"
-      modMessage += `**Moderation Action**\n`
-      modMessage += `* Client Type: ${data.comment?.client_type}\n`
-      modMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
-      modMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
-      modMessage += "\n```"
-      return modMessage
-
-    case 'user_unbanned':
-      let unbanMessage = "```\n"
-      unbanMessage += `**User Unbanned**\n`
-      unbanMessage += `* Client Type: ${data.comment?.client_type}\n`
-      unbanMessage += `* UserID: ${data.user?.id} (${data.comment?.username})n`
-      unbanMessage += `* Reason: ${data.reason}`
-      unbanMessage += "\n```"
-      return unbanMessage
+    case 'report_resolved':
+      return {
+        ...baseEmbed,
+        title: '✅ Report Resolved',
+        description: `Report for comment **${data.comment?.id}** has been resolved by **${data.moderator?.username}**`,
+        color: 0x00FA9A, // Medium Spring Green
+        fields: [
+          {
+            name: '✅ Resolution Details',
+            value: `**Comment ID:** ${data.comment?.id}\n**Resolved By:** ${data.moderator?.username}\n**Resolution:** Approved`,
+            inline: false
+          },
+          {
+            name: '📝 Comment Context',
+            value: data.comment?.content || 'No content',
+            inline: false
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.moderator?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
     case 'report_dismissed':
-      let dismissMessage = "```\n"
-      dismissMessage += `**Report Dismissed (Comment ID: ${data.comment?.id})**\n`
-      dismissMessage += `* Client Type: ${data.comment?.client_type}\n`
-      dismissMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
-      dismissMessage += `* Media ID: ${data.comment?.media_id} (Type: ${data.media?.type})\n`
-      dismissMessage += `* Media Name: ${data.media?.title}\n`
-      dismissMessage += `* Dismissed By: ${data.moderator?.username}`
-      dismissMessage += "\n```"
-      return dismissMessage
-
-    case 'config_updated':
-      let configMessage = "```\n"
-      configMessage += `**Configuration Updated**\n`
-      configMessage += `* Client Type: System\n`
-      configMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
-      configMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
-      configMessage += "\n```"
-      return configMessage
-
-    case 'system_enabled':
-      let enableMessage = "```\n"
-      enableMessage += `**System Enabled**\n`
-      enableMessage += `* Client Type: System\n`
-      enableMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
-      enableMessage += `* Action: System enabled by ${data.moderator?.username}`
-      enableMessage += "\n```"
-      return enableMessage
-
-    case 'system_disabled':
-      let disableMessage = "```\n"
-      disableMessage += `**System Disabled**\n`
-      disableMessage += `* Client Type: System\n`
-      disableMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
-      disableMessage += `* Action: System disabled by ${data.moderator?.username}`
-      disableMessage += "\n```"
-      return disableMessage
-
-    case 'bulk_action':
-      let bulkMessage = "```\n"
-      bulkMessage += `**Bulk Action Performed**\n`
-      bulkMessage += `* Client Type: ${data.comment?.client_type}\n`
-      bulkMessage += `* UserID: ${data.moderator?.id} (${data.moderator?.username})\n`
-      bulkMessage += `* Action: ${data.metadata?.action} - ${data.reason}`
-      bulkMessage += "\n```"
-      return bulkMessage
+      return {
+        ...baseEmbed,
+        title: '❌ Report Dismissed',
+        description: `Report for comment **${data.comment?.id}** has been dismissed by **${data.moderator?.username}**`,
+        color: 0xDC143C, // Crimson
+        fields: [
+          {
+            name: '❌ Dismissal Details',
+            value: `**Comment ID:** ${data.comment?.id}\n**Dismissed By:** ${data.moderator?.username}\n**Resolution:** Dismissed`,
+            inline: false
+          },
+          {
+            name: '📝 Comment Context',
+            value: data.comment?.content || 'No content',
+            inline: false
+          },
+          {
+            name: '🎬 Media Context',
+            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            inline: true
+          }
+        ],
+        thumbnail: {
+          url: data.moderator?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
+        image: {
+          url: data.media?.poster || null
+        }
+      }
 
     default:
-      return "```\n**Unknown Notification Type: " + data.type + "**\n```"
+      return {
+        ...baseEmbed,
+        title: '📢 System Notification',
+        description: `A system event occurred: ${data.type}`,
+        color: 0x808080, // Gray
+        fields: [
+          {
+            name: 'Event Details',
+            value: `**Type:** ${data.type}\n**Timestamp:** ${new Date().toISOString()}`,
+            inline: false
+          }
+        ]
+      }
   }
 }
