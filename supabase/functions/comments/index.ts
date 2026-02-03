@@ -191,24 +191,22 @@ serve(async (req) => {
       userRole = await getUserRole(supabase, user_id)
     }
 
-    const { data: existingUserComments } = await supabase
-      .from('comments')
-      .select('user_banned, user_muted_until, user_shadow_banned, user_warnings')
-      .eq('user_id', user_id)
-      .eq('client_type', client_type)
-      .order('created_at', { ascending: false })
-      .limit(1)
+    // Check user restrictions from commentum_users table
+    const { data: userStatus } = await supabase
+      .from('commentum_users')
+      .select('commentum_user_banned, commentum_user_muted_until, commentum_user_shadow_banned, commentum_user_warnings')
+      .eq('commentum_client_type', client_type)
+      .eq('commentum_user_id', user_id)
+      .single()
 
-    const userStatus = existingUserComments?.[0]
-
-    if (userStatus?.user_banned) {
+    if (userStatus?.commentum_user_banned) {
       return new Response(
         JSON.stringify({ error: 'User is banned' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    if (userStatus?.user_muted_until && new Date(userStatus.user_muted_until) > new Date()) {
+    if (userStatus?.commentum_user_muted && new Date(userStatus.commentum_user_muted_until) > new Date()) {
       return new Response(
         JSON.stringify({ error: 'User is muted' }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

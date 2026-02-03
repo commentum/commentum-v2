@@ -1,4 +1,5 @@
 import { createDiscordResponse, createErrorResponse, createModerationEmbed } from '../utils.ts'
+import { canModerate } from '../../shared/auth.ts'
 
 // Handle warn command
 export async function handleWarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -15,91 +16,90 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's current status
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role, user_warnings, user_banned, user_muted_until')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current status from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role, commentum_user_warnings, commentum_user_banned, commentum_user_muted, commentum_user_muted_until')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
     // Check permissions (can't moderate users with equal or higher role)
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot moderate user with equal or higher role.')
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot moderate user with equal or higher role.')
+      }
     }
 
-    // Update all user's comments with new warning
-    const newWarningCount = (targetUserComment.user_warnings || 0) + 1
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_warnings: newWarningCount,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'warn'
-      })
-      .eq('user_id', targetUserId)
-
-    if (error) throw error
+    // Use the helper function to add warning to user table
+    let warningCount = 0
+    for (const user of targetUsers) {
+      const { data: newCount } = await supabase
+        .rpc('add_user_warning', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: targetUserId,
+          p_warning_reason: reason,
+          p_warned_by: moderatorId
+        })
+      
+      if (newCount) {
+        warningCount = Math.max(warningCount, newCount)
+      }
+    }
 
     // Check for auto-mute/ban thresholds
-    const { data: autoWarnThreshold } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'auto_warn_threshold')
-      .single()
-
     const { data: autoMuteThreshold } = await supabase
       .from('config')
       .select('value')
-      .eq('key', 'auto_mute_threshold')
+      .eq('key', 'user_max_warnings_before_auto_mute')
       .single()
 
     const { data: autoBanThreshold } = await supabase
       .from('config')
       .select('value')
-      .eq('key', 'auto_ban_threshold')
+      .eq('key', 'user_max_warnings_before_auto_ban')
       .single()
 
-    const warnThreshold = autoWarnThreshold ? parseInt(autoWarnThreshold.value) : 3
     const muteThreshold = autoMuteThreshold ? parseInt(autoMuteThreshold.value) : 5
     const banThreshold = autoBanThreshold ? parseInt(autoBanThreshold.value) : 10
 
     let autoAction = ''
-    if (newWarningCount >= banThreshold) {
-      // Auto-ban
-      await supabase
-        .from('comments')
-        .update({
-          user_banned: true,
-          moderated: true,
-          moderated_at: new Date().toISOString(),
-          moderated_by: moderatorId,
-          moderation_reason: `Auto-ban after ${newWarningCount} warnings: ${reason}`,
-          moderation_action: 'auto_ban'
-        })
-        .eq('user_id', targetUserId)
+    if (warningCount >= banThreshold) {
+      // Auto-ban across all platforms
+      for (const user of targetUsers) {
+        await supabase
+          .rpc('ban_commentum_user', {
+            p_client_type: user.commentum_client_type,
+            p_user_id: targetUserId,
+            p_ban_reason: `Auto-ban after ${warningCount} warnings: ${reason}`,
+            p_banned_by: moderatorId,
+            p_shadow_ban: false
+          })
+      }
       autoAction = `AUTO-BANNED - User exceeded ${banThreshold} warnings`
-    } else if (newWarningCount >= muteThreshold) {
-      // Auto-mute for 24 hours
-      const muteUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      await supabase
-        .from('comments')
-        .update({
-          user_muted_until: muteUntil,
-          moderated: true,
-          moderated_at: new Date().toISOString(),
-          moderated_by: moderatorId,
-          moderation_reason: `Auto-mute after ${newWarningCount} warnings: ${reason}`,
-          moderation_action: 'auto_mute'
-        })
-        .eq('user_id', targetUserId)
-      autoAction = `AUTO-MUTED - User exceeded ${muteThreshold} warnings (24 hours)`
+    } else if (warningCount >= muteThreshold) {
+      // Auto-mute for default duration
+      const { data: defaultMuteDuration } = await supabase
+        .from('config')
+        .select('value')
+        .eq('key', 'user_default_mute_duration_hours')
+        .single()
+
+      const muteDuration = defaultMuteDuration ? parseInt(defaultMuteDuration.value) : 24
+      
+      for (const user of targetUsers) {
+        await supabase
+          .rpc('mute_commentum_user', {
+            p_client_type: user.commentum_client_type,
+            p_user_id: targetUserId,
+            p_mute_duration_hours: muteDuration,
+            p_mute_reason: `Auto-mute after ${warningCount} warnings: ${reason}`,
+            p_muted_by: moderatorId
+          })
+      }
+      autoAction = `AUTO-MUTED - User exceeded ${muteThreshold} warnings (${muteDuration} hours)`
     }
 
     return createModerationEmbed(
@@ -107,7 +107,7 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
       targetUserId,
       `<@${moderatorId}>`,
       reason,
-      `Warning Count: ${newWarningCount}${autoAction ? ' | ' + autoAction : ''}`
+      `Warning Count: ${warningCount}${autoAction ? ' | ' + autoAction : ''}`
     )
 
   } catch (error) {
@@ -206,38 +206,36 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's current status
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current status from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot moderate user with equal or higher role.')
+    // Check permissions across all platforms
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot moderate user with equal or higher role.')
+      }
     }
 
-    // Calculate mute end time
+    // Mute user across all platforms using helper function
+    for (const user of targetUsers) {
+      await supabase
+        .rpc('mute_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: targetUserId,
+          p_mute_duration_hours: duration,
+          p_mute_reason: reason,
+          p_muted_by: moderatorId
+        })
+    }
+
     const muteUntil = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString()
-
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_muted_until: muteUntil,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'mute'
-      })
-      .eq('user_id', targetUserId)
-
-    if (error) throw error
 
     return createModerationEmbed(
       'mute',
@@ -267,20 +265,28 @@ export async function handleUnmuteCommand(supabase: any, moderatorId: string, mo
       return createErrorResponse('user_id is required.')
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_muted_until: null,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'unmute'
-      })
-      .eq('user_id', targetUserId)
+    // Get target users from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type')
+      .eq('commentum_user_id', targetUserId)
 
-    if (error) throw error
+    if (!targetUsers || targetUsers.length === 0) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    // Unmute user across all platforms by updating the user table
+    for (const user of targetUsers) {
+      await supabase
+        .from('commentum_users')
+        .update({
+          commentum_user_muted: false,
+          commentum_user_muted_until: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('commentum_client_type', user.commentum_client_type)
+        .eq('commentum_user_id', targetUserId)
+    }
 
     return createModerationEmbed(
       'unmute',
