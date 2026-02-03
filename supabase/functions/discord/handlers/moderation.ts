@@ -36,13 +36,18 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
     // Use the helper function to add warning to user table
     let warningCount = 0
     for (const user of targetUsers) {
-      const { data: newCount } = await supabase
+      const { data: newCount, error: rpcError } = await supabase
         .rpc('add_user_warning', {
           p_client_type: user.commentum_client_type,
           p_user_id: targetUserId,
           p_warning_reason: reason,
           p_warned_by: moderatorId
         })
+      
+      if (rpcError) {
+        console.error('RPC add_user_warning error:', rpcError)
+        return createErrorResponse(`Failed to add warning: ${rpcError.message}`)
+      }
       
       if (newCount) {
         warningCount = Math.max(warningCount, newCount)
