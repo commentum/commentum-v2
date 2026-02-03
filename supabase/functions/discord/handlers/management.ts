@@ -1,4 +1,5 @@
 import { createDiscordResponse, createErrorResponse, createCommentEmbed, createUserEmbed, createModerationEmbed } from '../utils.ts'
+import { canModerate } from '../../shared/auth.ts'
 
 // Handle ban command
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -16,37 +17,34 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's current status
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current status from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
-    // Check permissions
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot ban user with equal or higher role.')
+    // Check permissions across all platforms
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot ban user with equal or higher role.')
+      }
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_banned: true,
-        user_shadow_banned: shadow,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: shadow ? 'shadow_ban' : 'ban'
-      })
-      .eq('user_id', targetUserId)
-
-    if (error) throw error
+    // Ban user across all platforms using helper function
+    for (const user of targetUsers) {
+      await supabase
+        .rpc('ban_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: targetUserId,
+          p_ban_reason: reason,
+          p_banned_by: moderatorId,
+          p_shadow_ban: shadow
+        })
+    }
 
     return createModerationEmbed(
       shadow ? 'shadow ban' : 'ban',
@@ -77,22 +75,30 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
       return createErrorResponse('user_id is required.')
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_banned: false,
-        user_shadow_banned: false,
-        user_muted_until: null,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'unban'
-      })
-      .eq('user_id', targetUserId)
+    // Get target users from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type')
+      .eq('commentum_user_id', targetUserId)
 
-    if (error) throw error
+    if (!targetUsers || targetUsers.length === 0) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    // Unban user across all platforms by updating the user table
+    for (const user of targetUsers) {
+      await supabase
+        .from('commentum_users')
+        .update({
+          commentum_user_banned: false,
+          commentum_user_shadow_banned: false,
+          commentum_user_muted: false,
+          commentum_user_muted_until: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('commentum_client_type', user.commentum_client_type)
+        .eq('commentum_user_id', targetUserId)
+    }
 
     return createDiscordResponse(
       `🔓 **User Unbanned**\n\n` +
@@ -124,37 +130,34 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's current status
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current status from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
-    // Check permissions
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot shadow ban user with equal or higher role.')
+    // Check permissions across all platforms
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot shadow ban user with equal or higher role.')
+      }
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_banned: false, // Shadow ban is separate from regular ban
-        user_shadow_banned: true,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'shadow_ban'
-      })
-      .eq('user_id', targetUserId)
-
-    if (error) throw error
+    // Shadow ban user across all platforms using helper function
+    for (const user of targetUsers) {
+      await supabase
+        .rpc('ban_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: targetUserId,
+          p_ban_reason: reason,
+          p_banned_by: moderatorId,
+          p_shadow_ban: true
+        })
+    }
 
     return createDiscordResponse(
       `👻 **User Shadow Banned**\n\n` +
@@ -190,20 +193,27 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
       return createErrorResponse('user_id is required.')
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_shadow_banned: false,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'unshadowban'
-      })
-      .eq('user_id', targetUserId)
+    // Get target users from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type')
+      .eq('commentum_user_id', targetUserId)
 
-    if (error) throw error
+    if (!targetUsers || targetUsers.length === 0) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    // Remove shadow ban across all platforms
+    for (const user of targetUsers) {
+      await supabase
+        .from('commentum_users')
+        .update({
+          commentum_user_shadow_banned: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('commentum_client_type', user.commentum_client_type)
+        .eq('commentum_user_id', targetUserId)
+    }
 
     return createDiscordResponse(
       `👻 **Shadow Ban Removed**\n\n` +
@@ -240,20 +250,21 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       return createErrorResponse('Role must be moderator, admin, or super_admin.')
     }
 
-    // Get target user's current role
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current role from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
-    // Check permissions
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot promote user with equal or higher role.')
+    // Check permissions across all platforms
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot promote user with equal or higher role.')
+      }
     }
 
     // Update config to add user to new role
@@ -281,20 +292,17 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
 
     if (updateError) throw updateError
 
-    // Update user's comments to reflect new role
-    const { error: commentError } = await supabase
-      .from('comments')
-      .update({
-        user_role: newRole,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'promote'
-      })
-      .eq('user_id', targetUserId)
-
-    if (commentError) throw commentError
+    // Update user's role in commentum_users table
+    for (const user of targetUsers) {
+      await supabase
+        .from('commentum_users')
+        .update({
+          commentum_user_role: newRole,
+          updated_at: new Date().toISOString()
+        })
+        .eq('commentum_client_type', user.commentum_client_type)
+        .eq('commentum_user_id', targetUserId)
+    }
 
     // Update Discord user registration if exists
     await supabase
@@ -307,7 +315,7 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       targetUserId,
       `<@${moderatorId}>`,
       reason,
-      `From ${targetUserComment.user_role} to ${newRole}`
+      `From ${targetUsers[0].commentum_user_role} to ${newRole}`
     )
 
   } catch (error) {
@@ -336,20 +344,21 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       return createErrorResponse('Role must be user, moderator, or admin.')
     }
 
-    // Get target user's current role
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current role from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
-    // Check permissions
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot demote user with equal or higher role.')
+    // Check permissions across all platforms
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot demote user with equal or higher role.')
+      }
     }
 
     // Remove from all role lists
@@ -377,20 +386,17 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       if (updateError) throw updateError
     }
 
-    // Update user's comments to reflect new role
-    const { error: commentError } = await supabase
-      .from('comments')
-      .update({
-        user_role: newRole,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'demote'
-      })
-      .eq('user_id', targetUserId)
-
-    if (commentError) throw commentError
+    // Update user's role in commentum_users table
+    for (const user of targetUsers) {
+      await supabase
+        .from('commentum_users')
+        .update({
+          commentum_user_role: newRole,
+          updated_at: new Date().toISOString()
+        })
+        .eq('commentum_client_type', user.commentum_client_type)
+        .eq('commentum_user_id', targetUserId)
+    }
 
     // Update Discord user registration if exists
     await supabase
@@ -402,7 +408,7 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       `⬇️ **User Demoted**\n\n` +
       `👤 **User:** ${targetUserId}\n` +
       `🎭 **New Role:** ${newRole}\n` +
-      `⬇️ **Previous Role:** ${targetUserComment.user_role}\n` +
+      `⬇️ **Previous Role:** ${targetUsers[0].commentum_user_role}\n` +
       `🛡️ **Demoted by:** <@${moderatorId}>\n` +
       `📝 **Reason:** ${reason}\n` +
       `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
