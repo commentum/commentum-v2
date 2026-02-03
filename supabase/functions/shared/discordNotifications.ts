@@ -273,7 +273,6 @@ async function sendToWebhook(webhookUrl: string, embedData: any, notificationTyp
       },
       body: JSON.stringify({
         username: 'Commentum Bot',
-        avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png', // Commentum logo
         embeds: [embedData]
       })
     })
@@ -317,465 +316,387 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'comment_created':
       return {
         ...baseEmbed,
-        title: '💬 New Comment Posted',
+        title: 'New Comment Posted',
         description: `A new comment was posted by **${data.comment?.username}**`,
         color: 0x00FF00, // Green
         fields: [
           {
-            name: '📝 Comment Details',
-            value: `**ID:** ${data.comment?.id}\n**Content:** ${data.comment?.content || 'No content'}`,
-            inline: false
-          },
-          {
-            name: '👤 User Info',
+            name: 'User Info',
             value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
             inline: true
           },
           {
-            name: '🎬 Media Info',
+            name: 'Media Info',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
+          },
+          {
+            name: 'Comment Details',
+            value: `**ID:** ${data.comment?.id}\n**Content:** ${data.comment?.content || 'No content'}`,
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'comment_updated':
       return {
         ...baseEmbed,
-        title: '✏️ Comment Edited',
+        title: 'Comment Edited',
         description: `Comment **${data.comment?.id}** was edited by **${data.comment?.username}**`,
         color: 0x9B59B6, // Purple
         fields: [
           {
-            name: '📝 Updated Content',
-            value: `**ID:** ${data.comment?.id}\n**New Content:** ${data.comment?.content || 'No content'}`,
-            inline: false
-          },
-          {
-            name: '👤 User Info',
+            name: 'User Info',
             value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
             inline: true
           },
           {
-            name: '🎬 Media Info',
+            name: 'Media Info',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
+          },
+          {
+            name: 'Updated Content',
+            value: `**ID:** ${data.comment?.id}\n**New Content:** ${data.comment?.content || 'No content'}`,
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'comment_deleted':
       return {
         ...baseEmbed,
-        title: '🗑️ Comment Deleted',
+        title: 'Comment Deleted',
         description: `Comment **${data.comment?.id}** was deleted by **${data.moderator?.username || data.comment?.username}**`,
         color: 0xFF0000, // Red
         fields: [
           {
-            name: '📝 Deleted Comment',
-            value: `**ID:** ${data.comment?.id}\n**Original Content:** ${data.comment?.content || 'No content'}`,
-            inline: false
-          },
-          {
-            name: '👤 User Info',
+            name: 'User Info',
             value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
             inline: true
           },
           {
-            name: '🎬 Media Info',
+            name: 'Media Info',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
           },
           {
-            name: '🔨 Deleted By',
+            name: 'Deleted By',
             value: data.moderator?.username || 'Original Author',
             inline: true
+          },
+          {
+            name: 'Deleted Comment',
+            value: `**ID:** ${data.comment?.id}\n**Original Content:** ${data.comment?.content || 'No content'}`,
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'vote_cast':
       return {
         ...baseEmbed,
-        title: `🗳️ ${data.voteType === 'upvote' ? '⬆️ Upvote' : '⬇️ Downvote'} Cast`,
+        title: `${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} Cast`,
         description: `**${data.user?.username}** cast a ${data.voteType} on comment **${data.comment?.id}**`,
         color: 0xFFA500, // Orange
         fields: [
           {
-            name: '📊 Vote Details',
-            value: `**Vote Type:** ${data.voteType === 'upvote' ? '⬆️ Upvote' : '⬇️ Downvote'}\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
+            name: 'Vote Details',
+            value: `**Vote Type:** ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'}\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
             inline: true
           },
           {
-            name: '👤 Voter Info',
+            name: 'Voter Info',
             value: `**ID:** ${data.user?.id} (${data.user?.username})`,
             inline: true
           },
           {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
           },
           {
-            name: '📝 Comment Content',
+            name: 'Comment Content',
             value: data.comment?.content || 'No content',
             inline: false
           }
-        ],
-        thumbnail: {
-          url: data.user?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'vote_removed':
       return {
         ...baseEmbed,
-        title: '🗳️ Vote Removed',
+        title: 'Vote Removed',
         description: `**${data.user?.username}** removed their vote from comment **${data.comment?.id}**`,
         color: 0xFFA500, // Orange
         fields: [
           {
-            name: '📊 Vote Details',
+            name: 'Vote Details',
             value: `**Action:** Vote Removed\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
             inline: true
           },
           {
-            name: '👤 User Info',
+            name: 'User Info',
             value: `**ID:** ${data.user?.id} (${data.user?.username})`,
             inline: true
           },
           {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
           }
-        ],
-        thumbnail: {
-          url: data.user?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'report_filed':
       return {
         ...baseEmbed,
-        title: '🚨 Comment Reported',
+        title: 'Comment Reported',
         description: `Comment **${data.comment?.id}** was reported by **${data.user?.username}**`,
         color: 0xFF8C00, // Dark Orange
         fields: [
           {
-            name: '🚨 Report Details',
+            name: 'Report Details',
             value: `**Reason:** ${data.reportReason}\n**Comment ID:** ${data.comment?.id}\n**Reported By:** ${data.user?.username}`,
             inline: false
           },
           {
-            name: '📝 Reported Comment',
-            value: data.comment?.content || 'No content',
-            inline: false
-          },
-          {
-            name: '👤 Comment Author',
+            name: 'Comment Author',
             value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
             inline: true
           },
           {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
+          },
+          {
+            name: 'Reported Comment',
+            value: data.comment?.content || 'No content',
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.user?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'user_banned':
       return {
         ...baseEmbed,
-        title: '🔨 User Banned',
+        title: 'User Banned',
         description: `**${data.comment?.username}** has been banned from the system`,
         color: 0x8B0000, // Dark Red
         fields: [
           {
-            name: '🔨 Ban Details',
+            name: 'Ban Details',
             value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
-            name: '⚖️ Client Type',
+            name: 'Client Type',
             value: data.comment?.client_type || 'Unknown',
             inline: true
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        }
+        ]
       }
 
     case 'user_warned':
       return {
         ...baseEmbed,
-        title: '⚠️ User Warned',
+        title: 'User Warned',
         description: `**${data.comment?.username}** has received a warning`,
         color: 0xFFD700, // Gold
         fields: [
           {
-            name: '⚠️ Warning Details',
+            name: 'Warning Details',
             value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Warned By:** ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
-            name: '⚖️ Client Type',
+            name: 'Client Type',
             value: data.comment?.client_type || 'Unknown',
             inline: true
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        }
+        ]
       }
 
     case 'user_muted':
       return {
         ...baseEmbed,
-        title: '🔇 User Muted',
+        title: 'User Muted',
         description: `**${data.comment?.username}** has been muted`,
         color: 0x808080, // Gray
         fields: [
           {
-            name: '🔇 Mute Details',
+            name: 'Mute Details',
             value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Muted By:** ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
-            name: '⚖️ Client Type',
+            name: 'Client Type',
             value: data.comment?.client_type || 'Unknown',
             inline: true
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        }
+        ]
       }
 
     case 'user_shadow_banned':
       return {
         ...baseEmbed,
-        title: '👤 User Shadow Banned',
+        title: 'User Shadow Banned',
         description: `**${data.comment?.username}** has been shadow banned`,
         color: 0x4B0082, // Indigo
         fields: [
           {
-            name: '👤 Shadow Ban Details',
+            name: 'Shadow Ban Details',
             value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
-            name: '⚖️ Client Type',
+            name: 'Client Type',
             value: data.comment?.client_type || 'Unknown',
             inline: true
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        }
+        ]
       }
 
     case 'comment_pinned':
       return {
         ...baseEmbed,
-        title: '📌 Comment Pinned',
+        title: 'Comment Pinned',
         description: `Comment **${data.comment?.id}** has been pinned by **${data.moderator?.username}**`,
         color: 0x00BFFF, // Deep Sky Blue
         fields: [
           {
-            name: '📌 Pin Details',
+            name: 'Pin Details',
             value: `**Comment ID:** ${data.comment?.id}\n**Pinned By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
             inline: false
           },
           {
-            name: '📝 Pinned Comment',
-            value: data.comment?.content || 'No content',
-            inline: false
-          },
-          {
-            name: '👤 Comment Author',
+            name: 'Comment Author',
             value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
             inline: true
           },
           {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
+          },
+          {
+            name: 'Pinned Comment',
+            value: data.comment?.content || 'No content',
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'comment_locked':
       return {
         ...baseEmbed,
-        title: '🔒 Comment Thread Locked',
+        title: 'Comment Thread Locked',
         description: `Comment **${data.comment?.id}** thread has been locked by **${data.moderator?.username}**`,
         color: 0x8B4513, // Saddle Brown
         fields: [
           {
-            name: '🔒 Lock Details',
+            name: 'Lock Details',
             value: `**Comment ID:** ${data.comment?.id}\n**Locked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
             inline: false
           },
           {
-            name: '📝 Locked Comment',
-            value: data.comment?.content || 'No content',
-            inline: false
-          },
-          {
-            name: '👤 Comment Author',
+            name: 'Comment Author',
             value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
             inline: true
           },
           {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
+          },
+          {
+            name: 'Locked Comment',
+            value: data.comment?.content || 'No content',
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'comment_unlocked':
       return {
         ...baseEmbed,
-        title: '🔓 Comment Thread Unlocked',
+        title: 'Comment Thread Unlocked',
         description: `Comment **${data.comment?.id}** thread has been unlocked by **${data.moderator?.username}**`,
         color: 0x32CD32, // Lime Green
         fields: [
           {
-            name: '🔓 Unlock Details',
+            name: 'Unlock Details',
             value: `**Comment ID:** ${data.comment?.id}\n**Unlocked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
             inline: false
           },
           {
-            name: '👤 Comment Author',
+            name: 'Comment Author',
             value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
             inline: true
           },
           {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
           }
-        ],
-        thumbnail: {
-          url: data.comment?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'report_resolved':
       return {
         ...baseEmbed,
-        title: '✅ Report Resolved',
+        title: 'Report Resolved',
         description: `Report for comment **${data.comment?.id}** has been resolved by **${data.moderator?.username}**`,
         color: 0x00FA9A, // Medium Spring Green
         fields: [
           {
-            name: '✅ Resolution Details',
+            name: 'Resolution Details',
             value: `**Comment ID:** ${data.comment?.id}\n**Resolved By:** ${data.moderator?.username}\n**Resolution:** Approved`,
             inline: false
           },
           {
-            name: '📝 Comment Context',
-            value: data.comment?.content || 'No content',
-            inline: false
-          },
-          {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
+          },
+          {
+            name: 'Comment Context',
+            value: data.comment?.content || 'No content',
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.moderator?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     case 'report_dismissed':
       return {
         ...baseEmbed,
-        title: '❌ Report Dismissed',
+        title: 'Report Dismissed',
         description: `Report for comment **${data.comment?.id}** has been dismissed by **${data.moderator?.username}**`,
         color: 0xDC143C, // Crimson
         fields: [
           {
-            name: '❌ Dismissal Details',
+            name: 'Dismissal Details',
             value: `**Comment ID:** ${data.comment?.id}\n**Dismissed By:** ${data.moderator?.username}\n**Resolution:** Dismissed`,
             inline: false
           },
           {
-            name: '📝 Comment Context',
-            value: data.comment?.content || 'No content',
-            inline: false
-          },
-          {
-            name: '🎬 Media Context',
+            name: 'Media Context',
             value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
             inline: true
+          },
+          {
+            name: 'Comment Context',
+            value: data.comment?.content || 'No content',
+            inline: false
           }
-        ],
-        thumbnail: {
-          url: data.moderator?.avatar || 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-        },
-        image: {
-          url: data.media?.poster || null
-        }
+        ]
       }
 
     default:
       return {
         ...baseEmbed,
-        title: '📢 System Notification',
+        title: 'System Notification',
         description: `A system event occurred: ${data.type}`,
         color: 0x808080, // Gray
         fields: [
