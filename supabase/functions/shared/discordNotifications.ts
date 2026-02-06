@@ -273,6 +273,7 @@ async function sendToWebhook(webhookUrl: string, embedData: any, notificationTyp
       },
       body: JSON.stringify({
         username: 'Commentum Bot',
+        avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png',
         embeds: [embedData]
       })
     })
