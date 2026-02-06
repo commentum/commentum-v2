@@ -237,7 +237,7 @@ async function handleCreateReport(supabase: any, params: any) {
     },
     user: {
       id: reporter_id,
-      username: `User ${reporter_id}` // We don't have reporter username without API call
+      username: `User ${reporter_id}`
     },
     media: {
       id: comment.media_id,

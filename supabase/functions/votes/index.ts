@@ -170,10 +170,10 @@ serve(async (req) => {
       if (!mediaInfo) {
         mediaInfo = {
           id: comment.media_id,
-          type: 'unknown',
-          title: `Media ID: ${comment.media_id}`,
-          year: null,
-          poster: null
+          type: comment.media_type,
+          title: comment.media_title,
+          year: comment.media_year,
+          poster: comment.media_poster
         }
       }
     }
