@@ -316,24 +316,22 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'comment_created':
       return {
         ...baseEmbed,
-        title: 'New Comment Posted',
-        description: `A new comment was posted by **${data.comment?.username}**`,
+        title: `New Comment (ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0x00FF00, // Green
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'User Info',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            name: 'User',
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}\n**Client:** ${data.comment?.client_type}`,
             inline: true
           },
           {
-            name: 'Media Info',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            name: 'Media',
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
             inline: true
-          },
-          {
-            name: 'Comment Details',
-            value: `**ID:** ${data.comment?.id}\n**Content:** ${data.comment?.content || 'No content'}`,
-            inline: false
           }
         ]
       }
@@ -341,24 +339,22 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'comment_updated':
       return {
         ...baseEmbed,
-        title: 'Comment Edited',
-        description: `Comment **${data.comment?.id}** was edited by **${data.comment?.username}**`,
+        title: `Comment Updated (ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0x9B59B6, // Purple
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'User Info',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            name: 'User',
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}\n**Client:** ${data.comment?.client_type}`,
             inline: true
           },
           {
-            name: 'Media Info',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            name: 'Media',
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
             inline: true
-          },
-          {
-            name: 'Updated Content',
-            value: `**ID:** ${data.comment?.id}\n**New Content:** ${data.comment?.content || 'No content'}`,
-            inline: false
           }
         ]
       }
@@ -366,28 +362,26 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'comment_deleted':
       return {
         ...baseEmbed,
-        title: 'Comment Deleted',
-        description: `Comment **${data.comment?.id}** was deleted by **${data.moderator?.username || data.comment?.username}**`,
+        title: `Comment Deleted (ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0xFF0000, // Red
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'User Info',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            name: 'User',
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}\n**Client:** ${data.comment?.client_type}`,
             inline: true
           },
           {
-            name: 'Media Info',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            name: 'Media',
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
             inline: true
           },
           {
             name: 'Deleted By',
             value: data.moderator?.username || 'Original Author',
-            inline: true
-          },
-          {
-            name: 'Deleted Comment',
-            value: `**ID:** ${data.comment?.id}\n**Original Content:** ${data.comment?.content || 'No content'}`,
             inline: false
           }
         ]
@@ -397,27 +391,15 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: `${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} Cast`,
-        description: `**${data.user?.username}** cast a ${data.voteType} on comment **${data.comment?.id}**`,
+        description: `**${data.user?.username}** voted on comment **${data.comment?.id}**`,
         color: 0xFFA500, // Orange
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
             name: 'Vote Details',
-            value: `**Vote Type:** ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'}\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
-            inline: true
-          },
-          {
-            name: 'Voter Info',
-            value: `**ID:** ${data.user?.id} (${data.user?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
-            inline: true
-          },
-          {
-            name: 'Comment Content',
-            value: data.comment?.content || 'No content',
+            value: `**User:** ${data.user?.username} (${data.user?.id})\n**Comment:** ${data.comment?.id}\n**Score:** ${data.voteScore || 0}\n**Media:** ${data.media?.title || 'Unknown'}`,
             inline: false
           }
         ]
@@ -427,23 +409,16 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Vote Removed',
-        description: `**${data.user?.username}** removed their vote from comment **${data.comment?.id}**`,
+        description: `**${data.user?.username}** removed vote from comment **${data.comment?.id}**`,
         color: 0xFFA500, // Orange
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
             name: 'Vote Details',
-            value: `**Action:** Vote Removed\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
-            inline: true
-          },
-          {
-            name: 'User Info',
-            value: `**ID:** ${data.user?.id} (${data.user?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
-            inline: true
+            value: `**User:** ${data.user?.username} (${data.user?.id})\n**Comment:** ${data.comment?.id}\n**New Score:** ${data.voteScore || 0}\n**Media:** ${data.media?.title || 'Unknown'}`,
+            inline: false
           }
         ]
       }
@@ -451,28 +426,31 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'report_filed':
       return {
         ...baseEmbed,
-        title: 'Comment Reported',
-        description: `Comment **${data.comment?.id}** was reported by **${data.user?.username}**`,
+        title: `Comment Reported (ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0xFF8C00, // Dark Orange
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Report Details',
-            value: `**Reason:** ${data.reportReason}\n**Comment ID:** ${data.comment?.id}\n**Reported By:** ${data.user?.username}`,
-            inline: false
+            name: 'Reporter',
+            value: `**ID:** \`${data.user?.id}\`\n**Name:** ${data.user?.username}`,
+            inline: true
           },
           {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
             inline: true
           },
           {
-            name: 'Reported Comment',
-            value: data.comment?.content || 'No content',
+            name: 'Report Reason',
+            value: `**${data.reportReason}**`,
             inline: false
           }
         ]
@@ -481,18 +459,21 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'user_banned':
       return {
         ...baseEmbed,
-        title: 'User Banned',
-        description: `**${data.comment?.username}** has been banned from the system`,
+        title: `User Banned (ID: ${data.user?.id})`,
+        description: `**${data.user?.username}** has been permanently banned`,
         color: 0x8B0000, // Dark Red
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Ban Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
-            inline: false
+            name: 'Banned User',
+            value: `**ID:** \`${data.user?.id}\`\n**Name:** ${data.user?.username}`,
+            inline: true
           },
           {
-            name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            name: 'Action Details',
+            value: `**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}\n**Client:** ${data.comment?.client_type || 'Unknown'}`,
             inline: true
           }
         ]
@@ -501,18 +482,21 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'user_warned':
       return {
         ...baseEmbed,
-        title: 'User Warned',
-        description: `**${data.comment?.username}** has received a warning`,
+        title: `User Warned (ID: ${data.user?.id})`,
+        description: `**${data.user?.username}** has received a warning`,
         color: 0xFFD700, // Gold
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Warning Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Warned By:** ${data.moderator?.username || 'System'}`,
-            inline: false
+            name: 'Warned User',
+            value: `**ID:** \`${data.user?.id}\`\n**Name:** ${data.user?.username}`,
+            inline: true
           },
           {
-            name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            name: 'Action Details',
+            value: `**Reason:** ${data.reason}\n**Warned By:** ${data.moderator?.username || 'System'}\n**Client:** ${data.comment?.client_type || 'Unknown'}`,
             inline: true
           }
         ]
@@ -521,18 +505,21 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'user_muted':
       return {
         ...baseEmbed,
-        title: 'User Muted',
-        description: `**${data.comment?.username}** has been muted`,
+        title: `User Muted (ID: ${data.user?.id})`,
+        description: `**${data.user?.username}** has been muted`,
         color: 0x808080, // Gray
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Mute Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Muted By:** ${data.moderator?.username || 'System'}`,
-            inline: false
+            name: 'Muted User',
+            value: `**ID:** \`${data.user?.id}\`\n**Name:** ${data.user?.username}`,
+            inline: true
           },
           {
-            name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            name: 'Action Details',
+            value: `**Reason:** ${data.reason}\n**Muted By:** ${data.moderator?.username || 'System'}\n**Client:** ${data.comment?.client_type || 'Unknown'}`,
             inline: true
           }
         ]
@@ -541,18 +528,21 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'user_shadow_banned':
       return {
         ...baseEmbed,
-        title: 'User Shadow Banned',
-        description: `**${data.comment?.username}** has been shadow banned`,
+        title: `User Shadow Banned (ID: ${data.user?.id})`,
+        description: `**${data.user?.username}** has been shadow banned`,
         color: 0x4B0082, // Indigo
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Shadow Ban Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
-            inline: false
+            name: 'Shadow Banned User',
+            value: `**ID:** \`${data.user?.id}\`\n**Name:** ${data.user?.username}`,
+            inline: true
           },
           {
-            name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            name: 'Action Details',
+            value: `**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}\n**Client:** ${data.comment?.client_type || 'Unknown'}`,
             inline: true
           }
         ]
@@ -561,28 +551,26 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'comment_pinned':
       return {
         ...baseEmbed,
-        title: 'Comment Pinned',
-        description: `Comment **${data.comment?.id}** has been pinned by **${data.moderator?.username}**`,
+        title: `Comment Pinned (ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0x00BFFF, // Deep Sky Blue
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Pin Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Pinned By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
-            inline: false
-          },
-          {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
             inline: true
           },
           {
-            name: 'Pinned Comment',
-            value: data.comment?.content || 'No content',
+            name: 'Pin Details',
+            value: `**Pinned By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
             inline: false
           }
         ]
@@ -591,28 +579,26 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'comment_locked':
       return {
         ...baseEmbed,
-        title: 'Comment Thread Locked',
-        description: `Comment **${data.comment?.id}** thread has been locked by **${data.moderator?.username}**`,
+        title: `Comment Locked (ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0x8B4513, // Saddle Brown
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Lock Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Locked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
-            inline: false
-          },
-          {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
             inline: true
           },
           {
-            name: 'Locked Comment',
-            value: data.comment?.content || 'No content',
+            name: 'Lock Details',
+            value: `**Locked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
             inline: false
           }
         ]
@@ -621,24 +607,27 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'comment_unlocked':
       return {
         ...baseEmbed,
-        title: 'Comment Thread Unlocked',
-        description: `Comment **${data.comment?.id}** thread has been unlocked by **${data.moderator?.username}**`,
+        title: `Comment Unlocked (ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0x32CD32, // Lime Green
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Unlock Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Unlocked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
-            inline: false
-          },
-          {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
             inline: true
+          },
+          {
+            name: 'Unlock Details',
+            value: `**Unlocked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
+            inline: false
           }
         ]
       }
@@ -646,23 +635,26 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'report_resolved':
       return {
         ...baseEmbed,
-        title: 'Report Resolved',
-        description: `Report for comment **${data.comment?.id}** has been resolved by **${data.moderator?.username}**`,
+        title: `Report Resolved (Comment ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0x00FA9A, // Medium Spring Green
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Resolution Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Resolved By:** ${data.moderator?.username}\n**Resolution:** Approved`,
-            inline: false
-          },
-          {
-            name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            name: 'Comment Author',
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}`,
             inline: true
           },
           {
-            name: 'Comment Context',
-            value: data.comment?.content || 'No content',
+            name: 'Media Context',
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
+            inline: true
+          },
+          {
+            name: 'Resolution Details',
+            value: `**Resolved By:** ${data.moderator?.username}\n**Resolution:** Approved`,
             inline: false
           }
         ]
@@ -671,23 +663,26 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
     case 'report_dismissed':
       return {
         ...baseEmbed,
-        title: 'Report Dismissed',
-        description: `Report for comment **${data.comment?.id}** has been dismissed by **${data.moderator?.username}**`,
+        title: `Report Dismissed (Comment ID: ${data.comment?.id})`,
+        description: `**${data.comment?.content || 'No content'}**`,
         color: 0xDC143C, // Crimson
+        thumbnail: {
+          url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
+        },
         fields: [
           {
-            name: 'Dismissal Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Dismissed By:** ${data.moderator?.username}\n**Resolution:** Dismissed`,
-            inline: false
-          },
-          {
-            name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            name: 'Comment Author',
+            value: `**ID:** \`${data.comment?.user_id}\`\n**Name:** ${data.comment?.username}`,
             inline: true
           },
           {
-            name: 'Comment Context',
-            value: data.comment?.content || 'No content',
+            name: 'Media Context',
+            value: `**ID:** \`${data.comment?.media_id}\`\n**Type:** ${data.media?.type || 'media'}\n**Title:** ${data.media?.title || 'Unknown Media'}`,
+            inline: true
+          },
+          {
+            name: 'Dismissal Details',
+            value: `**Dismissed By:** ${data.moderator?.username}\n**Resolution:** Dismissed`,
             inline: false
           }
         ]
