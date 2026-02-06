@@ -466,6 +466,9 @@ async function handleWarnUser(supabase: any, params: any) {
       id: target_user_id,
       username: `User ${target_user_id}`
     },
+    comment: {
+      client_type: targetUsers[0]?.commentum_client_type
+    },
     moderator: {
       id: moderator_id,
       username: `Moderator ${moderator_id}`
@@ -536,10 +539,13 @@ async function handleBanUser(supabase: any, params: any) {
 
   // Queue Discord notification for user ban in background - NON-BLOCKING
   queueDiscordNotification({
-    type: 'user_banned',
+    type: shadow_ban ? 'user_shadow_banned' : 'user_banned',
     user: {
       id: target_user_id,
       username: `User ${target_user_id}`
+    },
+    comment: {
+      client_type: targetUsers[0]?.commentum_client_type
     },
     moderator: {
       id: moderator_id,

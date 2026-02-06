@@ -447,10 +447,17 @@ async function handleEditComment(supabase: any, params: any) {
       client_type: updatedComment.client_type,
       media_id: updatedComment.media_id
     },
+    user: {
+      id: updatedComment.user_id,
+      username: updatedComment.username,
+      avatar: updatedComment.user_avatar
+    },
     media: {
       id: updatedComment.media_id,
       title: updatedComment.media_title,
-      type: updatedComment.media_type
+      type: updatedComment.media_type,
+      year: updatedComment.media_year,
+      poster: updatedComment.media_poster
     }
   })
 
@@ -507,7 +514,7 @@ async function handleDeleteComment(supabase: any, params: any) {
   if (error) throw error
 
   const moderator = comment.user_id !== user_id ? {
-      username: user_id,
+      username: `User ${user_id}`,
       id: user_id
     } : null
 
@@ -523,10 +530,17 @@ async function handleDeleteComment(supabase: any, params: any) {
         media_id: deletedComment.media_id
       },
       moderator,
+      user: {
+        id: deletedComment.user_id,
+        username: deletedComment.username,
+        avatar: deletedComment.user_avatar
+      },
       media: {
         id: deletedComment.media_id,
         title: deletedComment.media_title,
-        type: deletedComment.media_type
+        type: deletedComment.media_type,
+        year: deletedComment.media_year,
+        poster: deletedComment.media_poster
       }
     })
 

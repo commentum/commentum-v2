@@ -322,17 +322,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
         fields: [
           {
             name: 'User Info',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})\nClient: ${data.comment?.client_type}`,
             inline: true
           },
           {
             name: 'Media Info',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
             name: 'Comment Details',
-            value: `**ID:** ${data.comment?.id}\n**Content:** ${data.comment?.content || 'No content'}`,
+            value: `ID: \`${data.comment?.id}\`\nContent: ${data.comment?.content}`,
             inline: false
           }
         ]
@@ -342,22 +342,22 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Comment Edited',
-        description: `Comment **${data.comment?.id}** was edited by **${data.comment?.username}**`,
+        description: `Comment \`${data.comment?.id}\` was edited by **${data.comment?.username}**`,
         color: 0x9B59B6, // Purple
         fields: [
           {
             name: 'User Info',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})\nClient: ${data.comment?.client_type}`,
             inline: true
           },
           {
             name: 'Media Info',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
             name: 'Updated Content',
-            value: `**ID:** ${data.comment?.id}\n**New Content:** ${data.comment?.content || 'No content'}`,
+            value: `ID: \`${data.comment?.id}\`\nNew Content: ${data.comment?.content}`,
             inline: false
           }
         ]
@@ -367,17 +367,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Comment Deleted',
-        description: `Comment **${data.comment?.id}** was deleted by **${data.moderator?.username || data.comment?.username}**`,
+        description: `Comment \`${data.comment?.id}\` was deleted by **${data.moderator?.username || data.comment?.username}**`,
         color: 0xFF0000, // Red
         fields: [
           {
             name: 'User Info',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})\n**Client:** ${data.comment?.client_type}`,
+            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})\nClient: ${data.comment?.client_type}`,
             inline: true
           },
           {
             name: 'Media Info',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
@@ -387,7 +387,7 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
           },
           {
             name: 'Deleted Comment',
-            value: `**ID:** ${data.comment?.id}\n**Original Content:** ${data.comment?.content || 'No content'}`,
+            value: `ID: \`${data.comment?.id}\`\nOriginal Content: ${data.comment?.content}`,
             inline: false
           }
         ]
@@ -397,27 +397,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: `${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} Cast`,
-        description: `**${data.user?.username}** cast a ${data.voteType} on comment **${data.comment?.id}**`,
+        description: `**${data.user?.username}** voted on comment \`${data.comment?.id}\``,
         color: 0xFFA500, // Orange
         fields: [
           {
             name: 'Vote Details',
-            value: `**Vote Type:** ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'}\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
+            value: `Type: ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} | Score: ${data.voteScore} (total)\nComment ID: \`${data.comment?.id}\` | Voter: \`${data.user?.id}\``,
             inline: true
           },
           {
-            name: 'Voter Info',
-            value: `**ID:** ${data.user?.id} (${data.user?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
-            inline: true
-          },
-          {
-            name: 'Comment Content',
-            value: data.comment?.content || 'No content',
+            name: 'Comment',
+            value: data.comment?.content,
             inline: false
           }
         ]
@@ -427,23 +417,18 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Vote Removed',
-        description: `**${data.user?.username}** removed their vote from comment **${data.comment?.id}**`,
+        description: `**${data.user?.username}** removed vote from comment \`${data.comment?.id}\``,
         color: 0xFFA500, // Orange
         fields: [
           {
             name: 'Vote Details',
-            value: `**Action:** Vote Removed\n**New Score:** ${data.voteScore || 0}\n**Comment ID:** ${data.comment?.id}`,
+            value: `New Score: ${data.voteScore}\nComment ID: \`${data.comment?.id}\`\nUser: \`${data.user?.id}\``,
             inline: true
           },
           {
-            name: 'User Info',
-            value: `**ID:** ${data.user?.id} (${data.user?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
-            inline: true
+            name: 'Comment',
+            value: data.comment?.content,
+            inline: false
           }
         ]
       }
@@ -452,27 +437,27 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Comment Reported',
-        description: `Comment **${data.comment?.id}** was reported by **${data.user?.username}**`,
+        description: `Comment \`${data.comment?.id}\` was reported by **${data.user?.username}**`,
         color: 0xFF8C00, // Dark Orange
         fields: [
           {
             name: 'Report Details',
-            value: `**Reason:** ${data.reportReason}\n**Comment ID:** ${data.comment?.id}\n**Reported By:** ${data.user?.username}`,
+            value: `Reason: ${data.reportReason}\nComment ID: \`${data.comment?.id}\`\nReported By: ${data.user?.username}`,
             inline: false
           },
           {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
             name: 'Reported Comment',
-            value: data.comment?.content || 'No content',
+            value: data.comment?.content,
             inline: false
           }
         ]
@@ -482,17 +467,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'User Banned',
-        description: `**${data.comment?.username}** has been banned from the system`,
+        description: `**${data.user?.username}** has been banned from the system`,
         color: 0x8B0000, // Dark Red
         fields: [
           {
             name: 'Ban Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
+            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nBanned By: ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
             name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            value: data.comment?.client_type,
             inline: true
           }
         ]
@@ -502,17 +487,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'User Warned',
-        description: `**${data.comment?.username}** has received a warning`,
+        description: `**${data.user?.username}** has received a warning`,
         color: 0xFFD700, // Gold
         fields: [
           {
             name: 'Warning Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Warned By:** ${data.moderator?.username || 'System'}`,
+            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nWarned By: ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
             name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            value: data.comment?.client_type,
             inline: true
           }
         ]
@@ -522,17 +507,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'User Muted',
-        description: `**${data.comment?.username}** has been muted`,
+        description: `**${data.user?.username}** has been muted`,
         color: 0x808080, // Gray
         fields: [
           {
             name: 'Mute Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Muted By:** ${data.moderator?.username || 'System'}`,
+            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nMuted By: ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
             name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            value: data.comment?.client_type,
             inline: true
           }
         ]
@@ -542,17 +527,17 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'User Shadow Banned',
-        description: `**${data.comment?.username}** has been shadow banned`,
+        description: `**${data.user?.username}** has been shadow banned`,
         color: 0x4B0082, // Indigo
         fields: [
           {
             name: 'Shadow Ban Details',
-            value: `**ID:** ${data.user?.id} (${data.comment?.username})\n**Reason:** ${data.reason}\n**Banned By:** ${data.moderator?.username || 'System'}`,
+            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nBanned By: ${data.moderator?.username || 'System'}`,
             inline: false
           },
           {
             name: 'Client Type',
-            value: data.comment?.client_type || 'Unknown',
+            value: data.comment?.client_type,
             inline: true
           }
         ]
@@ -562,27 +547,27 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Comment Pinned',
-        description: `Comment **${data.comment?.id}** has been pinned by **${data.moderator?.username}**`,
+        description: `Comment \`${data.comment?.id}\` has been pinned by **${data.moderator?.username}**`,
         color: 0x00BFFF, // Deep Sky Blue
         fields: [
           {
             name: 'Pin Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Pinned By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
+            value: `Comment ID: \`${data.comment?.id}\`\nPinned By: ${data.moderator?.username}\nReason: ${data.reason || 'No reason provided'}`,
             inline: false
           },
           {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
             name: 'Pinned Comment',
-            value: data.comment?.content || 'No content',
+            value: data.comment?.content,
             inline: false
           }
         ]
@@ -592,27 +577,27 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Comment Thread Locked',
-        description: `Comment **${data.comment?.id}** thread has been locked by **${data.moderator?.username}**`,
+        description: `Comment \`${data.comment?.id}\` thread has been locked by **${data.moderator?.username}**`,
         color: 0x8B4513, // Saddle Brown
         fields: [
           {
             name: 'Lock Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Locked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
+            value: `Comment ID: \`${data.comment?.id}\`\nLocked By: ${data.moderator?.username}\nReason: ${data.reason || 'No reason provided'}`,
             inline: false
           },
           {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
             name: 'Locked Comment',
-            value: data.comment?.content || 'No content',
+            value: data.comment?.content,
             inline: false
           }
         ]
@@ -622,22 +607,22 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Comment Thread Unlocked',
-        description: `Comment **${data.comment?.id}** thread has been unlocked by **${data.moderator?.username}**`,
+        description: `Comment \`${data.comment?.id}\` thread has been unlocked by **${data.moderator?.username}**`,
         color: 0x32CD32, // Lime Green
         fields: [
           {
             name: 'Unlock Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Unlocked By:** ${data.moderator?.username}\n**Reason:** ${data.reason || 'No reason provided'}`,
+            value: `Comment ID: \`${data.comment?.id}\`\nUnlocked By: ${data.moderator?.username}\nReason: ${data.reason || 'No reason provided'}`,
             inline: false
           },
           {
             name: 'Comment Author',
-            value: `**ID:** ${data.comment?.user_id} (${data.comment?.username})`,
+            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
             inline: true
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           }
         ]
@@ -647,22 +632,22 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Report Resolved',
-        description: `Report for comment **${data.comment?.id}** has been resolved by **${data.moderator?.username}**`,
+        description: `Report for comment \`${data.comment?.id}\` has been resolved by **${data.moderator?.username}**`,
         color: 0x00FA9A, // Medium Spring Green
         fields: [
           {
             name: 'Resolution Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Resolved By:** ${data.moderator?.username}\n**Resolution:** Approved`,
+            value: `Comment ID: \`${data.comment?.id}\`\nResolved By: ${data.moderator?.username}\nResolution: Approved`,
             inline: false
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
             name: 'Comment Context',
-            value: data.comment?.content || 'No content',
+            value: data.comment?.content,
             inline: false
           }
         ]
@@ -672,22 +657,22 @@ function createDiscordEmbed(data: DiscordNotificationData): any {
       return {
         ...baseEmbed,
         title: 'Report Dismissed',
-        description: `Report for comment **${data.comment?.id}** has been dismissed by **${data.moderator?.username}**`,
+        description: `Report for comment \`${data.comment?.id}\` has been dismissed by **${data.moderator?.username}**`,
         color: 0xDC143C, // Crimson
         fields: [
           {
             name: 'Dismissal Details',
-            value: `**Comment ID:** ${data.comment?.id}\n**Dismissed By:** ${data.moderator?.username}\n**Resolution:** Dismissed`,
+            value: `Comment ID: \`${data.comment?.id}\`\nDismissed By: ${data.moderator?.username}\nResolution: Dismissed`,
             inline: false
           },
           {
             name: 'Media Context',
-            value: `**ID:** ${data.comment?.media_id} (${data.media?.type || 'Unknown'}) (${data.media?.year || 'Unknown'})\n**Title:** ${data.media?.title || 'Unknown'}`,
+            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
             inline: true
           },
           {
             name: 'Comment Context',
-            value: data.comment?.content || 'No content',
+            value: data.comment?.content,
             inline: false
           }
         ]
