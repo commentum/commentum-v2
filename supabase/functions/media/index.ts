@@ -20,8 +20,10 @@ serve(async (req) => {
     const url = new URL(req.url)
     const media_id = url.searchParams.get('media_id')
     const client_type = url.searchParams.get('client_type')
-    const page = parseInt(url.searchParams.get('page') || '1')
-    const limit = parseInt(url.searchParams.get('limit') || '50')
+    
+    // No default values for page and limit
+    const pageParam = url.searchParams.get('page')
+    const limitParam = url.searchParams.get('limit')
     const sort = url.searchParams.get('sort') || 'newest'
 
     // Validate required parameters
@@ -32,24 +34,13 @@ serve(async (req) => {
       )
     }
 
-    // Build order by
-    let orderBy = { created_at: 'desc' }
-    switch (sort) {
-      case 'oldest':
-        orderBy = { created_at: 'asc' }
-        break
-      case 'top':
-        orderBy = { vote_score: 'desc' }
-        break
-      case 'controversial':
-        orderBy = { upvotes: 'desc' }
-        break
-    }
+    // Determine if pagination is requested
+    const usePagination = pageParam !== null || limitParam !== null
+    const page = parseInt(pageParam || '1')
+    const limit = parseInt(limitParam || '50')
 
-    const offset = (page - 1) * limit
-
-    // Get comments for this media
-    const { data: comments, error } = await supabase
+    // First, get all comments for this media (we need all to build proper nesting)
+    const { data: allComments, error: allError } = await supabase
       .from('comments')
       .select('*')
       .eq('media_id', media_id)
@@ -58,22 +49,57 @@ serve(async (req) => {
       .eq('user_banned', false)
       .eq('user_shadow_banned', false)
       .order('created_at', { ascending: sort === 'oldest' })
-      .range(offset, offset + limit - 1)
 
-    if (error) throw error
+    if (allError) throw allError
 
-    // Get total count
-    const { count } = await supabase
-      .from('comments')
-      .select('*', { count: 'exact', head: true })
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
-      .eq('deleted', false)
-      .eq('user_banned', false)
-      .eq('user_shadow_banned', false)
+    // Get top-level comments (parent_id is null)
+    const topLevelComments = (allComments || []).filter(c => c.parent_id === null)
+
+    // Get total count of top-level comments for pagination
+    const totalTopLevel = topLevelComments.length
+
+    // Apply pagination to top-level comments only
+    let paginatedTopLevel = topLevelComments
+    if (usePagination) {
+      const offset = (page - 1) * limit
+      paginatedTopLevel = topLevelComments.slice(offset, offset + limit)
+    }
+
+    // Get IDs of paginated top-level comments
+    const topLevelIds = new Set(paginatedTopLevel.map(c => c.id))
+
+    // Get all replies that belong to these top-level comments (recursively)
+    const allReplies = (allComments || []).filter(c => c.parent_id !== null)
+    
+    // Find all descendant replies for the paginated top-level comments
+    const replyMap = new Map<number, any[]>()
+    allReplies.forEach(reply => {
+      // Check if this reply's ancestor is in our paginated top-level set
+      let currentId: number | null = reply.parent_id
+      while (currentId !== null) {
+        if (topLevelIds.has(currentId)) {
+          if (!replyMap.has(currentId)) {
+            replyMap.set(currentId, [])
+          }
+          replyMap.get(currentId)!.push(reply)
+          break
+        }
+        const parent = allComments?.find(c => c.id === currentId)
+        currentId = parent?.parent_id || null
+      }
+    })
+
+    // Combine paginated top-level comments with their replies
+    const commentsToShow = [...paginatedTopLevel]
+    replyMap.forEach(replies => {
+      commentsToShow.push(...replies)
+    })
 
     // Build nested structure
-    const nestedComments = buildNestedStructure(comments || [])
+    const nestedComments = buildNestedStructure(commentsToShow)
+
+    // Stats: count all top-level comments
+    const count = totalTopLevel
 
     // Get media statistics
     const { data: stats } = await supabase
@@ -95,23 +121,29 @@ serve(async (req) => {
       mediaPoster: comments[0].media_poster
     } : null
 
+    // Build response - only include pagination if it was requested
+    const response: any = {
+      media: mediaInfo,
+      comments: nestedComments,
+      stats: {
+        commentCount: count || 0,
+        totalUpvotes,
+        totalDownvotes,
+        netScore: totalUpvotes - totalDownvotes
+      }
+    }
+
+    if (usePagination) {
+      response.pagination = {
+        page,
+        limit,
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit)
+      }
+    }
+
     return new Response(
-      JSON.stringify({
-        media: mediaInfo,
-        comments: nestedComments,
-        stats: {
-          commentCount: count || 0,
-          totalUpvotes,
-          totalDownvotes,
-          netScore: totalUpvotes - totalDownvotes
-        },
-        pagination: {
-          page,
-          limit,
-          total: count || 0,
-          totalPages: Math.ceil((count || 0) / limit)
-        }
-      }),
+      JSON.stringify(response),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
