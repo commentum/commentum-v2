@@ -334,8 +334,8 @@ CREATE TABLE config (
 | `system_enabled` | BOOLEAN | true | Master system toggle |
 | `voting_enabled` | BOOLEAN | true | Voting system toggle |
 | `reporting_enabled` | BOOLEAN | true | Reporting system toggle |
-| `discord_webhook_url` | STRING | "" | Discord webhook (single) |
-| `discord_webhook_urls` | JSON | [] | Discord webhooks (multiple) |
+| `discord_bot_token` | STRING | "" | Discord bot token for API access |
+| `discord_guild_id` | STRING | "" | Primary Discord guild ID |
 | `discord_notifications_enabled` | BOOLEAN | true | Discord notifications toggle |
 | `discord_notification_types` | JSON | [] | Enabled notification types |
 | `anilist_client_id` | STRING | "" | AniList API client ID |
@@ -428,8 +428,9 @@ CREATE TABLE discord_notifications (
     user_data TEXT,
     media_data TEXT,
     
-    -- Discord delivery info
-    webhook_url TEXT,
+    -- Discord delivery info (Bot API with Components V2)
+    guild_id TEXT,
+    channel_id TEXT,
     message_id TEXT,
     delivery_status TEXT DEFAULT 'pending',
     delivery_error TEXT,

@@ -574,8 +574,14 @@ async function handleGlobalCommandSync(): Promise<Response> {
           required: true
         },
         {
-          name: 'webhook_url',
-          description: 'Discord webhook URL',
+          name: 'channel_id',
+          description: 'Channel ID for comment notifications',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'moderation_channel_id',
+          description: 'Channel ID for moderation notifications',
           type: 3,
           required: false
         },
