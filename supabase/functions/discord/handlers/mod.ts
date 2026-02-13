@@ -2,10 +2,255 @@ import { handleAddCommand, handleRegisterCommand, handleStatsCommand, handleHelp
 import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand, handleQueueCommand } from './moderation.ts'
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
 
+// Discord interaction types
+const InteractionType = {
+  PING: 1,
+  APPLICATION_COMMAND: 2,
+  MESSAGE_COMPONENT: 3,  // Button clicks
+  APPLICATION_COMMAND_AUTOCOMPLETE: 4,
+  MODAL_SUBMIT: 5
+}
+
+// Handle button interactions from notification messages
+async function handleButtonInteraction(supabase: any, interaction: any): Promise<Response> {
+  const { data, member, user, message } = interaction
+  const customId = data?.custom_id
+  
+  if (!customId) {
+    return new Response(
+      JSON.stringify({ type: 4, data: { content: '❌ Invalid button interaction', flags: 64 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+  
+  const userId = user?.id || member?.user?.id
+  const username = user?.username || member?.user?.username || 'Unknown'
+  
+  // Get user registration
+  const { data: registration } = await supabase
+    .from('discord_users')
+    .select('*')
+    .eq('discord_user_id', userId)
+    .eq('is_active', true)
+    .single()
+  
+  const userRole = registration?.user_role || 'user'
+  
+  // Parse custom_id (format: action:id1:id2)
+  const parts = customId.split(':')
+  const action = parts[0]
+  const id1 = parts[1]
+  const id2 = parts[2]
+  
+  console.log(`Button clicked: ${customId} by ${username} (${userRole})`)
+  
+  try {
+    switch (action) {
+      case 'mod_delete': {
+        // mod_delete:commentId:userId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can delete comments.', true)
+        }
+        const commentId = id1
+        const { error } = await supabase
+          .from('comments')
+          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+          .eq('id', commentId)
+        if (error) throw error
+        return createButtonResponse(`✅ Comment \`${commentId}\` deleted successfully!`)
+      }
+      
+      case 'mod_warn': {
+        // mod_warn:userId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can warn users.', true)
+        }
+        const targetUserId = id1
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('*')
+          .eq('commentum_user_id', targetUserId)
+        if (!targetUsers || targetUsers.length === 0) {
+          return createButtonResponse('❌ User not found.', true)
+        }
+        for (const u of targetUsers) {
+          await supabase
+            .from('commentum_users')
+            .update({ commentum_user_warnings: (u.commentum_user_warnings || 0) + 1 })
+            .eq('commentum_client_type', u.commentum_client_type)
+            .eq('commentum_user_id', targetUserId)
+        }
+        return createButtonResponse(`⚠️ User \`${targetUserId}\` has been warned!`)
+      }
+      
+      case 'mod_mute': {
+        // mod_mute:userId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can mute users.', true)
+        }
+        const targetUserId = id1
+        const muteUntil = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+        const { error } = await supabase
+          .from('comments')
+          .update({ user_muted_until: muteUntil.toISOString() })
+          .eq('user_id', targetUserId)
+        return createButtonResponse(`🔇 User \`${targetUserId}\` muted for 24 hours!`)
+      }
+      
+      case 'mod_ban': {
+        // mod_ban:userId
+        if (!['admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only admins can ban users.', true)
+        }
+        const targetUserId = id1
+        const { error } = await supabase
+          .from('comments')
+          .update({ user_banned: true })
+          .eq('user_id', targetUserId)
+        if (error) throw error
+        return createButtonResponse(`🔨 User \`${targetUserId}\` has been banned!`)
+      }
+      
+      case 'mod_del_warn': {
+        // mod_del_warn:commentId:userId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can perform this action.', true)
+        }
+        const commentId = id1
+        const targetUserId = id2
+        // Delete comment
+        await supabase
+          .from('comments')
+          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+          .eq('id', commentId)
+        // Warn user
+        await supabase.rpc('increment_user_warnings', { p_user_id: targetUserId })
+        return createButtonResponse(`🗑️⚠️ Comment deleted and user \`${targetUserId}\` warned!`)
+      }
+      
+      case 'mod_del_ban': {
+        // mod_del_ban:commentId:userId
+        if (!['admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only admins can ban users.', true)
+        }
+        const commentId = id1
+        const targetUserId = id2
+        // Delete comment
+        await supabase
+          .from('comments')
+          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+          .eq('id', commentId)
+        // Ban user
+        await supabase
+          .from('comments')
+          .update({ user_banned: true })
+          .eq('user_id', targetUserId)
+        return createButtonResponse(`🗑️🔨 Comment deleted and user \`${targetUserId}\` banned!`)
+      }
+      
+      case 'report_approve': {
+        // report_approve:commentId:userId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can approve reports.', true)
+        }
+        const commentId = id1
+        const { error } = await supabase
+          .from('comments')
+          .update({ reported: false, report_status: 'resolved' })
+          .eq('id', commentId)
+        if (error) throw error
+        return createButtonResponse(`✅ Report for comment \`${commentId}\` approved!`)
+      }
+      
+      case 'report_dismiss': {
+        // report_dismiss:commentId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can dismiss reports.', true)
+        }
+        const commentId = id1
+        const { error } = await supabase
+          .from('comments')
+          .update({ reported: false, report_status: 'dismissed' })
+          .eq('id', commentId)
+        if (error) throw error
+        return createButtonResponse(`❌ Report for comment \`${commentId}\` dismissed!`)
+      }
+      
+      case 'mod_unpin': {
+        // mod_unpin:commentId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can unpin comments.', true)
+        }
+        const commentId = id1
+        const { error } = await supabase
+          .from('comments')
+          .update({ pinned: false, pinned_at: null, pinned_by: null })
+          .eq('id', commentId)
+        if (error) throw error
+        return createButtonResponse(`📍 Comment \`${commentId}\` unpinned!`)
+      }
+      
+      case 'mod_unlock': {
+        // mod_unlock:commentId
+        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+          return createButtonResponse('❌ Only moderators can unlock threads.', true)
+        }
+        const commentId = id1
+        const { error } = await supabase
+          .from('comments')
+          .update({ locked: false, locked_at: null, locked_by: null })
+          .eq('id', commentId)
+        if (error) throw error
+        return createButtonResponse(`🔓 Comment \`${commentId}\` unlocked!`)
+      }
+      
+      case 'mod_history': {
+        // mod_history:userId - just show info
+        const targetUserId = id1
+        const { data: userComments } = await supabase
+          .from('comments')
+          .select('id, content, created_at, deleted, user_banned')
+          .eq('user_id', targetUserId)
+          .order('created_at', { ascending: false })
+          .limit(5)
+        const history = userComments?.map((c: any) => 
+          `• \`${c.id}\`: ${c.content?.substring(0, 30) || 'N/A'}... ${c.deleted ? '🗑️' : ''}`
+        ).join('\n') || 'No comments found'
+        return createButtonResponse(`📋 **User History for \`${targetUserId}\`**\n\n${history}`)
+      }
+      
+      default:
+        return createButtonResponse(`❌ Unknown action: \`${action}\``, true)
+    }
+  } catch (error) {
+    console.error('Button interaction error:', error)
+    return createButtonResponse(`❌ Error: ${error.message}`, true)
+  }
+}
+
+// Helper to create button response
+function createButtonResponse(content: string, ephemeral: boolean = false): Response {
+  return new Response(
+    JSON.stringify({
+      type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
+      data: {
+        content,
+        flags: ephemeral ? 64 : 0
+      }
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }
+  )
+}
+
 export async function routeInteraction(supabase: any, interaction: any): Promise<Response> {
   const { data, guild_id, member, user } = interaction
 
-  // Only handle application command interactions
+  // Handle button clicks (type 3)
+  if (interaction.type === 3) {
+    return await handleButtonInteraction(supabase, interaction)
+  }
+
+  // Only handle application command interactions (type 2)
   if (interaction.type !== 2) {
     return new Response('Not a command interaction', { status: 400 })
   }
