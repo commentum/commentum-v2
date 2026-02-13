@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole, canModerate } from '../shared/auth.ts'
+import { verifyClientToken, VerifiedUser } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
@@ -19,24 +20,27 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, moderator_info, target_user_id, comment_id, reason, severity, duration, shadow_ban } = await req.json()
+    const { action, client_type, access_token, target_user_id, comment_id, reason, severity, duration, shadow_ban } = await req.json()
 
-    // All moderation actions require authentication (no token needed)
-    if (!moderator_info) {
+    // All moderation actions require client authentication
+    if (!client_type || !access_token) {
       return new Response(
-        JSON.stringify({ error: 'moderator_info is required for moderation actions' }),
+        JSON.stringify({ error: 'client_type and access_token are required for moderation actions' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Extract moderator_id from moderator_info
-    const moderator_id = moderator_info?.user_id
-    if (!moderator_id) {
+    // Verify the client token with the provider API
+    const verifiedUser = await verifyClientToken(client_type, access_token)
+    if (!verifiedUser) {
       return new Response(
-        JSON.stringify({ error: 'moderator_info.user_id is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Invalid or expired access token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
+
+    // Use provider_user_id as the moderator_id
+    const moderator_id = verifiedUser.provider_user_id
 
     // Validate comment_id if provided (must be integer)
     if (comment_id && (!Number.isInteger(comment_id) || comment_id <= 0)) {
@@ -46,7 +50,7 @@ serve(async (req) => {
       )
     }
 
-    // Verify admin access with user_id only
+    // Verify admin access with verified user_id
     const adminVerification = await verifyAdminAccess(supabase, moderator_id)
     if (!adminVerification.valid) {
       return new Response(
@@ -59,25 +63,25 @@ serve(async (req) => {
 
     switch (action) {
       case 'pin_comment':
-        return await handlePinComment(supabase, { comment_id, moderator_id, reason, moderatorRole })
+        return await handlePinComment(supabase, { comment_id, moderator_id, reason, moderatorRole, verifiedUser })
       
       case 'unpin_comment':
-        return await handleUnpinComment(supabase, { comment_id, moderator_id, reason })
+        return await handleUnpinComment(supabase, { comment_id, moderator_id, reason, verifiedUser })
       
       case 'lock_thread':
-        return await handleLockThread(supabase, { comment_id, moderator_id, reason })
+        return await handleLockThread(supabase, { comment_id, moderator_id, reason, moderatorRole, verifiedUser })
       
       case 'unlock_thread':
-        return await handleUnlockThread(supabase, { comment_id, moderator_id, reason })
+        return await handleUnlockThread(supabase, { comment_id, moderator_id, reason, verifiedUser })
       
       case 'warn_user':
-        return await handleWarnUser(supabase, { target_user_id, moderator_id, reason, severity, duration, moderatorRole })
+        return await handleWarnUser(supabase, { target_user_id, moderator_id, reason, severity, duration, moderatorRole, verifiedUser })
       
       case 'ban_user':
-        return await handleBanUser(supabase, { target_user_id, moderator_id, reason, shadow_ban, moderatorRole })
+        return await handleBanUser(supabase, { target_user_id, moderator_id, reason, shadow_ban, moderatorRole, verifiedUser })
       
       case 'unban_user':
-        return await handleUnbanUser(supabase, { target_user_id, moderator_id, reason, moderatorRole })
+        return await handleUnbanUser(supabase, { target_user_id, moderator_id, reason, moderatorRole, verifiedUser })
       
       case 'get_queue':
         return await handleGetModerationQueue(supabase)
@@ -99,7 +103,7 @@ serve(async (req) => {
 })
 
 async function handlePinComment(supabase: any, params: any) {
-  const { comment_id, moderator_id, reason, moderatorRole } = params
+  const { comment_id, moderator_id, reason, moderatorRole, verifiedUser } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -160,7 +164,7 @@ async function handlePinComment(supabase: any, params: any) {
     },
     moderator: {
       id: moderator_id,
-      username: `Moderator ${moderator_id}`
+      username: verifiedUser.username
     },
     media: {
       id: updatedComment.media_id,
@@ -176,14 +180,19 @@ async function handlePinComment(supabase: any, params: any) {
     JSON.stringify({
       success: true,
       comment: updatedComment,
-      action: 'pinned'
+      action: 'pinned',
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: moderatorRole
+      }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 async function handleUnpinComment(supabase: any, params: any) {
-  const { comment_id, moderator_id, reason } = params
+  const { comment_id, moderator_id, reason, verifiedUser } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -228,14 +237,18 @@ async function handleUnpinComment(supabase: any, params: any) {
     JSON.stringify({
       success: true,
       comment: updatedComment,
-      action: 'unpinned'
+      action: 'unpinned',
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username
+      }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 async function handleLockThread(supabase: any, params: any) {
-  const { comment_id, moderator_id, reason } = params
+  const { comment_id, moderator_id, reason, moderatorRole, verifiedUser } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -289,7 +302,7 @@ async function handleLockThread(supabase: any, params: any) {
     },
     moderator: {
       id: moderator_id,
-      username: `Moderator ${moderator_id}`
+      username: verifiedUser.username
     },
     media: {
       id: updatedComment.media_id,
@@ -305,14 +318,19 @@ async function handleLockThread(supabase: any, params: any) {
     JSON.stringify({
       success: true,
       comment: updatedComment,
-      action: 'locked'
+      action: 'locked',
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: moderatorRole
+      }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 async function handleUnlockThread(supabase: any, params: any) {
-  const { comment_id, moderator_id, reason } = params
+  const { comment_id, moderator_id, reason, verifiedUser } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -357,14 +375,18 @@ async function handleUnlockThread(supabase: any, params: any) {
     JSON.stringify({
       success: true,
       comment: updatedComment,
-      action: 'unlocked'
+      action: 'unlocked',
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username
+      }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 async function handleWarnUser(supabase: any, params: any) {
-  const { target_user_id, moderator_id, reason, severity, duration, moderatorRole } = params
+  const { target_user_id, moderator_id, reason, severity, duration, moderatorRole, verifiedUser } = params
 
   // Need client_type to identify user in commentum_users table
   // For now, we'll update all platforms - this could be enhanced to accept client_type parameter
@@ -471,7 +493,7 @@ async function handleWarnUser(supabase: any, params: any) {
     },
     moderator: {
       id: moderator_id,
-      username: `Moderator ${moderator_id}`
+      username: verifiedUser.username
     },
     reason,
     severity
@@ -485,14 +507,19 @@ async function handleWarnUser(supabase: any, params: any) {
       reason,
       duration: duration || null,
       warningCount,
-      autoAction
+      autoAction,
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: moderatorRole
+      }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 async function handleBanUser(supabase: any, params: any) {
-  const { target_user_id, moderator_id, reason, shadow_ban, moderatorRole } = params
+  const { target_user_id, moderator_id, reason, shadow_ban, moderatorRole, verifiedUser } = params
 
   // Only admin and super_admin can ban
   if (!['admin', 'super_admin', 'owner'].includes(moderatorRole)) {
@@ -549,7 +576,7 @@ async function handleBanUser(supabase: any, params: any) {
     },
     moderator: {
       id: moderator_id,
-      username: `Moderator ${moderator_id}`
+      username: verifiedUser.username
     },
     reason
   })
@@ -559,14 +586,19 @@ async function handleBanUser(supabase: any, params: any) {
       success: true,
       action: shadow_ban ? 'shadow_banned' : 'banned',
       targetUserId: target_user_id,
-      reason
+      reason,
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: moderatorRole
+      }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 async function handleUnbanUser(supabase: any, params: any) {
-  const { target_user_id, moderator_id, reason, moderatorRole } = params
+  const { target_user_id, moderator_id, reason, moderatorRole, verifiedUser } = params
 
   // Only admin and super_admin can unban
   if (!['admin', 'super_admin', 'owner'].includes(moderatorRole)) {
@@ -609,7 +641,12 @@ async function handleUnbanUser(supabase: any, params: any) {
       success: true,
       action: 'unbanned',
       targetUserId: target_user_id,
-      reason
+      reason,
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: moderatorRole
+      }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )

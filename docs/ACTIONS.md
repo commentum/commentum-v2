@@ -1,357 +1,160 @@
 # System Actions and Capabilities - Commentum v2
 
-Complete reference of all available actions, capabilities, and features in the Commentum v2 system.
+Complete reference of all available actions and their authentication requirements.
 
-## 🎯 Overview
+---
 
-Commentum v2 provides a comprehensive comment system with advanced moderation, voting, and reporting capabilities. This document outlines all possible actions and system features.
+## 🔐 Authentication Methods
 
-## 📝 Comment Actions
+### Token-Based Authentication (Mod+ Actions)
 
-### Core Comment Operations
+All moderation and admin actions use **token-based authentication**:
 
-#### Create Comment
-- **Endpoint**: `/comments` with `action: "create"`
-- **Purpose**: Add new comment to media
-- **Features**:
-  - Auto-fetch user and media information
-  - Support for nested replies
-  - Content validation and filtering
-  - Banned keyword detection
-  - Rate limiting enforcement
-
-#### Edit Comment
-- **Endpoint**: `/comments` with `action: "edit"`
-- **Purpose**: Modify existing comment
-- **Features**:
-  - Full edit history tracking
-  - Edit count and timestamps
-  - Permission validation (owner or moderator)
-  - Audit logging
-
-#### Delete Comment
-- **Endpoint**: `/comments` with `action: "delete"`
-- **Purpose**: Soft delete comment
-- **Features**:
-  - Soft delete (content preserved)
-  - Delete tracking (who, when)
-  - Permission validation
-  - Thread preservation for replies
-
-### Comment Retrieval
-
-#### Get Media Comments
-- **Endpoint**: `/media` with GET parameters
-- **Purpose**: Retrieve comments for specific media
-- **Features**:
-  - Pagination support
-  - Multiple sorting options
-  - Nested comment structure
-  - Media statistics
-  - Banned/shadow-banned content filtering
-
-**Sorting Options**:
-- `newest`: Most recent first
-- `oldest`: Oldest first
-- `top`: Highest vote score
-- `controversial`: Most upvotes
-
-## 🗳️ Voting Actions
-
-### Vote Operations
-- **Endpoint**: `/votes`
-- **Purpose**: Manage comment voting
-- **Vote Types**:
-  - `upvote`: Add or remove upvote
-  - `downvote`: Add or remove downvote
-  - `remove`: Remove any existing vote
-
-### Voting Features
-- **Vote Switching**: Change from upvote to downvote
-- **Self-Vote Prevention**: Cannot vote on own comments
-- **Real-time Scoring**: Automatic vote score calculation
-- **Vote Tracking**: Complete vote history per comment
-- **Rate Limiting**: 100 votes per hour per user
-
-### Vote Data Structure
 ```json
 {
-  "user_votes": {
-    "user123": "upvote",
-    "user456": "downvote"
-  },
-  "upvotes": 10,
-  "downvotes": 2,
-  "vote_score": 8
+  "client_type": "anilist",
+  "access_token": "user_oauth_token_from_provider"
 }
 ```
 
-## 🚨 Reporting Actions
+Verified with provider APIs:
+- **AniList**: GraphQL API
+- **MAL**: REST API  
+- **SIMKL**: REST API
 
-### Report Operations
-- **Endpoint**: `/reports`
+### User Info (Basic Actions)
 
-#### Create Report
-- **Action**: `"create"`
-- **Purpose**: Report inappropriate content
-- **Report Reasons**:
-  - `spam`: Unsolicited promotional content
-  - `offensive`: Offensive language or content
-  - `harassment`: Targeted harassment
-  - `spoiler`: Unmarked spoilers
-  - `nsfw`: Not safe for work content
-  - `off_topic`: Irrelevant content
-  - `other`: Other violations
+```json
+{
+  "user_info": {
+    "user_id": "12345",
+    "username": "TestUser",
+    "avatar": "https://example.com/avatar.jpg"
+  }
+}
+```
 
-#### Resolve Report
-- **Action**: `"resolve"`
-- **Purpose**: Moderator resolves reported content
-- **Resolutions**:
-  - `resolved`: Action taken on report
-  - `dismissed`: Report rejected
+---
 
-#### Get Reports Queue
-- **Action**: `"get_queue"`
-- **Purpose**: View pending reports
-- **Features**:
-  - Admin-only access
-  - Paginated results
-  - Complete report details
-  - Comment context
+## 📝 Comments API
 
-### Reporting Features
-- **Duplicate Prevention**: One report per user per comment
-- **Report Tracking**: Complete audit trail
-- **Status Management**: Pending → Reviewed → Resolved/Dismissed
-- **Moderator Notes**: Private notes for resolution context
+### Create Comment
+- **Endpoint**: `POST /comments`
+- **Auth**: user_info
+- **Role**: user
 
-## 🔧 Moderation Actions
+### Edit Comment
+- **Endpoint**: `POST /comments`
+- **Auth**: user_info (owner only)
+- **Role**: user
 
-### Moderation Operations
-- **Endpoint**: `/moderation`
-- **Authentication**: Admin token required for all actions
+### Delete Comment (Own)
+- **Endpoint**: `POST /comments`
+- **Auth**: user_info (owner only)
+- **Role**: user
 
-### Comment Moderation
+### Mod Delete Comment
+- **Endpoint**: `POST /comments`
+- **Auth**: ✅ token required
+- **Role**: moderator+
 
-#### Pin/Unpin Comment
-- **Actions**: `"pin_comment"`, `"unpin_comment"`
-- **Purpose**: Highlight important comments
-- **Features**:
-  - Pin tracking (who, when, why)
-  - Automatic unpinning option
-  - Visual distinction in UI
+---
 
-#### Lock/Unlock Thread
-- **Actions**: `"lock_thread"`, `"unlock_thread"`
-- **Purpose**: Prevent further replies
-- **Features**:
-  - Thread-level locking
-  - Lock tracking and reasoning
-  - Prevents new replies only
+## 🗳️ Votes API
 
-### User Moderation
+### Vote
+- **Endpoint**: `POST /votes`
+- **Auth**: user_info
+- **Role**: user
+- **Types**: `upvote`, `downvote`, `remove`
 
-#### Warn User
-- **Action**: `"warn_user"`
-- **Purpose**: Issue warning to user
-- **Severity Levels**:
-  - `warning`: Simple warning
-  - `mute`: Temporary posting restriction
-  - `ban`: Permanent ban (admin only)
+---
 
-- **Features**:
-  - Warning count tracking
-  - Temporary mutes with duration
-  - Automatic threshold enforcement
-  - Moderation audit trail
+## 🚨 Reports API
 
-#### Ban/Unban User
-- **Actions**: `"ban_user"`, `"unban_user"`
-- **Purpose**: Manage user access
-- **Ban Types**:
-  - Regular ban: Visible to user
-  - Shadow ban: Invisible to user
-- **Permissions**: Admin and super-admin only
+### Create Report
+- **Endpoint**: `POST /reports`
+- **Auth**: user_info
+- **Role**: user
+- **Reasons**: `spam`, `offensive`, `harassment`, `spoiler`, `nsfw`, `off_topic`, `other`
 
-### Moderation Features
-- **Role Hierarchy**: Super Admin > Admin > Moderator > User
-- **Permission Validation**: Cannot moderate equal/higher roles
-- **Audit Logging**: Complete action tracking
-- **Bulk Operations**: Apply actions across all user comments
+### Resolve Report
+- **Endpoint**: `POST /reports`
+- **Auth**: ✅ token required
+- **Role**: moderator+
 
-## 🔐 Authentication Actions
+### Get Reports Queue
+- **Endpoint**: `POST /reports`
+- **Auth**: ✅ token required
+- **Role**: moderator+
 
-### Platform Authentication
-- **AniList**: Bearer token verification via GraphQL
-- **MyAnimeList**: Bearer token verification via REST
-- **SIMKL**: API key verification via REST
-- **Other**: Basic user identification
+---
 
-### Authentication Features
-- **Token Validation**: Verify token authenticity
-- **User Identity**: Confirm user ID matches token
-- **Role Verification**: Check user permissions
-- **Admin Access**: Special token verification for moderators
+## 🔧 Moderation API
 
-### Role-Based Access Control
-- **User**: Create, edit own comments, vote, report
-- **Moderator**: All user actions + moderate content
-- **Admin**: All moderator actions + user management
-- **Super Admin**: Full system access
+### Endpoint: `POST /moderation`
+**All actions require token auth**
 
-## 🛡️ Security Actions
+| Action | Role | Description |
+|--------|------|-------------|
+| `pin_comment` | moderator | Pin a comment |
+| `unpin_comment` | moderator | Unpin a comment |
+| `lock_thread` | moderator | Lock a thread |
+| `unlock_thread` | moderator | Unlock a thread |
+| `warn_user` | moderator | Warn a user |
+| `ban_user` | admin | Ban a user |
+| `unban_user` | admin | Unban a user |
+| `get_queue` | moderator | Get moderation queue |
 
-### Content Filtering
-- **Banned Keywords**: Automatic content rejection
-- **Content Length**: 1-10,000 character limits
-- **Rate Limiting**: Per-user action limits
-- **Self-Action Prevention**: Cannot vote/report own content
+---
 
-### User Status Management
-- **Warnings**: Track rule violations
-- **Muting**: Temporary posting restrictions
-- **Banning**: Permanent access removal
-- **Shadow Banning**: Hidden content removal
+## 👤 Users API
 
-### System Security
-- **IP Tracking**: Store user IP addresses
-- **User Agent Logging**: Browser/client tracking
-- **Audit Trails**: Complete action logging
-- **RLS Policies**: Database-level access control
+### Endpoint: `POST /users`
+**All actions require token auth**
 
-## 📊 System Configuration Actions
+| Action | Role | Description |
+|--------|------|-------------|
+| `get_user_info` | moderator | Get user information |
+| `get_user_stats` | moderator | Get user statistics |
+| `warn_user` | moderator | Warn a user |
+| `mute_user` | moderator | Mute a user |
+| `unmute_user` | moderator | Unmute a user |
+| `ban_user` | admin | Ban a user |
+| `unban_user` | admin | Unban a user |
+| `get_user_history` | moderator | Get user history |
 
-### Configuration Management
-- **Table**: `config`
-- **Access**: Admin and super-admin only
-- **Format**: JSON values for complex data
+---
 
-### Configurable Settings
+## 📺 Media API
 
-#### System Controls
-- `system_enabled`: Master system toggle
-- `voting_enabled`: Voting system toggle
-- `reporting_enabled`: Reporting system toggle
-
-#### Content Limits
-- `max_comment_length`: Maximum comment characters
-- `max_nesting_level`: Maximum reply depth
-
-#### Rate Limits
-- `rate_limit_comments_per_hour`: Comment creation limit
-- `rate_limit_votes_per_hour`: Voting limit
-- `rate_limit_reports_per_hour`: Reporting limit
-
-#### Moderation Thresholds
-- `auto_warn_threshold`: Auto-warn at X warnings
-- `auto_mute_threshold`: Auto-mute at X warnings
-- `auto_ban_threshold`: Auto-ban at X warnings
-
-#### User Management
-- `super_admin_users`: JSON array of super admin IDs
-- `admin_users`: JSON array of admin IDs
-- `moderator_users`: JSON array of moderator IDs
-
-#### Content Moderation
-- `banned_keywords`: JSON array of prohibited words
-
-#### Platform Integration
-- `anilist_client_id`: AniList API client ID
-- `myanimelist_client_id`: MyAnimeList client ID
-- `simkl_client_id`: SIMKL API key
-
-## 🔄 Automated Actions
-
-### Triggers and Automation
-
-#### Database Triggers
-- **Updated At**: Automatic timestamp updates
-- **Comment Counting**: Real-time statistics
-- **Vote Score Calculation**: Automatic score updates
-
-#### Automated Moderation
-- **Threshold Enforcement**: Auto-warn/mute/ban
-- **Content Filtering**: Keyword-based rejection
-- **Rate Limiting**: Automatic action blocking
-
-#### Data Cleanup
-- **Edit History**: Automatic history management
-- **Report Status**: Automatic status updates
-- **User Status**: Consistent status across comments
-
-## 📈 Analytics and Reporting
-
-### System Statistics
-- **Comment Metrics**: Total, active, deleted counts
-- **User Activity**: Posting frequency, engagement
-- **Moderation Actions**: Reports, bans, warnings
-- **Performance Metrics**: Response times, error rates
-
-### Available Reports
-- **Comment Growth**: Daily/weekly comment trends
-- **User Engagement**: Voting and participation
-- **Moderation Load**: Report resolution times
-- **Content Quality**: Edit rates, deletion reasons
-
-## 🚀 Performance Actions
-
-### Optimization Features
-- **Database Indexing**: Optimized query performance
-- **Pagination**: Large dataset handling
-- **JSON Operations**: Efficient JSON data handling
-- **Caching**: Configuration and frequently accessed data
-
-### Scaling Capabilities
-- **Horizontal Scaling**: Multiple edge function instances
-- **Database Scaling**: Read replicas and connection pooling
-- **CDN Integration**: Static asset delivery
-- **Load Balancing**: Automatic request distribution
-
-## 🎛️ Administrative Actions
-
-### System Administration
-- **Configuration Updates**: Real-time setting changes
-- **User Role Management**: Dynamic role assignment
-- **Content Moderation**: Bulk operations
-- **System Monitoring**: Health checks and alerts
-
-### Data Management
-- **Backup Operations**: Automated and manual backups
-- **Data Export**: Comment and configuration export
-- **Archive Management**: Old data handling
-- **System Restore**: Point-in-time recovery
-
-## 🔍 Monitoring and Debugging
-
-### Logging Actions
-- **Function Logs**: Real-time execution logs
-- **Error Tracking**: Detailed error information
-- **Performance Metrics**: Response time tracking
-- **User Actions**: Complete audit trail
-
-### Debugging Features
-- **Verbose Logging**: Detailed execution information
-- **Test Endpoints**: Development and testing tools
-- **Status Pages**: System health monitoring
-- **Error Reports**: Automated error notifications
+### Get Comments
+- **Endpoint**: `GET /media`
+- **Auth**: none
+- **Role**: -
 
 ---
 
 ## 🎯 Action Matrix
 
-| Action | Endpoint | Auth Required | Admin Only | Description |
-|--------|----------|---------------|------------|-------------|
-| create | /comments | ❌ | ❌ | Create new comment |
-| edit | /comments | ✅ | ❌ | Edit own comment |
-| delete | /comments | ✅ | ❌ | Delete own comment |
-| vote | /votes | ❌ | ❌ | Vote on comment |
-| create_report | /reports | ❌ | ❌ | Report comment |
-| resolve_report | /reports | ✅ | ✅ | Resolve report |
-| get_queue | /reports | ✅ | ✅ | View reports |
-| pin_comment | /moderation | ✅ | ✅ | Pin comment |
-| lock_thread | /moderation | ✅ | ✅ | Lock thread |
-| warn_user | /moderation | ✅ | ✅ | Warn user |
-| ban_user | /moderation | ✅ | ✅ | Ban user |
-| get_media | /media | ❌ | ❌ | Get comments |
-
-This comprehensive action set provides a full-featured comment system with enterprise-grade moderation and security capabilities.
+| Action | Endpoint | Auth | Min Role |
+|--------|----------|------|----------|
+| create | /comments | user_info | user |
+| edit | /comments | user_info (owner) | user |
+| delete | /comments | user_info (owner) | user |
+| mod_delete | /comments | token | moderator |
+| vote | /votes | user_info | user |
+| create_report | /reports | user_info | user |
+| resolve_report | /reports | token | moderator |
+| get_queue | /reports | token | moderator |
+| pin/unpin | /moderation | token | moderator |
+| lock/unlock | /moderation | token | moderator |
+| warn_user | /moderation | token | moderator |
+| ban_user | /moderation | token | admin |
+| unban_user | /moderation | token | admin |
+| get_queue | /moderation | token | moderator |
+| get_user_* | /users | token | moderator |
+| mute_user | /users | token | moderator |
+| ban_user | /users | token | admin |
+| unban_user | /users | token | admin |
+| get_media | /media | none | - |

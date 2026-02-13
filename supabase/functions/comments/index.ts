@@ -1,7 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { validateUserInfo, validateMediaInfo, UserInfo, MediaInfo } from '../shared/clientAPIs.ts'
-import { verifyAdminAccess, getUserRole, canModerate, getDisplayRole } from '../shared/auth.ts'
+import { verifyAdminAccess, getUserRole, getDisplayRole } from '../shared/auth.ts'
+import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
@@ -20,7 +21,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info } = await req.json()
+    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info, access_token } = await req.json()
 
     switch (action) {
       case 'create':
@@ -42,6 +43,7 @@ serve(async (req) => {
         break
         
       case 'delete':
+        // Original delete - for own comments only, uses user_info
         if (!comment_id || !user_info) {
           return new Response(
             JSON.stringify({ error: 'comment_id and user_info are required for delete action' }),
@@ -49,10 +51,20 @@ serve(async (req) => {
           )
         }
         break
+
+      case 'mod_delete':
+        // Mod delete - for deleting other users' comments, requires token auth
+        if (!comment_id || !client_type || !access_token) {
+          return new Response(
+            JSON.stringify({ error: 'comment_id, client_type, and access_token are required for mod_delete action' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        break
         
       default:
         return new Response(
-          JSON.stringify({ error: 'Invalid action. Must be create, edit, or delete' }),
+          JSON.stringify({ error: 'Invalid action. Must be create, edit, delete, or mod_delete' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }
@@ -116,6 +128,7 @@ serve(async (req) => {
 
     let userInfo: UserInfo | null = null
     let mediaInfo: MediaInfo | null = null
+    let verifiedUserFromToken = null
     
     if (action === 'create') {
       if (!validateUserInfo(user_info)) {
@@ -141,6 +154,20 @@ serve(async (req) => {
         )
       }
       userInfo = user_info
+    } else if (action === 'mod_delete') {
+      // Verify token for mod_delete
+      verifiedUserFromToken = await verifyClientToken(client_type, access_token)
+      if (!verifiedUserFromToken) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid or expired access token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      userInfo = {
+        user_id: verifiedUserFromToken.provider_user_id,
+        username: verifiedUserFromToken.username,
+        avatar: verifiedUserFromToken.avatar_url
+      }
     }
 
     const user_id = userInfo?.user_id
@@ -162,6 +189,7 @@ serve(async (req) => {
 
     let userRole = 'user'
     if (action === 'delete') {
+      // Original delete - check if user owns the comment
       const { data: comment } = await supabase
         .from('comments')
         .select('user_id, user_role, client_type')
@@ -175,42 +203,49 @@ serve(async (req) => {
         )
       }
 
-      if (comment.user_id === user_id) {
-        userRole = await getUserRole(supabase, user_id)
-      } else {
-        const adminVerification = await verifyAdminAccess(supabase, user_id)
-        if (!adminVerification.valid) {
-          return new Response(
-            JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-        userRole = adminVerification.role
+      if (comment.user_id !== user_id) {
+        return new Response(
+          JSON.stringify({ error: 'You can only delete your own comments. Use mod_delete for moderation.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
+      userRole = await getUserRole(supabase, user_id)
+    } else if (action === 'mod_delete') {
+      // Mod delete - verify admin access
+      const adminVerification = await verifyAdminAccess(supabase, user_id)
+      if (!adminVerification.valid) {
+        return new Response(
+          JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      userRole = adminVerification.role
     } else {
       userRole = await getUserRole(supabase, user_id)
     }
 
     // Check user restrictions from commentum_users table
-    const { data: userStatus } = await supabase
-      .from('commentum_users')
-      .select('commentum_user_banned, commentum_user_muted_until, commentum_user_shadow_banned, commentum_user_warnings')
-      .eq('commentum_client_type', client_type)
-      .eq('commentum_user_id', user_id)
-      .single()
+    if (action === 'create') {
+      const { data: userStatus } = await supabase
+        .from('commentum_users')
+        .select('commentum_user_banned, commentum_user_muted_until, commentum_user_shadow_banned, commentum_user_warnings')
+        .eq('commentum_client_type', client_type)
+        .eq('commentum_user_id', user_id)
+        .single()
 
-    if (userStatus?.commentum_user_banned) {
-      return new Response(
-        JSON.stringify({ error: 'User is banned' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+      if (userStatus?.commentum_user_banned) {
+        return new Response(
+          JSON.stringify({ error: 'User is banned' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
 
-    if (userStatus?.commentum_user_muted && new Date(userStatus.commentum_user_muted_until) > new Date()) {
-      return new Response(
-        JSON.stringify({ error: 'User is muted' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      if (userStatus?.commentum_user_muted && new Date(userStatus.commentum_user_muted_until) > new Date()) {
+        return new Response(
+          JSON.stringify({ error: 'User is muted' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
     }
 
     switch (action) {
@@ -243,6 +278,15 @@ serve(async (req) => {
           user_id,
           userRole,
           req
+        })
+
+      case 'mod_delete':
+        return await handleModDeleteComment(supabase, {
+          comment_id,
+          user_id,
+          userRole,
+          req,
+          verifiedUserFromToken
         })
 
       default:
@@ -467,6 +511,7 @@ async function handleEditComment(supabase: any, params: any) {
   )
 }
 
+// Original delete - for own comments only
 async function handleDeleteComment(supabase: any, params: any) {
   const { comment_id, user_id, userRole, req } = params
 
@@ -491,13 +536,10 @@ async function handleDeleteComment(supabase: any, params: any) {
   }
 
   if (comment.user_id !== user_id) {
-    const isAdmin = userRole === 'admin' || userRole === 'super_admin' || userRole === 'owner'
-    if (!isAdmin) {
-      return new Response(
-        JSON.stringify({ error: 'Only admins and super admins can delete other users comments' }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    return new Response(
+      JSON.stringify({ error: 'You can only delete your own comments. Use mod_delete for moderation.' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
   }
 
   const { data: deletedComment, error } = await supabase
@@ -513,39 +555,118 @@ async function handleDeleteComment(supabase: any, params: any) {
 
   if (error) throw error
 
-  const moderator = comment.user_id !== user_id ? {
-      username: `User ${user_id}`,
-      id: user_id
-    } : null
-
-    // Queue Discord notification in background - NON-BLOCKING
-    queueDiscordNotification({
-      type: 'comment_deleted',
-      comment: {
-        id: deletedComment.id,
-        username: deletedComment.username,
-        user_id: deletedComment.user_id,
-        content: comment.content,
-        client_type: deletedComment.client_type,
-        media_id: deletedComment.media_id
-      },
-      moderator,
-      user: {
-        id: deletedComment.user_id,
-        username: deletedComment.username,
-        avatar: deletedComment.user_avatar
-      },
-      media: {
-        id: deletedComment.media_id,
-        title: deletedComment.media_title,
-        type: deletedComment.media_type,
-        year: deletedComment.media_year,
-        poster: deletedComment.media_poster
-      }
-    })
+  // Queue Discord notification in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_deleted',
+    comment: {
+      id: deletedComment.id,
+      username: deletedComment.username,
+      user_id: deletedComment.user_id,
+      content: comment.content,
+      client_type: deletedComment.client_type,
+      media_id: deletedComment.media_id
+    },
+    moderator: null,
+    user: {
+      id: deletedComment.user_id,
+      username: deletedComment.username,
+      avatar: deletedComment.user_avatar
+    },
+    media: {
+      id: deletedComment.media_id,
+      title: deletedComment.media_title,
+      type: deletedComment.media_type,
+      year: deletedComment.media_year,
+      poster: deletedComment.media_poster
+    }
+  })
 
   return new Response(
     JSON.stringify({ success: true, comment: deletedComment }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+// Mod delete - for moderators to delete other users' comments
+async function handleModDeleteComment(supabase: any, params: any) {
+  const { comment_id, user_id, userRole, req, verifiedUserFromToken } = params
+
+  const { data: comment } = await supabase
+    .from('comments')
+    .select('*')
+    .eq('id', comment_id)
+    .single()
+
+  if (!comment) {
+    return new Response(
+      JSON.stringify({ error: 'Comment not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (comment.deleted) {
+    return new Response(
+      JSON.stringify({ error: 'Comment already deleted' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const { data: deletedComment, error } = await supabase
+    .from('comments')
+    .update({
+      deleted: true,
+      deleted_at: new Date().toISOString(),
+      deleted_by: user_id,
+      moderated: true,
+      moderated_at: new Date().toISOString(),
+      moderated_by: user_id,
+      moderation_action: 'mod_delete'
+    })
+    .eq('id', comment_id)
+    .select()
+    .single()
+
+  if (error) throw error
+
+  // Queue Discord notification in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_deleted',
+    comment: {
+      id: deletedComment.id,
+      username: deletedComment.username,
+      user_id: deletedComment.user_id,
+      content: comment.content,
+      client_type: deletedComment.client_type,
+      media_id: deletedComment.media_id
+    },
+    moderator: {
+      id: user_id,
+      username: verifiedUserFromToken?.username || `Moderator ${user_id}`
+    },
+    user: {
+      id: deletedComment.user_id,
+      username: deletedComment.username,
+      avatar: deletedComment.user_avatar
+    },
+    media: {
+      id: deletedComment.media_id,
+      title: deletedComment.media_title,
+      type: deletedComment.media_type,
+      year: deletedComment.media_year,
+      poster: deletedComment.media_poster
+    }
+  })
+
+  return new Response(
+    JSON.stringify({ 
+      success: true, 
+      comment: deletedComment,
+      moderator: {
+        id: user_id,
+        username: verifiedUserFromToken?.username,
+        role: userRole
+      }
+    }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }

@@ -1,4 +1,5 @@
 // Authentication utilities for admin/moderator verification
+import { verifyClientToken, VerifiedUser } from './clientAuth.ts'
 
 // Check if user has admin/moderator role based on user_id only
 export async function verifyAdminAccess(supabase: any, userId: string) {
@@ -9,6 +10,43 @@ export async function verifyAdminAccess(supabase: any, userId: string) {
   }
 
   return { valid: true, role: userRole }
+}
+
+/**
+ * Verify client token AND check admin access in one call
+ * This combines token verification with role checking
+ * @param supabase - Supabase client
+ * @param clientType - The client type: 'mal', 'anilist', or 'simkl'
+ * @param accessToken - The OAuth access token from the client
+ * @returns Object with verified user info and role if successful, or error info if failed
+ */
+export async function verifyTokenAndAdminAccess(
+  supabase: any, 
+  clientType: string, 
+  accessToken: string
+): Promise<{
+  valid: boolean;
+  reason?: string;
+  verifiedUser?: VerifiedUser;
+  role?: string;
+}> {
+  // First verify the token with the provider
+  const verifiedUser = await verifyClientToken(clientType, accessToken)
+  if (!verifiedUser) {
+    return { valid: false, reason: 'Invalid or expired access token' }
+  }
+
+  // Then check admin access
+  const adminAccess = await verifyAdminAccess(supabase, verifiedUser.provider_user_id)
+  if (!adminAccess.valid) {
+    return { valid: false, reason: adminAccess.reason }
+  }
+
+  return {
+    valid: true,
+    verifiedUser,
+    role: adminAccess.role
+  }
 }
 
 // Get user role from configuration
