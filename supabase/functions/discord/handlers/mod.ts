@@ -52,6 +52,25 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can delete comments.', true)
         }
         const commentId = id1
+        
+        // Check if already deleted
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('deleted, deleted_by')
+          .eq('id', commentId)
+          .single()
+        
+        if (comment?.deleted) {
+          // Get mod name who deleted
+          const { data: deleter } = await supabase
+            .from('discord_users')
+            .select('discord_username')
+            .eq('discord_user_id', comment.deleted_by)
+            .single()
+          const deleterName = deleter?.discord_username || comment.deleted_by || 'Unknown'
+          return createButtonResponse(`🗑️ Comment already deleted by **${deleterName}**.`, true)
+        }
+        
         const { error } = await supabase
           .from('comments')
           .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
@@ -66,21 +85,29 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can warn users.', true)
         }
         const targetUserId = id1
+        
+        // Check current warning count and who warned
         const { data: targetUsers } = await supabase
           .from('commentum_users')
-          .select('*')
+          .select('commentum_client_type, commentum_user_warnings, commentum_user_last_warning_by')
           .eq('commentum_user_id', targetUserId)
+        
         if (!targetUsers || targetUsers.length === 0) {
           return createButtonResponse('❌ User not found.', true)
         }
+        
+        // Warn user across all platforms
         for (const u of targetUsers) {
-          await supabase
-            .from('commentum_users')
-            .update({ commentum_user_warnings: (u.commentum_user_warnings || 0) + 1 })
-            .eq('commentum_client_type', u.commentum_client_type)
-            .eq('commentum_user_id', targetUserId)
+          await supabase.rpc('add_user_warning', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_warning_reason: 'Warned via Discord button',
+            p_warned_by: userId
+          })
         }
-        return createButtonResponse(`⚠️ User \`${targetUserId}\` has been warned!`)
+        
+        const newWarningCount = (targetUsers[0]?.commentum_user_warnings || 0) + 1
+        return createButtonResponse(`⚠️ User \`${targetUserId}\` has been warned! (Total: ${newWarningCount} warnings)`)
       }
       
       case 'mod_mute': {
@@ -89,12 +116,44 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can mute users.', true)
         }
         const targetUserId = id1
+        
+        // Check if already muted
+        const { data: userStatus } = await supabase
+          .from('commentum_users')
+          .select('commentum_user_muted, commentum_user_muted_until, commentum_user_muted_by')
+          .eq('commentum_user_id', targetUserId)
+          .limit(1)
+          .single()
+        
+        if (userStatus?.commentum_user_muted && userStatus?.commentum_user_muted_until && new Date(userStatus.commentum_user_muted_until) > new Date()) {
+          // Get mod name who muted
+          const { data: muter } = await supabase
+            .from('discord_users')
+            .select('discord_username')
+            .eq('discord_user_id', userStatus.commentum_user_muted_by)
+            .single()
+          const muterName = muter?.discord_username || userStatus.commentum_user_muted_by || 'Unknown'
+          return createButtonResponse(`🔇 User already muted by **${muterName}** until ${new Date(userStatus.commentum_user_muted_until).toLocaleString()}.`, true)
+        }
+        
         const muteUntil = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
-        const { error } = await supabase
-          .from('comments')
-          .update({ user_muted_until: muteUntil.toISOString() })
-          .eq('user_id', targetUserId)
-        return createButtonResponse(`🔇 User \`${targetUserId}\` muted for 24 hours!`)
+        
+        // Mute user across all platforms
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type')
+          .eq('commentum_user_id', targetUserId)
+        
+        for (const u of targetUsers || []) {
+          await supabase.rpc('mute_commentum_user', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_mute_duration_hours: 24,
+            p_mute_reason: 'Muted via Discord button',
+            p_muted_by: userId
+          })
+        }
+        return createButtonResponse(`🔇 User \`${targetUserId}\` muted for 24 hours until ${muteUntil.toLocaleString()}!`)
       }
       
       case 'mod_ban': {
@@ -103,11 +162,41 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only admins can ban users.', true)
         }
         const targetUserId = id1
-        const { error } = await supabase
-          .from('comments')
-          .update({ user_banned: true })
-          .eq('user_id', targetUserId)
-        if (error) throw error
+        
+        // Check if already banned
+        const { data: userStatus } = await supabase
+          .from('commentum_users')
+          .select('commentum_user_banned, commentum_user_banned_by')
+          .eq('commentum_user_id', targetUserId)
+          .limit(1)
+          .single()
+        
+        if (userStatus?.commentum_user_banned) {
+          // Get mod name who banned
+          const { data: banner } = await supabase
+            .from('discord_users')
+            .select('discord_username')
+            .eq('discord_user_id', userStatus.commentum_user_banned_by)
+            .single()
+          const bannerName = banner?.discord_username || userStatus.commentum_user_banned_by || 'Unknown'
+          return createButtonResponse(`🔨 User already banned by **${bannerName}**.`, true)
+        }
+        
+        // Ban user across all platforms
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type')
+          .eq('commentum_user_id', targetUserId)
+        
+        for (const u of targetUsers || []) {
+          await supabase.rpc('ban_commentum_user', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_ban_reason: 'Banned via Discord button',
+            p_banned_by: userId,
+            p_shadow_ban: false
+          })
+        }
         return createButtonResponse(`🔨 User \`${targetUserId}\` has been banned!`)
       }
       
@@ -118,13 +207,43 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         }
         const commentId = id1
         const targetUserId = id2
+        
+        // Check if already deleted
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('deleted, deleted_by')
+          .eq('id', commentId)
+          .single()
+        
+        if (comment?.deleted) {
+          const { data: deleter } = await supabase
+            .from('discord_users')
+            .select('discord_username')
+            .eq('discord_user_id', comment.deleted_by)
+            .single()
+          const deleterName = deleter?.discord_username || comment.deleted_by || 'Unknown'
+          return createButtonResponse(`🗑️ Comment already deleted by **${deleterName}**.`, true)
+        }
+        
         // Delete comment
         await supabase
           .from('comments')
           .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
           .eq('id', commentId)
+        
         // Warn user
-        await supabase.rpc('increment_user_warnings', { p_user_id: targetUserId })
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type')
+          .eq('commentum_user_id', targetUserId)
+        for (const u of targetUsers || []) {
+          await supabase.rpc('add_user_warning', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_warning_reason: 'Warned via delete & warn action',
+            p_warned_by: userId
+          })
+        }
         return createButtonResponse(`🗑️⚠️ Comment deleted and user \`${targetUserId}\` warned!`)
       }
       
@@ -135,16 +254,61 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         }
         const commentId = id1
         const targetUserId = id2
-        // Delete comment
-        await supabase
+        
+        // Check if already deleted and banned
+        const { data: comment } = await supabase
           .from('comments')
-          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+          .select('deleted, deleted_by')
           .eq('id', commentId)
-        // Ban user
-        await supabase
-          .from('comments')
-          .update({ user_banned: true })
-          .eq('user_id', targetUserId)
+          .single()
+        
+        const { data: userStatus } = await supabase
+          .from('commentum_users')
+          .select('commentum_user_banned, commentum_user_banned_by')
+          .eq('commentum_user_id', targetUserId)
+          .limit(1)
+          .single()
+        
+        if (comment?.deleted && userStatus?.commentum_user_banned) {
+          const { data: deleter } = await supabase
+            .from('discord_users')
+            .select('discord_username')
+            .eq('discord_user_id', comment.deleted_by)
+            .single()
+          const deleterName = deleter?.discord_username || comment.deleted_by || 'Unknown'
+          const { data: banner } = await supabase
+            .from('discord_users')
+            .select('discord_username')
+            .eq('discord_user_id', userStatus.commentum_user_banned_by)
+            .single()
+          const bannerName = banner?.discord_username || userStatus.commentum_user_banned_by || 'Unknown'
+          return createButtonResponse(`✅ Already handled: Deleted by **${deleterName}**, Banned by **${bannerName}**.`, true)
+        }
+        
+        // Delete comment if not already deleted
+        if (!comment?.deleted) {
+          await supabase
+            .from('comments')
+            .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+            .eq('id', commentId)
+        }
+        
+        // Ban user if not already banned
+        if (!userStatus?.commentum_user_banned) {
+          const { data: targetUsers } = await supabase
+            .from('commentum_users')
+            .select('commentum_client_type')
+            .eq('commentum_user_id', targetUserId)
+          for (const u of targetUsers || []) {
+            await supabase.rpc('ban_commentum_user', {
+              p_client_type: u.commentum_client_type,
+              p_user_id: targetUserId,
+              p_ban_reason: 'Banned via delete & ban action',
+              p_banned_by: userId,
+              p_shadow_ban: false
+            })
+          }
+        }
         return createButtonResponse(`🗑️🔨 Comment deleted and user \`${targetUserId}\` banned!`)
       }
       
@@ -154,6 +318,18 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can approve reports.', true)
         }
         const commentId = id1
+        
+        // Check current status
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('report_status')
+          .eq('id', commentId)
+          .single()
+        
+        if (comment?.report_status === 'resolved') {
+          return createButtonResponse(`✅ Report already resolved.`, true)
+        }
+        
         const { error } = await supabase
           .from('comments')
           .update({ reported: false, report_status: 'resolved' })
@@ -168,6 +344,18 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can dismiss reports.', true)
         }
         const commentId = id1
+        
+        // Check current status
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('report_status')
+          .eq('id', commentId)
+          .single()
+        
+        if (comment?.report_status === 'dismissed') {
+          return createButtonResponse(`❌ Report already dismissed.`, true)
+        }
+        
         const { error } = await supabase
           .from('comments')
           .update({ reported: false, report_status: 'dismissed' })
@@ -182,6 +370,18 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can unpin comments.', true)
         }
         const commentId = id1
+        
+        // Check if pinned
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('pinned, pinned_by')
+          .eq('id', commentId)
+          .single()
+        
+        if (!comment?.pinned) {
+          return createButtonResponse(`📍 Comment is not pinned.`, true)
+        }
+        
         const { error } = await supabase
           .from('comments')
           .update({ pinned: false, pinned_at: null, pinned_by: null })
@@ -196,6 +396,18 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can unlock threads.', true)
         }
         const commentId = id1
+        
+        // Check if locked
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('locked, locked_by')
+          .eq('id', commentId)
+          .single()
+        
+        if (!comment?.locked) {
+          return createButtonResponse(`🔓 Comment is not locked.`, true)
+        }
+        
         const { error } = await supabase
           .from('comments')
           .update({ locked: false, locked_at: null, locked_by: null })
