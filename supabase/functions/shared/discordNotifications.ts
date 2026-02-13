@@ -1,3 +1,5 @@
+// Enhanced Discord notification utilities for Commentum v2
+// Updated to use Discord Bot API with Components V2 for interactive buttons
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
@@ -623,96 +625,112 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   const lines: string[] = []
   let accentColor: number | undefined
   
+  // Get the main username for display
+  const mainUsername = data.comment?.username || data.user?.username || 'Unknown'
+  const mainUserId = data.comment?.user_id || data.user?.id || ''
+  const clientType = data.comment?.client_type || 'anilist'
+  
   // Build header based on type
   switch (data.type) {
     case 'comment_created':
       lines.push('## 💬 New Comment Posted')
-      lines.push(`**${data.comment?.username}** posted a new comment`)
+      lines.push(`**${mainUsername}** posted a new comment`)
       accentColor = 0x00FF00 // Green
       break
       
     case 'comment_updated':
       lines.push('## ✏️ Comment Edited')
-      lines.push(`Comment \`${data.comment?.id}\` was edited by **${data.comment?.username}**`)
+      lines.push(`**${mainUsername}** edited their comment`)
       accentColor = 0x9B59B6 // Purple
       break
       
     case 'comment_deleted':
+      const deleterName = data.moderator?.username || data.comment?.username || 'Unknown'
       lines.push('## 🗑️ Comment Deleted')
-      lines.push(`Comment \`${data.comment?.id}\` was deleted by **${data.moderator?.username || data.comment?.username}**`)
+      lines.push(`**${deleterName}** deleted a comment`)
       accentColor = 0xFF0000 // Red
       break
       
     case 'vote_cast':
       const voteEmoji = data.voteType === 'upvote' ? '👍' : '👎'
       lines.push(`## ${voteEmoji} ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} Cast`)
-      lines.push(`**${data.user?.username}** voted on comment \`${data.comment?.id}\``)
+      lines.push(`**${mainUsername}** voted on comment \`${data.comment?.id}\``)
       accentColor = 0xFFA500 // Orange
       break
       
     case 'vote_removed':
       lines.push('## ↩️ Vote Removed')
-      lines.push(`**${data.user?.username}** removed their vote from comment \`${data.comment?.id}\``)
+      lines.push(`**${mainUsername}** removed their vote from comment \`${data.comment?.id}\``)
       accentColor = 0xFFA500 // Orange
       break
       
     case 'report_filed':
+      const reporterName = data.user?.username || 'Unknown'
       lines.push('## 🚨 Comment Reported')
-      lines.push(`Comment \`${data.comment?.id}\` was reported by **${data.user?.username}**`)
+      lines.push(`**${reporterName}** reported a comment`)
       accentColor = 0xFF8C00 // Dark Orange
       break
       
     case 'user_banned':
+      const bannerName = data.moderator?.username || 'System'
       lines.push('## 🔨 User Banned')
-      lines.push(`**${data.user?.username}** has been banned`)
+      lines.push(`**${mainUsername}** was banned by **${bannerName}**`)
       accentColor = 0x8B0000 // Dark Red
       break
       
     case 'user_warned':
+      const warnerName = data.moderator?.username || 'System'
       lines.push('## ⚠️ User Warned')
-      lines.push(`**${data.user?.username}** has received a warning`)
+      lines.push(`**${mainUsername}** was warned by **${warnerName}**`)
       accentColor = 0xFFD700 // Gold
       break
       
     case 'user_muted':
+      const muterName = data.moderator?.username || 'System'
       lines.push('## 🔇 User Muted')
-      lines.push(`**${data.user?.username}** has been muted`)
+      lines.push(`**${mainUsername}** was muted by **${muterName}**`)
       accentColor = 0x808080 // Gray
       break
       
     case 'user_shadow_banned':
+      const shadowBannerName = data.moderator?.username || 'System'
       lines.push('## 👻 User Shadow Banned')
-      lines.push(`**${data.user?.username}** has been shadow banned`)
+      lines.push(`**${mainUsername}** was shadow banned by **${shadowBannerName}**`)
       accentColor = 0x4B0082 // Indigo
       break
       
     case 'comment_pinned':
+      const pinnerName = data.moderator?.username || 'Moderator'
       lines.push('## 📌 Comment Pinned')
-      lines.push(`Comment \`${data.comment?.id}\` has been pinned by **${data.moderator?.username}**`)
+      lines.push(`**${pinnerName}** pinned a comment`)
       accentColor = 0x00BFFF // Deep Sky Blue
       break
       
     case 'comment_locked':
-      lines.push('## 🔒 Comment Thread Locked')
-      lines.push(`Comment \`${data.comment?.id}\` thread has been locked by **${data.moderator?.username}**`)
+      const lockerName = data.moderator?.username || 'Moderator'
+      lines.push('## 🔒 Thread Locked')
+      lines.push(`**${lockerName}** locked a comment thread`)
       accentColor = 0x8B4513 // Saddle Brown
       break
       
     case 'comment_unlocked':
-      lines.push('## 🔓 Comment Thread Unlocked')
-      lines.push(`Comment \`${data.comment?.id}\` thread has been unlocked by **${data.moderator?.username}**`)
+      const unlockerName = data.moderator?.username || 'Moderator'
+      lines.push('## 🔓 Thread Unlocked')
+      lines.push(`**${unlockerName}** unlocked a comment thread`)
       accentColor = 0x32CD32 // Lime Green
       break
       
     case 'report_resolved':
+      const resolverName = data.moderator?.username || 'Moderator'
       lines.push('## ✅ Report Resolved')
-      lines.push(`Report for comment \`${data.comment?.id}\` has been resolved by **${data.moderator?.username}**`)
+      lines.push(`**${resolverName}** resolved a report`)
       accentColor = 0x00FA9A // Medium Spring Green
       break
       
     case 'report_dismissed':
+      const dismisserName = data.moderator?.username || 'Moderator'
       lines.push('## ❌ Report Dismissed')
-      lines.push(`Report for comment \`${data.comment?.id}\` has been dismissed by **${data.moderator?.username}**`)
+      lines.push(`**${dismisserName}** dismissed a report`)
       accentColor = 0xDC143C // Crimson
       break
       
@@ -722,49 +740,45 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
       accentColor = 0x808080 // Gray
   }
   
-  // Add separator after header
   lines.push('')
   
-  // Add user info if available
-  if (data.user?.id || data.comment?.user_id) {
+  // Add user info (compact format)
+  if (mainUserId) {
     lines.push(`### 👤 User Info`)
-    lines.push(`- **ID:** \`${data.user?.id || data.comment?.user_id}\``)
-    lines.push(`- **Username:** ${data.user?.username || data.comment?.username}`)
-    if (data.comment?.client_type) {
-      lines.push(`- **Client:** ${data.comment.client_type}`)
-    }
+    lines.push(`- **ID:** \`${mainUserId}\` (${mainUsername})`)
+    lines.push(`- **Client:** ${clientType}`)
     lines.push('')
   }
   
-  // Add media info if available
+  // Add media info (compact format)
   if (data.media) {
     lines.push(`### 🎬 Media Info`)
-    lines.push(`- **ID:** \`${data.comment?.media_id}\``)
-    lines.push(`- **Type:** ${data.media.type}`)
-    if (data.media.year) {
-      lines.push(`- **Year:** ${data.media.year}`)
-    }
+    const mediaId = data.comment?.media_id || data.media?.id || ''
+    const mediaType = data.media.type || 'anime'
+    const yearStr = data.media.year ? ` | ${data.media.year}` : ''
+    lines.push(`- **ID:** \`${mediaId}\` | ${mediaType}${yearStr}`)
     if (data.media.title) {
       lines.push(`- **Title:** ${data.media.title}`)
     }
     lines.push('')
   }
   
-  // Add comment content if available
+  // Add comment content (compact)
   if (data.comment?.content) {
     lines.push(`### 💭 Comment`)
-    lines.push(`> ${data.comment.content.substring(0, 500)}${data.comment.content.length > 500 ? '...' : ''}`)
+    const content = data.comment.content.substring(0, 200)
+    lines.push(`> ${content}${data.comment.content.length > 200 ? '...' : ''}`)
     lines.push('')
   }
   
-  // Add reason if available
+  // Add reason (compact)
   if (data.reason) {
     lines.push(`### 📝 Reason`)
     lines.push(data.reason)
     lines.push('')
   }
   
-  // Add report reason if available
+  // Add report reason (compact)
   if (data.reportReason) {
     lines.push(`### 🚨 Report Reason`)
     lines.push(data.reportReason)
@@ -898,7 +912,7 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
             BUTTON_STYLES.DANGER, 
             isDeleted ? undefined : `mod_del_warn:${data.comment.id}:${userId}`, 
             undefined, 
-            '🗑️⚠️',
+            '⚠️',
             isDeleted
           ),
           buildButton(
@@ -906,7 +920,7 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
             BUTTON_STYLES.DANGER, 
             (isDeleted || isBanned) ? undefined : `mod_del_ban:${data.comment.id}:${userId}`, 
             undefined, 
-            '🗑️🔨',
+            '🔨',
             isDeleted || isBanned
           ),
         ]))

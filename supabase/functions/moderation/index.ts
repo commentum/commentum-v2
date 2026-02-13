@@ -395,6 +395,17 @@ async function handleWarnUser(supabase: any, params: any) {
     .select('commentum_client_type, commentum_user_role, commentum_user_warnings')
     .eq('commentum_user_id', target_user_id)
 
+  // Get target user's username from comments table
+  const { data: targetUserComment } = await supabase
+    .from('comments')
+    .select('username')
+    .eq('user_id', target_user_id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+  
+  const targetUsername = targetUserComment?.username || target_user_id
+
   if (!targetUsers || targetUsers.length === 0) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
@@ -486,7 +497,7 @@ async function handleWarnUser(supabase: any, params: any) {
     type: 'user_warned',
     user: {
       id: target_user_id,
-      username: `User ${target_user_id}`
+      username: targetUsername
     },
     comment: {
       client_type: targetUsers[0]?.commentum_client_type
@@ -535,6 +546,17 @@ async function handleBanUser(supabase: any, params: any) {
     .select('commentum_client_type, commentum_user_role')
     .eq('commentum_user_id', target_user_id)
 
+  // Get target user's username from comments table
+  const { data: targetUserComment } = await supabase
+    .from('comments')
+    .select('username')
+    .eq('user_id', target_user_id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+  
+  const targetUsername = targetUserComment?.username || target_user_id
+
   if (!targetUsers || targetUsers.length === 0) {
     return new Response(
       JSON.stringify({ error: 'User not found' }),
@@ -569,7 +591,7 @@ async function handleBanUser(supabase: any, params: any) {
     type: shadow_ban ? 'user_shadow_banned' : 'user_banned',
     user: {
       id: target_user_id,
-      username: `User ${target_user_id}`
+      username: targetUsername
     },
     comment: {
       client_type: targetUsers[0]?.commentum_client_type

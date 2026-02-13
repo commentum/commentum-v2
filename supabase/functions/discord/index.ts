@@ -489,7 +489,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           choices: [
             { name: 'Moderator', value: 'moderator' },
             { name: 'Admin', value: 'admin' },
-            { name: 'Super Admin', value: 'super_admin' }
+            { name: 'Super Admin', value: 'super_admin' },
+            { name: 'Owner', value: 'owner' }
           ]
         },
         {
@@ -518,7 +519,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           choices: [
             { name: 'User', value: 'user' },
             { name: 'Moderator', value: 'moderator' },
-            { name: 'Admin', value: 'admin' }
+            { name: 'Admin', value: 'admin' },
+            { name: 'Super Admin', value: 'super_admin' }
           ]
         },
         {

@@ -238,18 +238,20 @@ async function handleCreateReport(supabase: any, params: any) {
       user_id: comment.user_id,
       content: comment.content,
       client_type: comment.client_type,
-      media_id: comment.media_id
+      media_id: comment.media_id,
+      media_type: comment.media_type
     },
     user: {
       id: reporter_id,
-      username: `User ${reporter_id}`
+      username: reporter_info?.username || reporter_id
     },
     media: {
       id: comment.media_id,
       title: comment.media_title,
       type: comment.media_type,
       year: comment.media_year,
-      poster: comment.media_poster
+      poster: comment.media_poster,
+      client_type: comment.client_type
     },
     reportReason: reason
   })
@@ -356,7 +358,8 @@ async function handleResolveReport(supabase: any, params: any) {
       user_id: fullComment.user_id,
       content: fullComment.content,
       client_type: fullComment.client_type,
-      media_id: fullComment.media_id
+      media_id: fullComment.media_id,
+      media_type: fullComment.media_type
     },
     moderator: {
       id: moderator_id,
@@ -367,7 +370,8 @@ async function handleResolveReport(supabase: any, params: any) {
       title: fullComment.media_title,
       type: fullComment.media_type,
       year: fullComment.media_year,
-      poster: fullComment.media_poster
+      poster: fullComment.media_poster,
+      client_type: fullComment.client_type
     },
     reason: review_notes || `Report ${resolution}`,
     reportReason: reports[reportIndex].reason

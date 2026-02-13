@@ -246,8 +246,8 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       return createErrorResponse('user_id and role are required.')
     }
 
-    if (!['moderator', 'admin', 'super_admin'].includes(newRole)) {
-      return createErrorResponse('Role must be moderator, admin, or super_admin.')
+    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(newRole)) {
+      return createErrorResponse('Role must be moderator, admin, super_admin, or owner.')
     }
 
     // Get target user's current role from commentum_users table
@@ -340,8 +340,8 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
       return createErrorResponse('user_id and role are required.')
     }
 
-    if (!['user', 'moderator', 'admin'].includes(newRole)) {
-      return createErrorResponse('Role must be user, moderator, or admin.')
+    if (!['user', 'moderator', 'admin', 'super_admin'].includes(newRole)) {
+      return createErrorResponse('Role must be user, moderator, admin, or super_admin.')
     }
 
     // Get target user's current role from commentum_users table

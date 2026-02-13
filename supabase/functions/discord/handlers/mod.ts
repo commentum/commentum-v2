@@ -48,17 +48,21 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
     switch (action) {
       case 'mod_delete': {
         // mod_delete:commentId:userId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can delete comments.', true)
         }
         const commentId = id1
         
-        // Check if already deleted
+        // Get comment to check owner's role
         const { data: comment } = await supabase
           .from('comments')
-          .select('deleted, deleted_by')
+          .select('deleted, deleted_by, user_id')
           .eq('id', commentId)
           .single()
+        
+        if (!comment) {
+          return createButtonResponse('❌ Comment not found.', true)
+        }
         
         if (comment?.deleted) {
           // Get mod name who deleted
@@ -71,6 +75,12 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse(`🗑️ Comment already deleted by **${deleterName}**.`, true)
         }
         
+        // Check if target user has equal or higher role
+        const targetUserRole = await getTargetUserRole(supabase, comment.user_id)
+        if (!canModerateUser(userRole, targetUserRole)) {
+          return createButtonResponse(`❌ Cannot delete comment from **${targetUserRole}**. You need higher role.`, true)
+        }
+        
         const { error } = await supabase
           .from('comments')
           .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
@@ -81,10 +91,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_warn': {
         // mod_warn:userId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can warn users.', true)
         }
         const targetUserId = id1
+        
+        // Check if target user has equal or higher role
+        const targetUserRole = await getTargetUserRole(supabase, targetUserId)
+        if (!canModerateUser(userRole, targetUserRole)) {
+          return createButtonResponse(`❌ Cannot warn **${targetUserRole}**. You need higher role.`, true)
+        }
         
         // Check current warning count and who warned
         const { data: targetUsers } = await supabase
@@ -112,10 +128,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_mute': {
         // mod_mute:userId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can mute users.', true)
         }
         const targetUserId = id1
+        
+        // Check if target user has equal or higher role
+        const targetUserRole = await getTargetUserRole(supabase, targetUserId)
+        if (!canModerateUser(userRole, targetUserRole)) {
+          return createButtonResponse(`❌ Cannot mute **${targetUserRole}**. You need higher role.`, true)
+        }
         
         // Check if already muted
         const { data: userStatus } = await supabase
@@ -158,10 +180,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_ban': {
         // mod_ban:userId
-        if (!['admin', 'super_admin'].includes(userRole)) {
+        if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only admins can ban users.', true)
         }
         const targetUserId = id1
+        
+        // Check if target user has equal or higher role
+        const targetUserRole = await getTargetUserRole(supabase, targetUserId)
+        if (!canModerateUser(userRole, targetUserRole)) {
+          return createButtonResponse(`❌ Cannot ban **${targetUserRole}**. You need higher role.`, true)
+        }
         
         // Check if already banned
         const { data: userStatus } = await supabase
@@ -202,11 +230,17 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_del_warn': {
         // mod_del_warn:commentId:userId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can perform this action.', true)
         }
         const commentId = id1
         const targetUserId = id2
+        
+        // Check if target user has equal or higher role
+        const targetUserRole = await getTargetUserRole(supabase, targetUserId)
+        if (!canModerateUser(userRole, targetUserRole)) {
+          return createButtonResponse(`❌ Cannot warn **${targetUserRole}**. You need higher role.`, true)
+        }
         
         // Check if already deleted
         const { data: comment } = await supabase
@@ -249,11 +283,17 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_del_ban': {
         // mod_del_ban:commentId:userId
-        if (!['admin', 'super_admin'].includes(userRole)) {
+        if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only admins can ban users.', true)
         }
         const commentId = id1
         const targetUserId = id2
+        
+        // Check if target user has equal or higher role
+        const targetUserRole = await getTargetUserRole(supabase, targetUserId)
+        if (!canModerateUser(userRole, targetUserRole)) {
+          return createButtonResponse(`❌ Cannot ban **${targetUserRole}**. You need higher role.`, true)
+        }
         
         // Check if already deleted and banned
         const { data: comment } = await supabase
@@ -314,7 +354,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'report_approve': {
         // report_approve:commentId:userId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can approve reports.', true)
         }
         const commentId = id1
@@ -340,7 +380,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'report_dismiss': {
         // report_dismiss:commentId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can dismiss reports.', true)
         }
         const commentId = id1
@@ -366,7 +406,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_unpin': {
         // mod_unpin:commentId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can unpin comments.', true)
         }
         const commentId = id1
@@ -392,7 +432,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_unlock': {
         // mod_unlock:commentId
-        if (!['moderator', 'admin', 'super_admin'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can unlock threads.', true)
         }
         const commentId = id1
@@ -452,6 +492,32 @@ function createButtonResponse(content: string, ephemeral: boolean = false): Resp
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } }
   )
+}
+
+// Role hierarchy for permission checks
+const ROLE_HIERARCHY: Record<string, number> = {
+  'user': 0,
+  'moderator': 1,
+  'admin': 2,
+  'super_admin': 3,
+  'owner': 4
+}
+
+// Check if moderator can perform action on target
+function canModerateUser(moderatorRole: string, targetRole: string): boolean {
+  return (ROLE_HIERARCHY[moderatorRole] || 0) > (ROLE_HIERARCHY[targetRole] || 0)
+}
+
+// Get target user's role from commentum_users table
+async function getTargetUserRole(supabase: any, targetUserId: string): Promise<string> {
+  const { data } = await supabase
+    .from('commentum_users')
+    .select('commentum_user_role')
+    .eq('commentum_user_id', targetUserId)
+    .limit(1)
+    .single()
+  
+  return data?.commentum_user_role || 'user'
 }
 
 export async function routeInteraction(supabase: any, interaction: any): Promise<Response> {

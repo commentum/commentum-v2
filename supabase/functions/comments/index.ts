@@ -402,6 +402,7 @@ async function handleCreateComment(supabase: any, params: any) {
       content: comment.content,
       client_type: comment.client_type,
       media_id: comment.media_id,
+      media_type: comment.media_type,
       parent_id: comment.parent_id
     },
     user: userInfo,
@@ -410,7 +411,8 @@ async function handleCreateComment(supabase: any, params: any) {
       title: mediaInfo.title,
       year: mediaInfo.year,
       poster: mediaInfo.poster,
-      type: mediaInfo.type
+      type: mediaInfo.type,
+      client_type: comment.client_type
     }
   })
 
@@ -489,7 +491,8 @@ async function handleEditComment(supabase: any, params: any) {
       user_id: updatedComment.user_id,
       content: updatedComment.content,
       client_type: updatedComment.client_type,
-      media_id: updatedComment.media_id
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type
     },
     user: {
       id: updatedComment.user_id,
@@ -501,7 +504,8 @@ async function handleEditComment(supabase: any, params: any) {
       title: updatedComment.media_title,
       type: updatedComment.media_type,
       year: updatedComment.media_year,
-      poster: updatedComment.media_poster
+      poster: updatedComment.media_poster,
+      client_type: updatedComment.client_type
     }
   })
 
@@ -564,7 +568,8 @@ async function handleDeleteComment(supabase: any, params: any) {
       user_id: deletedComment.user_id,
       content: comment.content,
       client_type: deletedComment.client_type,
-      media_id: deletedComment.media_id
+      media_id: deletedComment.media_id,
+      media_type: deletedComment.media_type
     },
     moderator: null,
     user: {
@@ -577,7 +582,8 @@ async function handleDeleteComment(supabase: any, params: any) {
       title: deletedComment.media_title,
       type: deletedComment.media_type,
       year: deletedComment.media_year,
-      poster: deletedComment.media_poster
+      poster: deletedComment.media_poster,
+      client_type: deletedComment.client_type
     }
   })
 
@@ -637,7 +643,8 @@ async function handleModDeleteComment(supabase: any, params: any) {
       user_id: deletedComment.user_id,
       content: comment.content,
       client_type: deletedComment.client_type,
-      media_id: deletedComment.media_id
+      media_id: deletedComment.media_id,
+      media_type: deletedComment.media_type
     },
     moderator: {
       id: user_id,
@@ -653,7 +660,8 @@ async function handleModDeleteComment(supabase: any, params: any) {
       title: deletedComment.media_title,
       type: deletedComment.media_type,
       year: deletedComment.media_year,
-      poster: deletedComment.media_poster
+      poster: deletedComment.media_poster,
+      client_type: deletedComment.client_type
     }
   })
 
