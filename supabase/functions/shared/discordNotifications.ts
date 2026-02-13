@@ -1,4 +1,5 @@
 // Enhanced Discord notification utilities for Commentum v2
+// Updated to use Discord Bot API with Components V2 for interactive buttons
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
@@ -16,50 +17,320 @@ export interface DiscordNotificationData {
   voteScore?: number;
 }
 
+// ====================================
+// DISCORD COMPONENTS V2 CONSTANTS
+// ====================================
+
+// Component types for Discord Components V2
+const COMPONENT_TYPES = {
+  ACTION_ROW: 1,
+  BUTTON: 2,
+  STRING_SELECT: 3,
+  TEXT_DISPLAY: 10,
+  SEPARATOR: 14,
+  CONTAINER: 17,
+} as const
+
+// Button styles
+const BUTTON_STYLES = {
+  PRIMARY: 1,
+  SECONDARY: 2,
+  SUCCESS: 3,
+  DANGER: 4,
+  LINK: 5,
+} as const
+
+// Components V2 flag (must be set in message flags)
+const IS_COMPONENTS_V2 = 32768
+
+// ====================================
+// COMPONENTS V2 BUILDERS
+// ====================================
+
+interface ButtonComponent {
+  type: number
+  style: number
+  label: string
+  custom_id?: string
+  url?: string
+  disabled?: boolean
+  emoji?: { name: string }
+}
+
+interface ActionRowComponent {
+  type: number
+  components: ButtonComponent[]
+}
+
+interface TextDisplayComponent {
+  type: number
+  content: string
+}
+
+interface SeparatorComponent {
+  type: number
+  divider?: boolean
+  spacing?: number
+}
+
+interface ContainerComponent {
+  type: number
+  accent_color?: number
+  components: any[]
+  spoiler?: boolean
+}
+
+// Build a button component
+function buildButton(
+  label: string, 
+  style: number, 
+  customId?: string, 
+  url?: string, 
+  emoji?: string,
+  disabled: boolean = false
+): ButtonComponent {
+  const button: ButtonComponent = {
+    type: COMPONENT_TYPES.BUTTON,
+    style,
+    label,
+    disabled
+  }
+  
+  if (customId) button.custom_id = customId
+  if (url) button.url = url
+  if (emoji) button.emoji = { name: emoji }
+  
+  return button
+}
+
+// Build an action row with buttons
+function buildActionRow(buttons: ButtonComponent[]): ActionRowComponent {
+  return {
+    type: COMPONENT_TYPES.ACTION_ROW,
+    components: buttons
+  }
+}
+
+// Build a text display component (markdown supported)
+function buildTextDisplay(content: string): TextDisplayComponent {
+  return {
+    type: COMPONENT_TYPES.TEXT_DISPLAY,
+    content
+  }
+}
+
+// Build a separator
+function buildSeparator(divider: boolean = true, spacing: number = 1): SeparatorComponent {
+  return {
+    type: COMPONENT_TYPES.SEPARATOR,
+    divider,
+    spacing
+  }
+}
+
+// Build a container with accent color
+function buildContainer(components: any[], accentColor?: number): ContainerComponent {
+  const container: ContainerComponent = {
+    type: COMPONENT_TYPES.CONTAINER,
+    components
+  }
+  
+  if (accentColor !== undefined) {
+    container.accent_color = accentColor
+  }
+  
+  return container
+}
+
+// ====================================
+// MODERATION BUTTON GENERATORS
+// ====================================
+
+interface ModerationButtons {
+  commentButtonsRow?: ActionRowComponent
+  userButtonRow?: ActionRowComponent
+}
+
+// Generate moderation buttons based on notification type
+function generateModerationButtons(data: DiscordNotificationData): ModerationButtons {
+  const buttons: ModerationButtons = {}
+  
+  // Comment action buttons
+  if (data.comment?.id) {
+    const commentId = data.comment.id
+    const userId = data.comment.user_id || data.user?.id
+    
+    buttons.commentButtonRow = buildActionRow([
+      // Delete comment button
+      buildButton('Delete', BUTTON_STYLES.DANGER, `mod_delete:${commentId}:${userId}`, undefined, '🗑️'),
+      // View comment button (link to the comment if we have a URL)
+      buildButton('View Context', BUTTON_STYLES.LINK, undefined, data.comment.url || `https://discord.com`, undefined),
+    ])
+  }
+  
+  // User action buttons (for moderation notifications)
+  if (data.user?.id && ['report_filed', 'user_warned', 'comment_created'].includes(data.type)) {
+    const userId = data.user.id
+    
+    buttons.userButtonRow = buildActionRow([
+      buildButton('Warn', BUTTON_STYLES.SECONDARY, `mod_warn:${userId}`, undefined, '⚠️'),
+      buildButton('Mute', BUTTON_STYLES.SECONDARY, `mod_mute:${userId}`, undefined, '🔇'),
+      buildButton('Ban', BUTTON_STYLES.DANGER, `mod_ban:${userId}`, undefined, '🔨'),
+    ])
+  }
+  
+  return buttons
+}
+
+// Generate buttons for report notifications
+function generateReportButtons(data: DiscordNotificationData): ActionRowComponent[] {
+  const commentId = data.comment?.id
+  const userId = data.comment?.user_id || data.user?.id
+  
+  const rows: ActionRowComponent[] = []
+  
+  // First row: Resolve/Dismiss report
+  if (commentId) {
+    rows.push(buildActionRow([
+      buildButton('Approve Comment', BUTTON_STYLES.SUCCESS, `report_approve:${commentId}:${userId}`, undefined, '✅'),
+      buildButton('Dismiss Report', BUTTON_STYLES.SECONDARY, `report_dismiss:${commentId}`, undefined, '❌'),
+    ]))
+    
+    // Second row: Moderation actions
+    rows.push(buildActionRow([
+      buildButton('Delete & Warn', BUTTON_STYLES.DANGER, `mod_delete_warn:${commentId}:${userId}`, undefined, '🗑️⚠️'),
+      buildButton('Delete & Ban', BUTTON_STYLES.DANGER, `mod_delete_ban:${commentId}:${userId}`, undefined, '🗑️🔨'),
+    ]))
+  }
+  
+  return rows
+}
+
+// ====================================
+// DISCORD API HELPERS
+// ====================================
+
+// Bot API request helper
+async function discordBotApi(
+  endpoint: string, 
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' = 'GET',
+  body?: any,
+  botToken?: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const token = botToken || Deno.env.get('DISCORD_BOT_TOKEN')
+    
+    if (!token) {
+      return { success: false, error: 'Discord bot token not configured' }
+    }
+    
+    const response = await fetch(`https://discord.com/api/v10${endpoint}`, {
+      method,
+      headers: {
+        'Authorization': `Bot ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined
+    })
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error(`Discord API error (${response.status}):`, errorText)
+      return { success: false, error: errorText }
+    }
+    
+    // Handle empty responses
+    const responseText = await response.text()
+    let data = null
+    if (responseText && responseText.trim()) {
+      try {
+        data = JSON.parse(responseText)
+      } catch {
+        // Response wasn't JSON, that's okay
+      }
+    }
+    
+    return { success: true, data }
+    
+  } catch (error) {
+    console.error('Discord API request failed:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+// Send message to channel with Components V2
+async function sendComponentsV2Message(
+  channelId: string,
+  components: any[],
+  botToken?: string
+): Promise<{ success: boolean; messageId?: string; error?: string }> {
+  const body = {
+    flags: IS_COMPONENTS_V2,
+    components
+  }
+  
+  const result = await discordBotApi(
+    `/channels/${channelId}/messages`,
+    'POST',
+    body,
+    botToken
+  )
+  
+  if (result.success && result.data?.id) {
+    return { success: true, messageId: result.data.id }
+  }
+  
+  return { success: false, error: result.error }
+}
+
+// ====================================
+// NOTIFICATION QUEUE SYSTEM
+// ====================================
+
 // Background notification queue - stores notifications for async processing
-let notificationQueue: DiscordNotificationData[] = [];
-let isProcessingQueue = false;
+let notificationQueue: DiscordNotificationData[] = []
+let isProcessingQueue = false
 
 // Add notification to background queue - NON-BLOCKING
 export function queueDiscordNotification(data: DiscordNotificationData) {
   // Add to queue without waiting
-  notificationQueue.push(data);
+  notificationQueue.push(data)
   
   // Start background processing if not already running
   if (!isProcessingQueue) {
-    processNotificationQueue();
+    processNotificationQueue()
   }
   
   // Immediately return success - don't wait for Discord
-  return { success: true, queued: true, message: 'Notification queued for background processing' };
+  return { success: true, queued: true, message: 'Notification queued for background processing' }
 }
 
 // Legacy function for backward compatibility - now just queues the notification
 export async function sendDiscordNotification(supabase: any, data: DiscordNotificationData) {
   // Just queue it and return immediately - don't block the main flow
-  return queueDiscordNotification(data);
+  return queueDiscordNotification(data)
 }
 
 // Background queue processor - runs independently
 async function processNotificationQueue() {
   if (isProcessingQueue || notificationQueue.length === 0) {
-    return;
+    return
   }
   
-  isProcessingQueue = true;
+  isProcessingQueue = true
   
   try {
     while (notificationQueue.length > 0) {
-      const notification = notificationQueue.shift();
+      const notification = notificationQueue.shift()
       if (notification) {
         // Process each notification without blocking the main flow
         processNotificationInBackground(notification).catch(error => {
-          console.error('Background notification processing failed:', error);
-        });
+          console.error('Background notification processing failed:', error)
+        })
       }
     }
   } finally {
-    isProcessingQueue = false;
+    isProcessingQueue = false
   }
 }
 
@@ -67,20 +338,24 @@ async function processNotificationQueue() {
 async function processNotificationInBackground(data: DiscordNotificationData) {
   try {
     // Create a temporary Supabase client for background processing
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabase = createClient(supabaseUrl, supabaseServiceKey)
     
-    await sendDiscordNotificationInternal(supabase, data);
+    await sendDiscordNotificationInternal(supabase, data)
   } catch (error) {
-    console.error('Background notification error:', error);
+    console.error('Background notification error:', error)
   }
 }
 
-// Internal Discord notification implementation - separated from public API
+// ====================================
+// CORE NOTIFICATION SENDING LOGIC
+// ====================================
+
+// Internal Discord notification implementation - uses Bot API with Components V2
 async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotificationData) {
   try {
-    // Check if Discord notifications are enabled (still use config table for this global setting)
+    // Check if Discord notifications are enabled
     const { data: config } = await supabase
       .from('config')
       .select('value')
@@ -91,17 +366,30 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       return { success: false, reason: 'Discord notifications disabled' }
     }
 
+    // Get bot token from config
+    const { data: tokenConfig } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'discord_bot_token')
+      .single()
+
+    const botToken = tokenConfig?.value
+
+    if (!botToken) {
+      return { success: false, reason: 'Discord bot token not configured in config table' }
+    }
+
     // Determine which channel to send to based on notification type
     const channelType = getChannelForNotificationType(data.type)
     
-    // Get ALL appropriate webhook URLs from ALL active servers
-    const webhookUrls = await getChannelWebhookUrls(supabase, channelType)
+    // Get ALL appropriate channel IDs from ALL active servers
+    const channelConfigs = await getChannelConfigs(supabase, channelType)
     
-    if (webhookUrls.length === 0) {
-      return { success: false, reason: `No webhook URLs configured for ${channelType} channel in any active server` }
+    if (channelConfigs.length === 0) {
+      return { success: false, reason: `No channel IDs configured for ${channelType} channel in any active server` }
     }
 
-    // Check if this notification type is enabled (still use config table for this global setting)
+    // Check if this notification type is enabled
     const { data: typesConfig } = await supabase
       .from('config')
       .select('value')
@@ -113,16 +401,16 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       return { success: false, reason: 'Notification type disabled' }
     }
 
-    // Create Discord embed content
-    const embedData = createDiscordEmbed(data)
+    // Build Components V2 message
+    const components = createComponentsV2Message(data)
 
     // Log notification for tracking using comment ID if available
     let notificationId = null
+    
+    // For comment notifications, use comment ID; for others, create new record
     if (data.comment?.id) {
-      // Use the comment ID for the notification record
       notificationId = data.comment.id
     } else {
-      // For non-comment notifications, use the sequence
       const { data: newNotification } = await supabase
         .from('discord_notifications')
         .insert({
@@ -132,7 +420,6 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
           comment_data: data.comment ? JSON.stringify(data.comment) : null,
           user_data: data.user ? JSON.stringify(data.user) : null,
           media_data: data.media ? JSON.stringify(data.media) : null,
-          webhook_url: JSON.stringify(webhookUrls),
           delivery_status: 'pending'
         })
         .select('id')
@@ -143,49 +430,57 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       }
     }
 
-    // For comment notifications, update/insert with comment ID
-    if (data.comment?.id) {
-      await supabase
-        .from('discord_notifications')
-        .upsert({
-          id: data.comment.id, // Use comment ID
-          notification_type: data.type,
-          target_id: data.comment?.id?.toString() || data.user?.id,
-          target_type: data.comment ? 'comment' : data.user ? 'user' : 'unknown',
-          comment_data: data.comment ? JSON.stringify(data.comment) : null,
-          user_data: data.user ? JSON.stringify(data.user) : null,
-          media_data: data.media ? JSON.stringify(data.media) : null,
-          webhook_url: JSON.stringify(webhookUrls),
-          delivery_status: 'pending'
-        }, {
-          onConflict: 'id'
-        })
-    }
-
-    // Send to ALL configured webhooks for this channel type
+    // Send to ALL configured channels
     const sendResults = []
     
-    for (const webhookUrl of webhookUrls) {
-      const sendResult = await sendToWebhook(webhookUrl, embedData, data.type)
+    for (const channelConfig of channelConfigs) {
+      const sendResult = await sendComponentsV2Message(
+        channelConfig.channelId,
+        components,
+        botToken
+      )
+      
       sendResults.push({
-        webhookUrl,
+        guildId: channelConfig.guildId,
+        channelId: channelConfig.channelId,
         success: sendResult.success,
         messageId: sendResult.messageId,
         error: sendResult.error
       })
+
+      // Update notification record with message ID for each server
+      if (sendResult.success && sendResult.messageId && notificationId) {
+        await supabase
+          .from('discord_notifications')
+          .upsert({
+            id: notificationId,
+            notification_type: data.type,
+            target_id: data.comment?.id?.toString() || data.user?.id,
+            target_type: data.comment ? 'comment' : data.user ? 'user' : 'unknown',
+            comment_data: data.comment ? JSON.stringify(data.comment) : null,
+            user_data: data.user ? JSON.stringify(data.user) : null,
+            media_data: data.media ? JSON.stringify(data.media) : null,
+            channel_id: channelConfig.channelId,
+            guild_id: channelConfig.guildId,
+            message_id: sendResult.messageId,
+            delivery_status: 'sent',
+            delivered_at: new Date().toISOString()
+          }, {
+            onConflict: 'id'
+          })
+      }
     }
 
     const successfulSends = sendResults.filter(r => r.success)
     const failedSends = sendResults.filter(r => !r.success)
 
-    // Update notification record with results if we have an ID
+    // Update notification record with overall status
     if (notificationId) {
       await supabase
         .from('discord_notifications')
         .update({
           delivery_status: failedSends.length === 0 ? 'sent' : 'partial',
           delivery_error: failedSends.length > 0 ? JSON.stringify(failedSends.map(f => f.error)) : null,
-          webhook_url: JSON.stringify(webhookUrls),
           delivered_at: failedSends.length === 0 ? new Date().toISOString() : null
         })
         .eq('id', notificationId)
@@ -194,7 +489,7 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
     return { 
       success: failedSends.length === 0, 
       channel: channelType,
-      totalWebhooks: webhookUrls.length,
+      totalChannels: channelConfigs.length,
       successful: successfulSends.length,
       failed: failedSends.length,
       results: sendResults,
@@ -223,8 +518,11 @@ function getChannelForNotificationType(notificationType: string): 'comments' | '
   return commentsChannelTypes.includes(notificationType) ? 'comments' : 'moderation'
 }
 
-// Get the webhook URLs for a specific channel from ALL active servers
-async function getChannelWebhookUrls(supabase: any, channelType: 'comments' | 'moderation'): Promise<string[]> {
+// Get the channel IDs for a specific channel type from ALL active servers
+async function getChannelConfigs(
+  supabase: any, 
+  channelType: 'comments' | 'moderation'
+): Promise<{ guildId: string; channelId: string }[]> {
   try {
     // Get ALL active server configurations
     const { data: serverConfigs } = await supabase
@@ -237,461 +535,285 @@ async function getChannelWebhookUrls(supabase: any, channelType: 'comments' | 'm
       return []
     }
 
-    const webhookUrls: string[] = []
+    const channels: { guildId: string; channelId: string }[] = []
 
-    // For each server, get the appropriate webhook URL
+    // For each server, get the appropriate channel ID
     for (const serverConfig of serverConfigs) {
-      let webhookUrl: string | null = null
+      const channelId = channelType === 'comments' 
+        ? serverConfig.channel_id 
+        : serverConfig.moderation_channel_id
 
-      if (channelType === 'comments') {
-        // Use existing webhook_url for comments channel
-        webhookUrl = serverConfig.webhook_url
-      } else {
-        // Use new moderation_webhook_url for moderation channel
-        webhookUrl = serverConfig.moderation_webhook_url
-      }
-
-      if (webhookUrl) {
-        webhookUrls.push(webhookUrl)
+      if (channelId) {
+        channels.push({
+          guildId: serverConfig.guild_id,
+          channelId
+        })
       }
     }
 
-    return webhookUrls
+    return channels
   } catch (error) {
-    console.error('Error fetching webhook URLs from server_configs:', error)
+    console.error('Error fetching channel IDs from server_configs:', error)
     return []
   }
 }
 
-// Send message to a specific webhook
-async function sendToWebhook(webhookUrl: string, embedData: any, notificationType: string) {
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        username: 'Commentum Bot',
-        avatar_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png',
-        embeds: [embedData]
-      })
-    })
+// ====================================
+// COMPONENTS V2 MESSAGE BUILDERS
+// ====================================
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(`Discord webhook error for ${notificationType}:`, errorText)
-      return { success: false, error: errorText }
-    }
-
-    // Parse Discord response (webhooks might return empty response on success)
-    let result = { id: null }
-    try {
-      const responseText = await response.text()
-      if (responseText && responseText.trim()) {
-        result = JSON.parse(responseText)
-      }
-    } catch (parseError) {
-      console.log('Discord webhook response parsing (this is normal for empty responses):', parseError.message)
-      // Use empty result object for empty responses
-    }
-
-    return { success: true, messageId: result.id }
-
-  } catch (error) {
-    console.error(`Failed to send to webhook:`, error)
-    return { success: false, error: error.message }
+// Create Components V2 message based on notification type
+function createComponentsV2Message(data: DiscordNotificationData): any[] {
+  const components: any[] = []
+  
+  // Build the container with content
+  const containerContent = buildNotificationContent(data)
+  
+  // Add container with content
+  components.push(containerContent)
+  
+  // Add separator
+  components.push(buildSeparator(true, 1))
+  
+  // Add interactive buttons based on notification type
+  const buttons = buildInteractiveButtons(data)
+  if (buttons.length > 0) {
+    components.push(...buttons)
   }
+  
+  return components
 }
 
-function createDiscordEmbed(data: DiscordNotificationData): any {
-  const baseEmbed = {
-    timestamp: new Date().toISOString(),
-    footer: {
-      text: 'Commentum v2',
-      icon_url: 'https://i.ibb.co/67QzfyTf/1769510599299.png'
-    }
-  }
-
+// Build notification content as Components V2 container
+function buildNotificationContent(data: DiscordNotificationData): ContainerComponent {
+  const lines: string[] = []
+  let accentColor: number | undefined
+  
+  // Build header based on type
   switch (data.type) {
     case 'comment_created':
-      return {
-        ...baseEmbed,
-        title: 'New Comment Posted',
-        description: `A new comment was posted by **${data.comment?.username}**`,
-        color: 0x00FF00, // Green
-        fields: [
-          {
-            name: 'User Info',
-            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})\nClient: ${data.comment?.client_type}`,
-            inline: true
-          },
-          {
-            name: 'Media Info',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Comment Details',
-            value: `ID: \`${data.comment?.id}\`\nContent: ${data.comment?.content}`,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## 💬 New Comment Posted')
+      lines.push(`**${data.comment?.username}** posted a new comment`)
+      accentColor = 0x00FF00 // Green
+      break
+      
     case 'comment_updated':
-      return {
-        ...baseEmbed,
-        title: 'Comment Edited',
-        description: `Comment \`${data.comment?.id}\` was edited by **${data.comment?.username}**`,
-        color: 0x9B59B6, // Purple
-        fields: [
-          {
-            name: 'User Info',
-            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})\nClient: ${data.comment?.client_type}`,
-            inline: true
-          },
-          {
-            name: 'Media Info',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Updated Content',
-            value: `ID: \`${data.comment?.id}\`\nNew Content: ${data.comment?.content}`,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## ✏️ Comment Edited')
+      lines.push(`Comment \`${data.comment?.id}\` was edited by **${data.comment?.username}**`)
+      accentColor = 0x9B59B6 // Purple
+      break
+      
     case 'comment_deleted':
-      return {
-        ...baseEmbed,
-        title: 'Comment Deleted',
-        description: `Comment \`${data.comment?.id}\` was deleted by **${data.moderator?.username || data.comment?.username}**`,
-        color: 0xFF0000, // Red
-        fields: [
-          {
-            name: 'User Info',
-            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})\nClient: ${data.comment?.client_type}`,
-            inline: true
-          },
-          {
-            name: 'Media Info',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Deleted By',
-            value: data.moderator?.username || 'Original Author',
-            inline: true
-          },
-          {
-            name: 'Deleted Comment',
-            value: `ID: \`${data.comment?.id}\`\nOriginal Content: ${data.comment?.content}`,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## 🗑️ Comment Deleted')
+      lines.push(`Comment \`${data.comment?.id}\` was deleted by **${data.moderator?.username || data.comment?.username}**`)
+      accentColor = 0xFF0000 // Red
+      break
+      
     case 'vote_cast':
-      return {
-        ...baseEmbed,
-        title: `${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} Cast`,
-        description: `**${data.user?.username}** voted on comment \`${data.comment?.id}\``,
-        color: 0xFFA500, // Orange
-        fields: [
-          {
-            name: 'Vote Details',
-            value: `Type: ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} | Score: ${data.voteScore} (total)\nComment ID: \`${data.comment?.id}\` | Voter: \`${data.user?.id}\``,
-            inline: true
-          },
-          {
-            name: 'Comment',
-            value: data.comment?.content,
-            inline: false
-          }
-        ]
-      }
-
+      const voteEmoji = data.voteType === 'upvote' ? '👍' : '👎'
+      lines.push(`## ${voteEmoji} ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} Cast`)
+      lines.push(`**${data.user?.username}** voted on comment \`${data.comment?.id}\``)
+      accentColor = 0xFFA500 // Orange
+      break
+      
     case 'vote_removed':
-      return {
-        ...baseEmbed,
-        title: 'Vote Removed',
-        description: `**${data.user?.username}** removed vote from comment \`${data.comment?.id}\``,
-        color: 0xFFA500, // Orange
-        fields: [
-          {
-            name: 'Vote Details',
-            value: `New Score: ${data.voteScore}\nComment ID: \`${data.comment?.id}\`\nUser: \`${data.user?.id}\``,
-            inline: true
-          },
-          {
-            name: 'Comment',
-            value: data.comment?.content,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## ↩️ Vote Removed')
+      lines.push(`**${data.user?.username}** removed their vote from comment \`${data.comment?.id}\``)
+      accentColor = 0xFFA500 // Orange
+      break
+      
     case 'report_filed':
-      return {
-        ...baseEmbed,
-        title: 'Comment Reported',
-        description: `Comment \`${data.comment?.id}\` was reported by **${data.user?.username}**`,
-        color: 0xFF8C00, // Dark Orange
-        fields: [
-          {
-            name: 'Report Details',
-            value: `Reason: ${data.reportReason}\nComment ID: \`${data.comment?.id}\`\nReported By: ${data.user?.username}`,
-            inline: false
-          },
-          {
-            name: 'Comment Author',
-            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Reported Comment',
-            value: data.comment?.content,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## 🚨 Comment Reported')
+      lines.push(`Comment \`${data.comment?.id}\` was reported by **${data.user?.username}**`)
+      accentColor = 0xFF8C00 // Dark Orange
+      break
+      
     case 'user_banned':
-      return {
-        ...baseEmbed,
-        title: 'User Banned',
-        description: `**${data.user?.username}** has been banned from the system`,
-        color: 0x8B0000, // Dark Red
-        fields: [
-          {
-            name: 'Ban Details',
-            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nBanned By: ${data.moderator?.username || 'System'}`,
-            inline: false
-          },
-          {
-            name: 'Client Type',
-            value: data.comment?.client_type,
-            inline: true
-          }
-        ]
-      }
-
+      lines.push('## 🔨 User Banned')
+      lines.push(`**${data.user?.username}** has been banned`)
+      accentColor = 0x8B0000 // Dark Red
+      break
+      
     case 'user_warned':
-      return {
-        ...baseEmbed,
-        title: 'User Warned',
-        description: `**${data.user?.username}** has received a warning`,
-        color: 0xFFD700, // Gold
-        fields: [
-          {
-            name: 'Warning Details',
-            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nWarned By: ${data.moderator?.username || 'System'}`,
-            inline: false
-          },
-          {
-            name: 'Client Type',
-            value: data.comment?.client_type,
-            inline: true
-          }
-        ]
-      }
-
+      lines.push('## ⚠️ User Warned')
+      lines.push(`**${data.user?.username}** has received a warning`)
+      accentColor = 0xFFD700 // Gold
+      break
+      
     case 'user_muted':
-      return {
-        ...baseEmbed,
-        title: 'User Muted',
-        description: `**${data.user?.username}** has been muted`,
-        color: 0x808080, // Gray
-        fields: [
-          {
-            name: 'Mute Details',
-            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nMuted By: ${data.moderator?.username || 'System'}`,
-            inline: false
-          },
-          {
-            name: 'Client Type',
-            value: data.comment?.client_type,
-            inline: true
-          }
-        ]
-      }
-
+      lines.push('## 🔇 User Muted')
+      lines.push(`**${data.user?.username}** has been muted`)
+      accentColor = 0x808080 // Gray
+      break
+      
     case 'user_shadow_banned':
-      return {
-        ...baseEmbed,
-        title: 'User Shadow Banned',
-        description: `**${data.user?.username}** has been shadow banned`,
-        color: 0x4B0082, // Indigo
-        fields: [
-          {
-            name: 'Shadow Ban Details',
-            value: `ID: \`${data.user?.id}\` (${data.user?.username})\nReason: ${data.reason}\nBanned By: ${data.moderator?.username || 'System'}`,
-            inline: false
-          },
-          {
-            name: 'Client Type',
-            value: data.comment?.client_type,
-            inline: true
-          }
-        ]
-      }
-
+      lines.push('## 👻 User Shadow Banned')
+      lines.push(`**${data.user?.username}** has been shadow banned`)
+      accentColor = 0x4B0082 // Indigo
+      break
+      
     case 'comment_pinned':
-      return {
-        ...baseEmbed,
-        title: 'Comment Pinned',
-        description: `Comment \`${data.comment?.id}\` has been pinned by **${data.moderator?.username}**`,
-        color: 0x00BFFF, // Deep Sky Blue
-        fields: [
-          {
-            name: 'Pin Details',
-            value: `Comment ID: \`${data.comment?.id}\`\nPinned By: ${data.moderator?.username}\nReason: ${data.reason || 'No reason provided'}`,
-            inline: false
-          },
-          {
-            name: 'Comment Author',
-            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Pinned Comment',
-            value: data.comment?.content,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## 📌 Comment Pinned')
+      lines.push(`Comment \`${data.comment?.id}\` has been pinned by **${data.moderator?.username}**`)
+      accentColor = 0x00BFFF // Deep Sky Blue
+      break
+      
     case 'comment_locked':
-      return {
-        ...baseEmbed,
-        title: 'Comment Thread Locked',
-        description: `Comment \`${data.comment?.id}\` thread has been locked by **${data.moderator?.username}**`,
-        color: 0x8B4513, // Saddle Brown
-        fields: [
-          {
-            name: 'Lock Details',
-            value: `Comment ID: \`${data.comment?.id}\`\nLocked By: ${data.moderator?.username}\nReason: ${data.reason || 'No reason provided'}`,
-            inline: false
-          },
-          {
-            name: 'Comment Author',
-            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Locked Comment',
-            value: data.comment?.content,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## 🔒 Comment Thread Locked')
+      lines.push(`Comment \`${data.comment?.id}\` thread has been locked by **${data.moderator?.username}**`)
+      accentColor = 0x8B4513 // Saddle Brown
+      break
+      
     case 'comment_unlocked':
-      return {
-        ...baseEmbed,
-        title: 'Comment Thread Unlocked',
-        description: `Comment \`${data.comment?.id}\` thread has been unlocked by **${data.moderator?.username}**`,
-        color: 0x32CD32, // Lime Green
-        fields: [
-          {
-            name: 'Unlock Details',
-            value: `Comment ID: \`${data.comment?.id}\`\nUnlocked By: ${data.moderator?.username}\nReason: ${data.reason || 'No reason provided'}`,
-            inline: false
-          },
-          {
-            name: 'Comment Author',
-            value: `ID: \`${data.comment?.user_id}\` (${data.comment?.username})`,
-            inline: true
-          },
-          {
-            name: 'Media Context',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          }
-        ]
-      }
-
+      lines.push('## 🔓 Comment Thread Unlocked')
+      lines.push(`Comment \`${data.comment?.id}\` thread has been unlocked by **${data.moderator?.username}**`)
+      accentColor = 0x32CD32 // Lime Green
+      break
+      
     case 'report_resolved':
-      return {
-        ...baseEmbed,
-        title: 'Report Resolved',
-        description: `Report for comment \`${data.comment?.id}\` has been resolved by **${data.moderator?.username}**`,
-        color: 0x00FA9A, // Medium Spring Green
-        fields: [
-          {
-            name: 'Resolution Details',
-            value: `Comment ID: \`${data.comment?.id}\`\nResolved By: ${data.moderator?.username}\nResolution: Approved`,
-            inline: false
-          },
-          {
-            name: 'Media Context',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Comment Context',
-            value: data.comment?.content,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## ✅ Report Resolved')
+      lines.push(`Report for comment \`${data.comment?.id}\` has been resolved by **${data.moderator?.username}**`)
+      accentColor = 0x00FA9A // Medium Spring Green
+      break
+      
     case 'report_dismissed':
-      return {
-        ...baseEmbed,
-        title: 'Report Dismissed',
-        description: `Report for comment \`${data.comment?.id}\` has been dismissed by **${data.moderator?.username}**`,
-        color: 0xDC143C, // Crimson
-        fields: [
-          {
-            name: 'Dismissal Details',
-            value: `Comment ID: \`${data.comment?.id}\`\nDismissed By: ${data.moderator?.username}\nResolution: Dismissed`,
-            inline: false
-          },
-          {
-            name: 'Media Context',
-            value: `ID: \`${data.comment?.media_id}\` (${data.media?.type}) (${data.media?.year})\nTitle: ${data.media?.title}`,
-            inline: true
-          },
-          {
-            name: 'Comment Context',
-            value: data.comment?.content,
-            inline: false
-          }
-        ]
-      }
-
+      lines.push('## ❌ Report Dismissed')
+      lines.push(`Report for comment \`${data.comment?.id}\` has been dismissed by **${data.moderator?.username}**`)
+      accentColor = 0xDC143C // Crimson
+      break
+      
     default:
-      return {
-        ...baseEmbed,
-        title: 'System Notification',
-        description: `A system event occurred: ${data.type}`,
-        color: 0x808080, // Gray
-        fields: [
-          {
-            name: 'Event Details',
-            value: `**Type:** ${data.type}\n**Timestamp:** ${new Date().toISOString()}`,
-            inline: false
-          }
-        ]
-      }
+      lines.push('## 📢 System Notification')
+      lines.push(`Event: ${data.type}`)
+      accentColor = 0x808080 // Gray
   }
+  
+  // Add separator after header
+  lines.push('')
+  
+  // Add user info if available
+  if (data.user?.id || data.comment?.user_id) {
+    lines.push(`### 👤 User Info`)
+    lines.push(`- **ID:** \`${data.user?.id || data.comment?.user_id}\``)
+    lines.push(`- **Username:** ${data.user?.username || data.comment?.username}`)
+    if (data.comment?.client_type) {
+      lines.push(`- **Client:** ${data.comment.client_type}`)
+    }
+    lines.push('')
+  }
+  
+  // Add media info if available
+  if (data.media) {
+    lines.push(`### 🎬 Media Info`)
+    lines.push(`- **ID:** \`${data.comment?.media_id}\``)
+    lines.push(`- **Type:** ${data.media.type}`)
+    if (data.media.year) {
+      lines.push(`- **Year:** ${data.media.year}`)
+    }
+    if (data.media.title) {
+      lines.push(`- **Title:** ${data.media.title}`)
+    }
+    lines.push('')
+  }
+  
+  // Add comment content if available
+  if (data.comment?.content) {
+    lines.push(`### 💭 Comment`)
+    lines.push(`> ${data.comment.content.substring(0, 500)}${data.comment.content.length > 500 ? '...' : ''}`)
+    lines.push('')
+  }
+  
+  // Add reason if available
+  if (data.reason) {
+    lines.push(`### 📝 Reason`)
+    lines.push(data.reason)
+    lines.push('')
+  }
+  
+  // Add report reason if available
+  if (data.reportReason) {
+    lines.push(`### 🚨 Report Reason`)
+    lines.push(data.reportReason)
+    lines.push('')
+  }
+  
+  // Add timestamp footer
+  lines.push(`---`)
+  lines.push(`<t:${Math.floor(Date.now() / 1000)}:R> • Commentum v2`)
+  
+  return buildContainer([buildTextDisplay(lines.join('\n'))], accentColor)
+}
+
+// Build interactive buttons based on notification type
+function buildInteractiveButtons(data: DiscordNotificationData): ActionRowComponent[] {
+  const rows: ActionRowComponent[] = []
+  
+  switch (data.type) {
+    case 'comment_created':
+    case 'comment_updated':
+      // Comment notifications: Delete and View buttons
+      if (data.comment?.id) {
+        rows.push(buildActionRow([
+          buildButton('Delete', BUTTON_STYLES.DANGER, `mod_delete:${data.comment.id}:${data.comment.user_id}`, undefined, '🗑️'),
+          buildButton('View', BUTTON_STYLES.LINK, undefined, data.comment?.url || 'https://example.com', '👁️'),
+        ]))
+        
+        // User action buttons
+        if (data.comment?.user_id) {
+          rows.push(buildActionRow([
+            buildButton('Warn User', BUTTON_STYLES.SECONDARY, `mod_warn:${data.comment.user_id}`, undefined, '⚠️'),
+            buildButton('Mute User', BUTTON_STYLES.SECONDARY, `mod_mute:${data.comment.user_id}`, undefined, '🔇'),
+          ]))
+        }
+      }
+      break
+      
+    case 'report_filed':
+      // Report notifications: Quick action buttons
+      if (data.comment?.id) {
+        const userId = data.comment.user_id || data.user?.id
+        rows.push(buildActionRow([
+          buildButton('Approve', BUTTON_STYLES.SUCCESS, `report_approve:${data.comment.id}:${userId}`, undefined, '✅'),
+          buildButton('Dismiss', BUTTON_STYLES.SECONDARY, `report_dismiss:${data.comment.id}`, undefined, '❌'),
+        ]))
+        rows.push(buildActionRow([
+          buildButton('Delete & Warn', BUTTON_STYLES.DANGER, `mod_del_warn:${data.comment.id}:${userId}`, undefined, '🗑️⚠️'),
+          buildButton('Delete & Ban', BUTTON_STYLES.DANGER, `mod_del_ban:${data.comment.id}:${userId}`, undefined, '🗑️🔨'),
+        ]))
+      }
+      break
+      
+    case 'user_warned':
+    case 'user_muted':
+      // User moderation: Additional actions
+      if (data.user?.id) {
+        rows.push(buildActionRow([
+          buildButton('Ban User', BUTTON_STYLES.DANGER, `mod_ban:${data.user.id}`, undefined, '🔨'),
+          buildButton('View History', BUTTON_STYLES.SECONDARY, `mod_history:${data.user.id}`, undefined, '📋'),
+        ]))
+      }
+      break
+      
+    case 'comment_pinned':
+    case 'comment_locked':
+      // Pin/Lock: Unpin/Unlock buttons
+      if (data.comment?.id) {
+        if (data.type === 'comment_pinned') {
+          rows.push(buildActionRow([
+            buildButton('Unpin', BUTTON_STYLES.SECONDARY, `mod_unpin:${data.comment.id}`, undefined, '📍'),
+          ]))
+        } else {
+          rows.push(buildActionRow([
+            buildButton('Unlock', BUTTON_STYLES.SUCCESS, `mod_unlock:${data.comment.id}`, undefined, '🔓'),
+          ]))
+        }
+      }
+      break
+      
+    default:
+      // No buttons for other notification types
+      break
+  }
+  
+  return rows
 }

@@ -59,7 +59,8 @@ export async function handleAddCommand(supabase: any, moderatorId: string, moder
     // Get options from command
     const serverName = options?.find((opt: any) => opt.name === 'server_name')?.value
     const guildId = options?.find((opt: any) => opt.name === 'guild_id')?.value
-    const webhookUrl = options?.find((opt: any) => opt.name === 'webhook_url')?.value
+    const channelId = options?.find((opt: any) => opt.name === 'channel_id')?.value
+    const moderationChannelId = options?.find((opt: any) => opt.name === 'moderation_channel_id')?.value
     const roleId = options?.find((opt: any) => opt.name === 'role_id')?.value
 
     if (!serverName || !guildId) {
@@ -76,7 +77,7 @@ export async function handleAddCommand(supabase: any, moderatorId: string, moder
     if (existingServer) {
       return createSimpleEmbed(
         'Server Already Configured',
-        `Server ${serverName} is already configured!\n\nServer Name: ${existingServer.server_name}\nConfigured by: Server setup\n\nCurrent Settings:\n• Role ID: ${existingServer.role_id || 'Not set'}\n• Webhook: ${existingServer.webhook_url ? 'Configured' : 'Not set'}\n• Status: ${existingServer.is_active ? 'Active' : 'Inactive'}`,
+        `Server ${serverName} is already configured!\n\nServer Name: ${existingServer.server_name}\nConfigured by: Server setup\n\nCurrent Settings:\n• Role ID: ${existingServer.role_id || 'Not set'}\n• Comments Channel: ${existingServer.channel_id || 'Not set'}\n• Moderation Channel: ${existingServer.moderation_channel_id || 'Not set'}\n• Status: ${existingServer.is_active ? 'Active' : 'Inactive'}`,
         0xFFA500
       )
     }
@@ -93,7 +94,8 @@ export async function handleAddCommand(supabase: any, moderatorId: string, moder
       .insert({
         server_name: serverName,
         guild_id: guildId,
-        webhook_url: webhookUrl || null,
+        channel_id: channelId || null,
+        moderation_channel_id: moderationChannelId || null,
         role_id: roleId || null,
         is_active: true
       })
@@ -104,7 +106,7 @@ export async function handleAddCommand(supabase: any, moderatorId: string, moder
 
     return createSimpleEmbed(
         'Server Configured Successfully',
-        `Server ${serverName} has been successfully configured!\n\nServer ID: ${guildId}\nConfigured by: <@${moderatorId}>\nConfigured: ${new Date().toLocaleDateString()}\n${roleId ? `Role ID: ${roleId}\n` : ''}${webhookUrl ? `Webhook: Configured\n` : ''}\n\nNext Steps:\n• Members can now use /register and select this server\n• Users will be auto-assigned the Discord role if configured\n• Use /config action:view to see all settings\n\nNote: Server "${serverName}" is now available for registration.`,
+        `Server ${serverName} has been successfully configured!\n\nServer ID: ${guildId}\nConfigured by: <@${moderatorId}>\nConfigured: ${new Date().toLocaleDateString()}\n${roleId ? `Role ID: ${roleId}\n` : ''}${channelId ? `Comments Channel: ${channelId}\n` : ''}${moderationChannelId ? `Moderation Channel: ${moderationChannelId}\n` : ''}\n\nNext Steps:\n• Members can now use /register and select this server\n• Users will be auto-assigned the Discord role if configured\n• Use /config action:view to see all settings\n\nNote: Server "${serverName}" is now available for registration.`,
         0x00FF00
       )
 
@@ -368,7 +370,7 @@ function getHelpContent(role: string): string {
     `• \`/promote user_id:<id> role:<role> [reason:<text>]\` - Promote user\n` +
     `• \`/demote user_id:<id> role:<role> [reason:<text>]\` - Demote user\n` +
     `• \`/config action:<action> [key:<key>] [value:<value>]\` - Manage config\n` +
-    `• \`/add server_name:<name> guild_id:<id> [webhook_url:<url>] [role_id:<id>]\` - Configure server\n`;
+    `• \`/add server_name:<name> guild_id:<id> channel_id:<id> moderation_channel_id:<id> [role_id:<id>]\` - Configure server\n`;
 
   const footer = `\n🔗 **Supported Platforms:** AniList, MyAnimeList, SIMKL\n` +
     `📚 **Documentation:** Check pinned messages or ask an admin\n` +

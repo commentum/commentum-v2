@@ -46,7 +46,7 @@ You're deploying a **backend API service** that:
 - **Discord Bot** (for moderation notifications):
   - Discord Developer Account
   - Bot Token
-  - Webhook URL(s)
+  - Channel IDs (for sending notifications)
 
 ---
 
@@ -136,12 +136,11 @@ Get these from: Settings > API
 MYANIMELIST_CLIENT_ID=your_mal_client_id
 SIMKL_CLIENT_ID=your_simkl_client_id
 
-# Discord Bot (for moderation notifications)
+# Discord Bot (for moderation notifications with Components V2)
 DISCORD_BOT_TOKEN=your_bot_token
 DISCORD_PUBLIC_KEY=your_public_key
 DISCORD_CLIENT_ID=your_client_id
 DISCORD_GUILD_ID=your_guild_id
-DISCORD_WEBHOOK_URL=your_webhook_url
 ```
 
 ### Step 7: Verify Deployment
@@ -268,11 +267,13 @@ No API key needed! AniList's public GraphQL API is used.
 2. Copy the **Public Key** (this is `DISCORD_PUBLIC_KEY`)
 3. Also copy the **Application ID** (this is `DISCORD_CLIENT_ID`)
 
-### Create Webhook (Optional)
+### Get Channel IDs (Required for Notifications)
 
-1. In your Discord server, go to Server Settings > Integrations
-2. Create Webhook
-3. Copy the **Webhook URL** (this is `DISCORD_WEBHOOK_URL`)
+1. Enable Developer Mode in Discord (User Settings > Advanced > Developer Mode)
+2. Right-click on the channel where you want comment notifications
+3. Click "Copy ID" - this is your Comments Channel ID
+4. Repeat for moderation notifications channel
+5. Add these to `server_configs` table (see Initial Configuration below)
 
 ### Get Guild ID
 
@@ -333,8 +334,9 @@ After deployment, verify:
 ### Discord (if enabled)
 
 - [ ] Bot responds to commands
-- [ ] Webhook notifications working
+- [ ] Channel notifications working (via Bot API)
 - [ ] User registration works
+- [ ] Interactive buttons on notifications (Components V2)
 
 ---
 
@@ -530,9 +532,10 @@ For high-traffic deployments:
 - Check for client-side caching issues
 
 **Discord Bot Not Responding:**
-- Verify webhook URL is correct
-- Check bot permissions
+- Verify bot token is correct
+- Check bot permissions (SEND_MESSAGES, READ_MESSAGE_HISTORY)
 - Verify interaction endpoint URL
+- Check channel IDs in server_configs table
 
 ### Getting Help
 
