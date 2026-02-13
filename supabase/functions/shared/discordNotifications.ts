@@ -1,5 +1,3 @@
-// Enhanced Discord notification utilities for Commentum v2
-// Updated to use Discord Bot API with Components V2 for interactive buttons
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
@@ -780,18 +778,32 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   return buildContainer([buildTextDisplay(lines.join('\n'))], accentColor)
 }
 
-// Build deep link URL for View button
-// Format: anymex://clientname/mediatype/mediaid#commentid
+// Build View URL for View button
+// Uses actual platform URLs with #comment tab anchor
 function buildDeepLinkUrl(data: DiscordNotificationData): string {
   const clientType = data.comment?.client_type || data.media?.client_type || 'anilist'
   const mediaType = data.comment?.media_type || data.media?.type || 'anime'
   const mediaId = data.comment?.media_id || data.media?.id || ''
-  const commentId = data.comment?.id || ''
   
-  // Map client_type to URL scheme name
-  const clientName = clientType === 'myanimelist' ? 'mal' : clientType
-  
-  return `anymex://${clientName}/${mediaType}/${mediaId}#${commentId}`
+  // Build platform-specific URLs
+  switch (clientType) {
+    case 'anilist':
+      // https://anilist.co/anime/20958#comment
+      return `https://anilist.co/${mediaType}/${mediaId}#comment`
+    
+    case 'myanimelist':
+    case 'mal':
+      // https://myanimelist.net/anime/5114#comment
+      return `https://myanimelist.net/${mediaType}/${mediaId}#comment`
+    
+    case 'simkl':
+      // https://simkl.com/anime/40991#comment
+      return `https://simkl.com/${mediaType}/${mediaId}#comment`
+    
+    default:
+      // Fallback to AniList
+      return `https://anilist.co/${mediaType}/${mediaId}#comment`
+  }
 }
 
 // Build interactive buttons based on notification type
