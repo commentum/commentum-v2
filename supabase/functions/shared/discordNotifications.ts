@@ -355,6 +355,13 @@ async function processNotificationInBackground(data: DiscordNotificationData) {
 // Internal Discord notification implementation - uses Bot API with Components V2
 async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotificationData) {
   try {
+    // Get bot token from environment variable
+    const botToken = Deno.env.get('DISCORD_BOT_TOKEN')
+
+    if (!botToken) {
+      return { success: false, reason: 'Discord bot token not configured in DISCORD_BOT_TOKEN env' }
+    }
+
     // Check if Discord notifications are enabled
     const { data: config } = await supabase
       .from('config')
@@ -364,19 +371,6 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
 
     if (!config || JSON.parse(config.value) !== true) {
       return { success: false, reason: 'Discord notifications disabled' }
-    }
-
-    // Get bot token from config
-    const { data: tokenConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'discord_bot_token')
-      .single()
-
-    const botToken = tokenConfig?.value
-
-    if (!botToken) {
-      return { success: false, reason: 'Discord bot token not configured in config table' }
     }
 
     // Determine which channel to send to based on notification type
