@@ -5,10 +5,52 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 export interface DiscordNotificationData {
   type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
         'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed';
-  comment?: any;
-  user?: any;
-  media?: any;
-  moderator?: any;
+  comment?: {
+    id: number | string;
+    user_id?: string;
+    username?: string;
+    user_avatar?: string;
+    client_type?: string;
+    media_id?: string;
+    media_type?: string;
+    media_title?: string;
+    content?: string;
+    deleted?: boolean;
+    deleted_by?: string;
+    deleted_by_username?: string;
+    user_banned?: boolean;
+    user_muted_until?: string;
+    user_warnings?: number;
+    banned_by?: string;
+    banned_by_username?: string;
+    muted_by?: string;
+    muted_by_username?: string;
+    warned_by?: string;
+    warned_by_username?: string;
+    pinned?: boolean;
+    locked?: boolean;
+    url?: string;
+  };
+  user?: {
+    id: string;
+    username?: string;
+    avatar?: string;
+    banned?: boolean;
+    banned_by?: string;
+    banned_by_username?: string;
+  };
+  media?: {
+    id?: string;
+    type?: string;
+    title?: string;
+    year?: number;
+    poster?: string;
+    client_type?: string;
+  };
+  moderator?: {
+    id?: string;
+    username?: string;
+  };
   reason?: string;
   reportReason?: string;
   actionedBy?: string;
@@ -738,25 +780,85 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   return buildContainer([buildTextDisplay(lines.join('\n'))], accentColor)
 }
 
+// Build deep link URL for View button
+// Format: anymex://clientname/mediatype/mediaid#commentid
+function buildDeepLinkUrl(data: DiscordNotificationData): string {
+  const clientType = data.comment?.client_type || data.media?.client_type || 'anilist'
+  const mediaType = data.comment?.media_type || data.media?.type || 'anime'
+  const mediaId = data.comment?.media_id || data.media?.id || ''
+  const commentId = data.comment?.id || ''
+  
+  // Map client_type to URL scheme name
+  const clientName = clientType === 'myanimelist' ? 'mal' : clientType
+  
+  return `anymex://${clientName}/${mediaType}/${mediaId}#${commentId}`
+}
+
 // Build interactive buttons based on notification type
 function buildInteractiveButtons(data: DiscordNotificationData): ActionRowComponent[] {
   const rows: ActionRowComponent[] = []
+  
+  // Generate deep link URL for View button
+  const deepLinkUrl = buildDeepLinkUrl(data)
   
   switch (data.type) {
     case 'comment_created':
     case 'comment_updated':
       // Comment notifications: Delete and View buttons
       if (data.comment?.id) {
+        const isDeleted = data.comment?.deleted === true
+        const deletedBy = data.comment?.deleted_by_username || data.comment?.deleted_by || null
+        
         rows.push(buildActionRow([
-          buildButton('Delete', BUTTON_STYLES.DANGER, `mod_delete:${data.comment.id}:${data.comment.user_id}`, undefined, '🗑️'),
-          buildButton('View', BUTTON_STYLES.LINK, undefined, data.comment?.url || 'https://example.com', '👁️'),
+          buildButton(
+            isDeleted ? `Already deleted by ${deletedBy || 'Unknown'}` : 'Delete', 
+            BUTTON_STYLES.DANGER, 
+            isDeleted ? undefined : `mod_delete:${data.comment.id}:${data.comment.user_id}`, 
+            undefined, 
+            '🗑️',
+            isDeleted // Disable button if already deleted
+          ),
+          buildButton('View', BUTTON_STYLES.LINK, undefined, deepLinkUrl, '👁️'),
         ]))
         
-        // User action buttons
+        // User action buttons - check user status
         if (data.comment?.user_id) {
+          const isBanned = data.comment?.user_banned === true
+          const isMuted = data.comment?.user_muted_until && new Date(data.comment.user_muted_until) > new Date()
+          const warningCount = data.comment?.user_warnings || 0
+          const bannedBy = data.comment?.banned_by_username || data.comment?.banned_by || null
+          const mutedBy = data.comment?.muted_by_username || data.comment?.muted_by || null
+          const warnedBy = data.comment?.warned_by_username || data.comment?.warned_by || null
+          
           rows.push(buildActionRow([
-            buildButton('Warn User', BUTTON_STYLES.SECONDARY, `mod_warn:${data.comment.user_id}`, undefined, '⚠️'),
-            buildButton('Mute User', BUTTON_STYLES.SECONDARY, `mod_mute:${data.comment.user_id}`, undefined, '🔇'),
+            buildButton(
+              warningCount > 0 ? `Already warned by ${warnedBy || 'Mod'} (${warningCount}x)` : 'Warn User', 
+              BUTTON_STYLES.SECONDARY, 
+              warningCount > 0 ? undefined : `mod_warn:${data.comment.user_id}`, 
+              undefined, 
+              '⚠️',
+              warningCount > 0
+            ),
+            buildButton(
+              isMuted ? `Already muted by ${mutedBy || 'Mod'}` : 'Mute User', 
+              BUTTON_STYLES.SECONDARY, 
+              isMuted ? undefined : `mod_mute:${data.comment.user_id}`, 
+              undefined, 
+              '🔇',
+              isMuted
+            ),
+          ]))
+          
+          // Add ban button in a separate row if not already banned
+          rows.push(buildActionRow([
+            buildButton(
+              isBanned ? `Already banned by ${bannedBy || 'Mod'}` : 'Ban User', 
+              BUTTON_STYLES.DANGER, 
+              isBanned ? undefined : `mod_ban:${data.comment.user_id}`, 
+              undefined, 
+              '🔨',
+              isBanned
+            ),
           ]))
         }
       }
@@ -766,13 +868,35 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
       // Report notifications: Quick action buttons
       if (data.comment?.id) {
         const userId = data.comment.user_id || data.user?.id
+        const isDeleted = data.comment?.deleted === true
+        const isBanned = data.comment?.user_banned === true
+        const deletedBy = data.comment?.deleted_by_username || data.comment?.deleted_by || null
+        const bannedBy = data.comment?.banned_by_username || data.comment?.banned_by || null
+        const warnedBy = data.comment?.warned_by_username || data.comment?.warned_by || null
+        const warningCount = data.comment?.user_warnings || 0
+        
         rows.push(buildActionRow([
           buildButton('Approve', BUTTON_STYLES.SUCCESS, `report_approve:${data.comment.id}:${userId}`, undefined, '✅'),
           buildButton('Dismiss', BUTTON_STYLES.SECONDARY, `report_dismiss:${data.comment.id}`, undefined, '❌'),
+          buildButton('View', BUTTON_STYLES.LINK, undefined, deepLinkUrl, '👁️'),
         ]))
         rows.push(buildActionRow([
-          buildButton('Delete & Warn', BUTTON_STYLES.DANGER, `mod_del_warn:${data.comment.id}:${userId}`, undefined, '🗑️⚠️'),
-          buildButton('Delete & Ban', BUTTON_STYLES.DANGER, `mod_del_ban:${data.comment.id}:${userId}`, undefined, '🗑️🔨'),
+          buildButton(
+            isDeleted ? `Deleted by ${deletedBy || 'Mod'}` : 'Delete & Warn', 
+            BUTTON_STYLES.DANGER, 
+            isDeleted ? undefined : `mod_del_warn:${data.comment.id}:${userId}`, 
+            undefined, 
+            '🗑️⚠️',
+            isDeleted
+          ),
+          buildButton(
+            (isDeleted && isBanned) ? `Already handled` : 'Delete & Ban', 
+            BUTTON_STYLES.DANGER, 
+            (isDeleted || isBanned) ? undefined : `mod_del_ban:${data.comment.id}:${userId}`, 
+            undefined, 
+            '🗑️🔨',
+            isDeleted || isBanned
+          ),
         ]))
       }
       break
@@ -781,8 +905,18 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
     case 'user_muted':
       // User moderation: Additional actions
       if (data.user?.id) {
+        const isBanned = data.user?.banned === true
+        const bannedBy = data.user?.banned_by_username || data.user?.banned_by || null
+        
         rows.push(buildActionRow([
-          buildButton('Ban User', BUTTON_STYLES.DANGER, `mod_ban:${data.user.id}`, undefined, '🔨'),
+          buildButton(
+            isBanned ? `Already banned by ${bannedBy || 'Mod'}` : 'Ban User', 
+            BUTTON_STYLES.DANGER, 
+            isBanned ? undefined : `mod_ban:${data.user.id}`, 
+            undefined, 
+            '🔨',
+            isBanned
+          ),
           buildButton('View History', BUTTON_STYLES.SECONDARY, `mod_history:${data.user.id}`, undefined, '📋'),
         ]))
       }
@@ -795,10 +929,12 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
         if (data.type === 'comment_pinned') {
           rows.push(buildActionRow([
             buildButton('Unpin', BUTTON_STYLES.SECONDARY, `mod_unpin:${data.comment.id}`, undefined, '📍'),
+            buildButton('View', BUTTON_STYLES.LINK, undefined, deepLinkUrl, '👁️'),
           ]))
         } else {
           rows.push(buildActionRow([
             buildButton('Unlock', BUTTON_STYLES.SUCCESS, `mod_unlock:${data.comment.id}`, undefined, '🔓'),
+            buildButton('View', BUTTON_STYLES.LINK, undefined, deepLinkUrl, '👁️'),
           ]))
         }
       }
