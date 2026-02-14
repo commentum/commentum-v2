@@ -783,8 +783,13 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
     lines.push(`**${data.reason}**`) // Title
     lines.push('')
     if (data.comment?.content) {
-      const content = data.comment.content.substring(0, 300)
-      lines.push(`${content}${data.comment.content.length > 300 ? '...' : ''}`)
+      // For announcements, show content with Discord's limit (4000 chars for safety)
+      // Discord Text Display has 4096 char limit, we leave room for header/footer
+      const maxContentLength = 4000
+      const content = data.comment.content.length > maxContentLength 
+        ? data.comment.content.substring(0, maxContentLength) + '\n\n... *(Content truncated. View full announcement in app.)*'
+        : data.comment.content
+      lines.push(content)
       lines.push('')
     }
     if (data.moderator?.username) {
@@ -796,8 +801,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   // Add comment content (compact) - skip for announcements
   if (data.comment?.content && data.type !== 'announcement_published') {
     lines.push(`### 💭 Comment`)
-    const content = data.comment.content.substring(0, 200)
-    lines.push(`> ${content}${data.comment.content.length > 200 ? '...' : ''}`)
+    lines.push(`> ${data.comment.content}`)
     lines.push('')
   }
   

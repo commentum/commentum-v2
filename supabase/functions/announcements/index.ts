@@ -511,7 +511,7 @@ async function handleCreateAnnouncement(supabase: any, req: Request) {
       type: 'announcement_published' as any,
       comment: {
         id: announcement.id,
-        content: short_description,
+        content: full_content, // Pass full content for Discord
         client_type: app_id
       },
       moderator: {
@@ -673,7 +673,7 @@ async function handlePublishAnnouncement(supabase: any, announcementId: number, 
     type: 'announcement_published' as any,
     comment: {
       id: announcement.id,
-      content: announcement.short_description,
+      content: announcement.full_content, // Pass full content for Discord
       client_type: announcement.app_id
     },
     moderator: {
