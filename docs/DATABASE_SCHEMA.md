@@ -327,6 +327,7 @@ CREATE TABLE config (
 | `auto_warn_threshold` | INTEGER | 3 | Auto-warn at warnings |
 | `auto_mute_threshold` | INTEGER | 5 | Auto-mute at warnings |
 | `auto_ban_threshold` | INTEGER | 10 | Auto-ban at warnings |
+| `owner_users` | JSON | [] | Owner user IDs (highest role, displayed as super_admin) |
 | `super_admin_users` | JSON | [] | Super admin user IDs |
 | `moderator_users` | JSON | [] | Moderator user IDs |
 | `admin_users` | JSON | [] | Admin user IDs |
@@ -444,6 +445,171 @@ CREATE TABLE discord_notifications (
 
 ---
 
+### 5. announcements
+
+Multi-app announcement system for developer communications.
+
+#### Purpose
+
+Stores announcements for multiple apps (AnymeX, ShonenX, Animestream) with:
+- Developer announcements and updates
+- Read status tracking per user
+- View count analytics
+- Category and priority management
+
+#### Structure
+
+```sql
+CREATE TABLE announcements (
+  id SERIAL PRIMARY KEY,
+  
+  -- App identification (for multi-app support)
+  app_id VARCHAR(50) NOT NULL,  -- 'anymex', 'shonenx', 'animestream'
+  
+  -- Content
+  title VARCHAR(200) NOT NULL,
+  short_description VARCHAR(500) NOT NULL,  -- Preview text
+  full_content TEXT NOT NULL,  -- Markdown supported
+  
+  -- Metadata
+  author_id VARCHAR(100),  -- Developer ID (from config or discord_users)
+  author_name VARCHAR(100),  -- Display name
+  
+  -- Categorization (custom categories by devs)
+  category VARCHAR(50) DEFAULT 'general',  -- 'general', 'update', 'bugfix', 'feature', 'maintenance', 'warning', or custom
+  priority INTEGER DEFAULT 0,  -- Higher = more important (pinned)
+  
+  -- Targeting (optional)
+  target_roles TEXT[],  -- NULL = all users, or ['moderator', 'admin'] for restricted
+  target_platforms TEXT[],  -- NULL = all platforms, or ['anilist', 'mal']
+  
+  -- Status
+  status VARCHAR(20) DEFAULT 'draft',  -- 'draft', 'published', 'archived'
+  pinned BOOLEAN DEFAULT FALSE,  -- Pin to top
+  featured BOOLEAN DEFAULT FALSE,  -- Featured announcement
+  
+  -- Timestamps
+  published_at TIMESTAMP WITH TIME ZONE,
+  expires_at TIMESTAMP WITH TIME ZONE,  -- Optional expiration
+  
+  -- Tracking
+  view_count INTEGER DEFAULT 0,
+  
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  -- Constraints
+  CONSTRAINT valid_status CHECK (status IN ('draft', 'published', 'archived')),
+  CONSTRAINT valid_app_id CHECK (app_id IN ('anymex', 'shonenx', 'animestream'))
+);
+```
+
+#### Column Details
+
+| Column | Type | Description | Default |
+|--------|------|-------------|---------|
+| `id` | SERIAL | Primary key | Auto |
+| `app_id` | VARCHAR(50) | Target app (anymex/shonenx/animestream) | Required |
+| `title` | VARCHAR(200) | Announcement title | Required |
+| `short_description` | VARCHAR(500) | Preview text for lists | Required |
+| `full_content` | TEXT | Full markdown content | Required |
+| `author_id` | VARCHAR(100) | Developer user ID | NULL |
+| `author_name` | VARCHAR(100) | Display name | NULL |
+| `category` | VARCHAR(50) | Category for filtering | 'general' |
+| `priority` | INTEGER | Higher = more important | 0 |
+| `status` | VARCHAR(20) | Draft/published/archived | 'draft' |
+| `pinned` | BOOLEAN | Pin to top of list | FALSE |
+| `featured` | BOOLEAN | Featured announcement | FALSE |
+| `published_at` | TIMESTAMPTZ | Publication timestamp | NULL |
+| `expires_at` | TIMESTAMPTZ | Optional expiration | NULL |
+| `view_count` | INTEGER | Total view count | 0 |
+
+**Supported Apps:**
+- `anymex` - AnymeX app
+- `shonenx` - ShonenX app
+- `animestream` - Animestream app
+
+**Categories:**
+- `general` - General announcements
+- `update` - App updates
+- `bugfix` - Bug fixes
+- `feature` - New features
+- `maintenance` - Maintenance notices
+- `warning` - Important warnings
+- Custom categories supported
+
+---
+
+### 6. announcement_reads
+
+User read status tracking for announcements.
+
+#### Purpose
+
+Tracks which users have read which announcements for unread count calculations.
+
+#### Structure
+
+```sql
+CREATE TABLE announcement_reads (
+  id SERIAL PRIMARY KEY,
+  announcement_id INTEGER REFERENCES announcements(id) ON DELETE CASCADE,
+  user_id VARCHAR(100) NOT NULL,
+  app_id VARCHAR(50) NOT NULL,
+  read_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  
+  UNIQUE(announcement_id, user_id, app_id)
+);
+```
+
+**Features:**
+- One read record per user per announcement per app
+- Cascade delete when announcement is deleted
+- Used for unread count calculations
+
+---
+
+### 7. announcement_views
+
+Detailed view tracking for analytics.
+
+#### Purpose
+
+Records every view for analytics and metrics.
+
+#### Structure
+
+```sql
+CREATE TABLE announcement_views (
+  id SERIAL PRIMARY KEY,
+  announcement_id INTEGER REFERENCES announcements(id) ON DELETE CASCADE,
+  user_id VARCHAR(100),  -- Can be anonymous (NULL)
+  app_id VARCHAR(50) NOT NULL,
+  viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+```
+
+---
+
+## Role Hierarchy
+
+The system uses a hierarchical role system with the following levels:
+
+| Role | Level | Description | Display As |
+|------|-------|-------------|------------|
+| `owner` | 4 | System owner (hidden) | `super_admin` |
+| `super_admin` | 3 | Full system access | `super_admin` |
+| `admin` | 2 | Administrative access | `admin` |
+| `moderator` | 1 | Moderation powers | `moderator` |
+| `user` | 0 | Regular user | `user` |
+
+**Important Security Note:**
+- The `owner` role is the highest level but is displayed as `super_admin` in all API responses
+- This hides the existence of the owner role for security purposes
+- Only the `owner_users` config key contains owner user IDs
+
+---
+
 ## Indexes
 
 ### Performance Indexes
@@ -476,6 +642,17 @@ CREATE INDEX idx_discord_users_platform ON discord_users(platform_type, platform
 CREATE INDEX idx_discord_users_role ON discord_users(user_role);
 CREATE INDEX idx_discord_notifications_type ON discord_notifications(notification_type);
 CREATE INDEX idx_discord_notifications_status ON discord_notifications(delivery_status);
+
+-- Announcements indexes
+CREATE INDEX idx_announcements_app_id ON announcements(app_id);
+CREATE INDEX idx_announcements_status ON announcements(status);
+CREATE INDEX idx_announcements_published_at ON announcements(published_at DESC);
+CREATE INDEX idx_announcements_app_status ON announcements(app_id, status);
+CREATE INDEX idx_announcements_pinned ON announcements(pinned DESC, priority DESC, published_at DESC);
+CREATE INDEX idx_announcements_category ON announcements(app_id, category);
+CREATE INDEX idx_announcement_reads_user ON announcement_reads(user_id, app_id);
+CREATE INDEX idx_announcement_reads_announcement ON announcement_reads(announcement_id);
+CREATE INDEX idx_announcement_views_announcement ON announcement_views(announcement_id);
 ```
 
 ---
@@ -496,6 +673,15 @@ CREATE SEQUENCE discord_users_seq START 1;
 
 -- Discord notifications sequence
 CREATE SEQUENCE discord_notifications_seq START 1000;
+
+-- Announcements sequence
+CREATE SEQUENCE announcements_id_seq START 1;
+
+-- Announcement reads sequence
+CREATE SEQUENCE announcement_reads_id_seq START 1;
+
+-- Announcement views sequence
+CREATE SEQUENCE announcement_views_id_seq START 1;
 ```
 
 ---
@@ -658,9 +844,11 @@ CREATE POLICY "Moderators can delete" ON comments
 ### Enums via CHECK Constraints
 
 - **client_type**: 'anilist', 'myanimelist', 'simkl', 'other'
-- **user_role**: 'user', 'moderator', 'admin', 'super_admin'
+- **user_role**: 'user', 'moderator', 'admin', 'super_admin', 'owner'
 - **media_type**: 'anime', 'manga', 'movie', 'tv', 'other'
 - **report_status**: 'none', 'pending', 'reviewed', 'resolved', 'dismissed'
+- **announcement_status**: 'draft', 'published', 'archived'
+- **app_id**: 'anymex', 'shonenx', 'animestream'
 - **notification_type**: See Discord API docs for full list
 
 ### Data Validation

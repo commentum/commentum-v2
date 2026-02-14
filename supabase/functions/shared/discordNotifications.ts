@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 
 export interface DiscordNotificationData {
   type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
-        'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed';
+        'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed' | 'announcement_published';
   comment?: {
     id: number | string;
     user_id?: string;
@@ -548,7 +548,8 @@ function getChannelForNotificationType(notificationType: string): 'comments' | '
     'comment_locked',
     'comment_unlocked',
     'vote_cast',
-    'vote_removed'
+    'vote_removed',
+    'announcement_published'
   ]
   
   return commentsChannelTypes.includes(notificationType) ? 'comments' : 'moderation'
@@ -734,6 +735,14 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
       accentColor = 0xDC143C // Crimson
       break
       
+    case 'announcement_published':
+      const appName = data.comment?.client_type || 'App'
+      const appDisplayName = appName === 'anymex' ? 'AnymeX' : appName === 'shonenx' ? 'ShonenX' : appName === 'animestream' ? 'Animestream' : appName
+      lines.push('## 📢 New Announcement')
+      lines.push(`**${appDisplayName}** - New developer announcement!`)
+      accentColor = 0x5865F2 // Discord Blurple
+      break
+      
     default:
       lines.push('## 📢 System Notification')
       lines.push(`Event: ${data.type}`)
@@ -742,16 +751,16 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   
   lines.push('')
   
-  // Add user info (compact format)
-  if (mainUserId) {
+  // Add user info (compact format) - skip for announcements
+  if (mainUserId && data.type !== 'announcement_published') {
     lines.push(`### 👤 User Info`)
     lines.push(`- **ID:** \`${mainUserId}\` (${mainUsername})`)
     lines.push(`- **Client:** ${clientType}`)
     lines.push('')
   }
   
-  // Add media info (compact format)
-  if (data.media) {
+  // Add media info (compact format) - skip for announcements
+  if (data.media && data.type !== 'announcement_published') {
     lines.push(`### 🎬 Media Info`)
     const mediaId = data.comment?.media_id || data.media?.id || ''
     const mediaType = data.media.type || 'anime'
@@ -763,8 +772,24 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
     lines.push('')
   }
   
-  // Add comment content (compact)
-  if (data.comment?.content) {
+  // Add announcement-specific content
+  if (data.type === 'announcement_published' && data.reason) {
+    lines.push(`### 📝 Announcement`)
+    lines.push(`**${data.reason}**`) // Title
+    lines.push('')
+    if (data.comment?.content) {
+      const content = data.comment.content.substring(0, 300)
+      lines.push(`${content}${data.comment.content.length > 300 ? '...' : ''}`)
+      lines.push('')
+    }
+    if (data.moderator?.username) {
+      lines.push(`— **${data.moderator.username}**`)
+      lines.push('')
+    }
+  }
+  
+  // Add comment content (compact) - skip for announcements
+  if (data.comment?.content && data.type !== 'announcement_published') {
     lines.push(`### 💭 Comment`)
     const content = data.comment.content.substring(0, 200)
     lines.push(`> ${content}${data.comment.content.length > 200 ? '...' : ''}`)

@@ -135,6 +135,65 @@ Verified with provider APIs:
 
 ---
 
+## 📢 Announcements API
+
+### List Announcements
+- **Endpoint**: `GET /announcements`
+- **Auth**: none
+- **Role**: -
+- **Query**: `app_id` (required), `status`, `category`, `page`, `limit`, `user_id`
+
+### Get Announcement
+- **Endpoint**: `GET /announcements/:id`
+- **Auth**: none
+- **Role**: -
+
+### Get Unread Count
+- **Endpoint**: `GET /announcements/unread-count`
+- **Auth**: none
+- **Role**: -
+- **Query**: `user_id` (required), `app_id` (required)
+
+### Mark Viewed
+- **Endpoint**: `POST /announcements/:id/view`
+- **Auth**: none
+- **Role**: -
+
+### Mark Read
+- **Endpoint**: `POST /announcements/:id/read`
+- **Auth**: none
+- **Role**: -
+- **Body**: `user_id` (required), `app_id` (required)
+
+### Create Announcement
+- **Endpoint**: `POST /announcements`
+- **Auth**: ✅ token required
+- **Role**: super_admin+ (owner or super_admin)
+- **Body**: `app_id`, `title`, `short_description`, `full_content`, `category`, `priority`, `pinned`, `publish`
+
+### Update Announcement
+- **Endpoint**: `PATCH /announcements/:id`
+- **Auth**: ✅ token required
+- **Role**: super_admin+
+
+### Delete Announcement
+- **Endpoint**: `DELETE /announcements/:id`
+- **Auth**: ✅ token required
+- **Role**: super_admin+
+
+### Publish Announcement
+- **Endpoint**: `POST /announcements/:id/publish`
+- **Auth**: ✅ token required
+- **Role**: super_admin+
+- **Note**: Sends Discord notification on publish
+
+### Archive Announcement
+- **Endpoint**: `POST /announcements/:id/archive`
+- **Auth**: ✅ token required
+- **Role**: super_admin+
+
+---
+
 ## 🎯 Action Matrix
 
 | Action | Endpoint | Auth | Min Role |
@@ -158,3 +217,27 @@ Verified with provider APIs:
 | ban_user | /users | token | admin |
 | unban_user | /users | token | admin |
 | get_media | /media | none | - |
+| list_announcements | /announcements | none | - |
+| get_announcement | /announcements/:id | none | - |
+| get_unread_count | /announcements/unread-count | none | - |
+| mark_viewed | /announcements/:id/view | none | - |
+| mark_read | /announcements/:id/read | none | - |
+| create_announcement | /announcements | token | super_admin |
+| update_announcement | /announcements/:id | token | super_admin |
+| delete_announcement | /announcements/:id | token | super_admin |
+| publish_announcement | /announcements/:id/publish | token | super_admin |
+| archive_announcement | /announcements/:id/archive | token | super_admin |
+
+---
+
+## 📊 Role Hierarchy
+
+| Role | Level | Display As | Description |
+|------|-------|------------|-------------|
+| owner | 4 | super_admin | System owner (hidden for security) |
+| super_admin | 3 | super_admin | Full system access |
+| admin | 2 | admin | Administrative access |
+| moderator | 1 | moderator | Moderation powers |
+| user | 0 | user | Regular user |
+
+**Security Note**: The `owner` role is the highest privilege level but is displayed as `super_admin` in all API responses to hide its existence.
