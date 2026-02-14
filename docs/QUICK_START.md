@@ -157,3 +157,44 @@ const response = await fetch('https://your-project.supabase.co/functions/v1/comm
 - [Complete API Reference](./COMPLETE_API_REFERENCE.md)
 - [Actions Reference](./ACTIONS.md)
 - [Database Schema](./DATABASE_SCHEMA.md)
+
+---
+
+## 📢 Announcements API
+
+### Get Announcements (Public)
+```javascript
+const response = await fetch(
+  'https://your-project.supabase.co/functions/v1/announcements?app_id=anymex&status=published'
+);
+```
+
+### Create Announcement (Super Admin+)
+```javascript
+const response = await fetch('https://your-project.supabase.co/functions/v1/announcements', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    client_type: 'anilist',
+    access_token: 'super_admin_oauth_token',
+    app_id: 'anymex',
+    title: 'New Feature Release',
+    short_description: 'We have added a new feature...',
+    full_content: '# Details\n\nFull markdown content here...',
+    category: 'feature',
+    publish: true
+  })
+});
+```
+
+### Mark as Read
+```javascript
+const response = await fetch('https://your-project.supabase.co/functions/v1/announcements/1/read', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    user_id: '12345',
+    app_id: 'anymex'
+  })
+});
+```

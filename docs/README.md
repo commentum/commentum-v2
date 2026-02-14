@@ -4,6 +4,18 @@
 
 ---
 
+## ✨ Features
+
+- 💬 **Comments** - Full CRUD with threading, voting, and moderation
+- 🗳️ **Voting** - Upvotes, downvotes, and vote scoring
+- 🚨 **Reports** - User reporting and moderation queue
+- 🔧 **Moderation** - Pin, lock, warn, mute, ban actions
+- 📢 **Announcements** - Multi-app developer announcements
+- 🤖 **Discord Integration** - Notifications with Components V2
+- 🔐 **Role System** - Hierarchical permissions (owner > super_admin > admin > moderator > user)
+
+---
+
 ## 🔐 Authentication
 
 ### Token Auth (Mod+ Actions)
@@ -50,6 +62,7 @@ Verified with provider APIs (AniList, MAL, SIMKL).
 | `/reports` | user_info / token | Reports |
 | `/moderation` | token | Moderation |
 | `/users` | token | User management |
+| `/announcements` | none / token | Multi-app announcements |
 
 ---
 
@@ -66,6 +79,20 @@ Verified with provider APIs (AniList, MAL, SIMKL).
 | pin/lock | token | moderator |
 | warn | token | moderator |
 | ban | token | admin |
+| list announcements | none | - |
+| create announcement | token | super_admin |
+
+---
+
+## 📊 Role Hierarchy
+
+| Role | Level | Display As |
+|------|-------|------------|
+| owner | 4 | super_admin (hidden) |
+| super_admin | 3 | super_admin |
+| admin | 2 | admin |
+| moderator | 1 | moderator |
+| user | 0 | user |
 
 ---
 

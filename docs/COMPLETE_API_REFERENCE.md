@@ -33,7 +33,8 @@ Commentum v2 is a **comment backend API service** that provides:
 5. [Moderation API](#moderation-api)
 6. [Users API](#users-api)
 7. [Media API](#media-api)
-8. [Error Handling](#error-handling)
+8. [Announcements API](#announcements-api)
+9. [Error Handling](#error-handling)
 
 ---
 
@@ -571,6 +572,282 @@ GET /media?media_id=6789&client_type=anilist&page=1&limit=20&sort=top
 
 ---
 
+## 📢 Announcements API
+
+### Endpoint: `/announcements`
+
+Multi-app announcement system for developer communications.
+
+---
+
+### 1. List Announcements
+
+**Method**: `GET`
+
+**Auth**: Not required (public)
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `app_id` | string | ✅ | - | App ID (anymex/shonenx/animestream) |
+| `status` | string | ❌ | published | Filter by status |
+| `category` | string | ❌ | - | Filter by category |
+| `page` | integer | ❌ | 1 | Page number |
+| `limit` | integer | ❌ | 20 | Results per page (max 50) |
+| `user_id` | string | ❌ | - | For read status |
+| `include_read` | boolean | ❌ | false | Include read status |
+
+**Example:**
+```
+GET /announcements?app_id=anymex&status=published&page=1&limit=20
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "announcements": [
+    {
+      "id": 1,
+      "title": "New Feature Release",
+      "short_description": "We've added a new feature...",
+      "category": "feature",
+      "pinned": true,
+      "featured": false,
+      "priority": 10,
+      "published_at": "2024-01-15T10:00:00Z",
+      "author_name": "Dev Team",
+      "view_count": 150,
+      "is_read": false
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 45,
+    "total_pages": 3
+  },
+  "unread_count": 5
+}
+```
+
+---
+
+### 2. Get Single Announcement
+
+**Method**: `GET`
+
+**Auth**: Not required (public)
+
+**Example:**
+```
+GET /announcements/1?user_id=12345&app_id=anymex
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "announcement": {
+    "id": 1,
+    "app_id": "anymex",
+    "title": "New Feature Release",
+    "short_description": "We've added a new feature...",
+    "full_content": "# Full markdown content here...",
+    "author_id": "dev123",
+    "author_name": "Dev Team",
+    "category": "feature",
+    "priority": 10,
+    "status": "published",
+    "pinned": true,
+    "featured": false,
+    "published_at": "2024-01-15T10:00:00Z",
+    "expires_at": null,
+    "view_count": 151,
+    "is_read": false
+  }
+}
+```
+
+---
+
+### 3. Get Unread Count
+
+**Method**: `GET`
+
+**Auth**: Not required
+
+**Example:**
+```
+GET /announcements/unread-count?user_id=12345&app_id=anymex
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "total_published": 45,
+  "read_count": 40,
+  "unread_count": 5
+}
+```
+
+---
+
+### 4. Create Announcement (Admin Only)
+
+**Method**: `POST`
+
+**Auth**: ✅ Token required (owner/super_admin only)
+
+```json
+{
+  "client_type": "anilist",
+  "access_token": "admin_oauth_token",
+  "app_id": "anymex",
+  "title": "New Feature Release",
+  "short_description": "We've added a new feature...",
+  "full_content": "# Full markdown content here...",
+  "category": "feature",
+  "priority": 10,
+  "pinned": false,
+  "featured": false,
+  "expires_at": null,
+  "publish": true
+}
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "announcement": { /* announcement object */ },
+  "message": "Announcement published successfully"
+}
+```
+
+---
+
+### 5. Update Announcement (Admin Only)
+
+**Method**: `PATCH`
+
+**Auth**: ✅ Token required (owner/super_admin only)
+
+```
+PATCH /announcements/1
+```
+
+```json
+{
+  "client_type": "anilist",
+  "access_token": "admin_oauth_token",
+  "title": "Updated Title",
+  "priority": 20,
+  "pinned": true
+}
+```
+
+---
+
+### 6. Delete Announcement (Admin Only)
+
+**Method**: `DELETE`
+
+**Auth**: ✅ Token required (owner/super_admin only)
+
+```
+DELETE /announcements/1
+```
+
+```json
+{
+  "client_type": "anilist",
+  "access_token": "admin_oauth_token"
+}
+```
+
+---
+
+### 7. Publish Draft (Admin Only)
+
+**Method**: `POST`
+
+**Auth**: ✅ Token required (owner/super_admin only)
+
+```
+POST /announcements/1/publish
+```
+
+```json
+{
+  "client_type": "anilist",
+  "access_token": "admin_oauth_token"
+}
+```
+
+**Note:** Publishing sends a Discord notification to the configured channel.
+
+---
+
+### 8. Archive Announcement (Admin Only)
+
+**Method**: `POST`
+
+**Auth**: ✅ Token required (owner/super_admin only)
+
+```
+POST /announcements/1/archive
+```
+
+```json
+{
+  "client_type": "anilist",
+  "access_token": "admin_oauth_token"
+}
+```
+
+---
+
+### 9. Mark as Viewed
+
+**Method**: `POST`
+
+**Auth**: Not required
+
+```
+POST /announcements/1/view
+```
+
+```json
+{
+  "user_id": "12345",
+  "app_id": "anymex"
+}
+```
+
+---
+
+### 10. Mark as Read
+
+**Method**: `POST`
+
+**Auth**: Not required
+
+```
+POST /announcements/1/read
+```
+
+```json
+{
+  "user_id": "12345",
+  "app_id": "anymex"
+}
+```
+
+---
+
 ## ❌ Error Handling
 
 ### Standard Error Response
@@ -631,6 +908,16 @@ GET /media?media_id=6789&client_type=anilist&page=1&limit=20&sort=top
 | ban_user | /users | token | admin |
 | unban_user | /users | token | admin |
 | get_media | /media | none | - |
+| list_announcements | /announcements | none | - |
+| get_announcement | /announcements/:id | none | - |
+| get_unread_count | /announcements/unread-count | none | - |
+| mark_viewed | /announcements/:id/view | none | - |
+| mark_read | /announcements/:id/read | none | - |
+| create_announcement | /announcements | token | super_admin |
+| update_announcement | /announcements/:id | token | super_admin |
+| delete_announcement | /announcements/:id | token | super_admin |
+| publish_announcement | /announcements/:id/publish | token | super_admin |
+| archive_announcement | /announcements/:id/archive | token | super_admin |
 
 ---
 

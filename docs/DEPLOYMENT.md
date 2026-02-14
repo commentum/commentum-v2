@@ -100,6 +100,9 @@ This creates:
 - `config` table
 - `discord_users` table
 - `discord_notifications` table
+- `announcements` table
+- `announcement_reads` table
+- `announcement_views` table
 - All indexes, triggers, and RLS policies
 
 ### Step 5: Deploy Edge Functions
@@ -116,6 +119,7 @@ supabase functions deploy moderation
 supabase functions deploy media
 supabase functions deploy users
 supabase functions deploy discord
+supabase functions deploy announcements
 ```
 
 ### Step 6: Configure Environment Variables
@@ -183,7 +187,21 @@ WHERE key = 'admin_users';
 UPDATE config 
 SET value = '[999]' 
 WHERE key = 'super_admin_users';
+
+-- Add owners (highest level, displayed as super_admin for security)
+UPDATE config 
+SET value = '[1]' 
+WHERE key = 'owner_users';
 ```
+
+**Role Hierarchy:**
+| Role | Level | Description |
+|------|-------|-------------|
+| owner | 4 | Highest level (hidden, displayed as super_admin) |
+| super_admin | 3 | Full system access |
+| admin | 2 | Administrative access |
+| moderator | 1 | Moderation powers |
+| user | 0 | Regular user |
 
 ### Configure System Settings
 
@@ -323,6 +341,9 @@ After deployment, verify:
 - [ ] `config` table has default settings
 - [ ] `discord_users` table exists (if using Discord)
 - [ ] `discord_notifications` table exists (if using Discord)
+- [ ] `announcements` table exists
+- [ ] `announcement_reads` table exists
+- [ ] `announcement_views` table exists
 
 ### Configuration
 
