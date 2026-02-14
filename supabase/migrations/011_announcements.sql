@@ -96,9 +96,23 @@ CREATE INDEX idx_announcement_views_announcement ON announcement_views(announcem
 
 INSERT INTO config (key, value) VALUES 
   ('announcements_enabled', 'true'),
-  ('announcements_per_page', '20'),
-  ('announcement_notification_types', '["announcement_published"]')
+  ('announcements_per_page', '20')
 ON CONFLICT (key) DO NOTHING;
+
+-- Add 'announcement_published' to discord_notification_types if not already present
+-- This ensures Discord notifications are sent when announcements are published
+UPDATE config 
+SET value = (
+  SELECT jsonb_set(
+    value::jsonb,
+    '$',
+    (value::jsonb || '["announcement_published"]')
+  )::text
+  FROM config 
+  WHERE key = 'discord_notification_types'
+)
+WHERE key = 'discord_notification_types'
+AND NOT (value::jsonb ? 'announcement_published');
 
 -- ====================================
 -- GRANT PERMISSIONS

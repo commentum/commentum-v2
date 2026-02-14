@@ -353,6 +353,11 @@ export async function sendDiscordNotification(supabase: any, data: DiscordNotifi
   return queueDiscordNotification(data)
 }
 
+// Blocking version - waits for notification to be sent (use for important notifications)
+export async function sendDiscordNotificationBlocking(supabase: any, data: DiscordNotificationData) {
+  return await sendDiscordNotificationInternal(supabase, data)
+}
+
 // Background queue processor - runs independently
 async function processNotificationQueue() {
   if (isProcessingQueue || notificationQueue.length === 0) {
