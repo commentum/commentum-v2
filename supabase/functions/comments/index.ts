@@ -4,6 +4,7 @@ import { validateUserInfo, validateMediaInfo, UserInfo, MediaInfo } from '../sha
 import { verifyAdminAccess, getUserRole, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -113,13 +114,10 @@ serve(async (req) => {
       }
     }
 
-    const { data: systemConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'system_enabled')
-      .single()
+    // Get all needed configs in ONE query (cached)
+    const configs = await getConfigs(supabase, ['system_enabled', 'max_nesting_level', 'banned_keywords'])
 
-    if (systemConfig && JSON.parse(systemConfig.value) === false) {
+    if (configs.system_enabled === false) {
       return new Response(
         JSON.stringify({ error: 'Comment system is disabled' }),
         { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -260,7 +258,8 @@ serve(async (req) => {
           userInfo,
           mediaInfo,
           userRole,
-          req
+          req,
+          configs // Pass cached configs
         })
 
       case 'edit':
@@ -306,7 +305,7 @@ serve(async (req) => {
 })
 
 async function handleCreateComment(supabase: any, params: any) {
-  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req } = params
+  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req, configs } = params
 
   if (parent_id) {
     const { data: parentComment } = await supabase
@@ -330,13 +329,8 @@ async function handleCreateComment(supabase: any, params: any) {
     }
 
     const nestingLevel = await getNestingLevel(supabase, parent_id)
-    const { data: maxNestingConfig } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'max_nesting_level')
-      .single()
-
-    const maxNesting = maxNestingConfig ? parseInt(JSON.parse(maxNestingConfig.value)) : 10
+    const maxNesting = configs.max_nesting_level ?? 10
+    
     if (nestingLevel >= maxNesting) {
       return new Response(
         JSON.stringify({ error: 'Maximum nesting level exceeded' }),
@@ -345,13 +339,8 @@ async function handleCreateComment(supabase: any, params: any) {
     }
   }
 
-  const { data: bannedKeywordsConfig } = await supabase
-    .from('config')
-    .select('value')
-    .eq('key', 'banned_keywords')
-    .single()
-
-  const bannedKeywords = bannedKeywordsConfig ? JSON.parse(bannedKeywordsConfig.value) : []
+  // Use cached banned_keywords from configs
+  const bannedKeywords = configs.banned_keywords ?? []
   const hasBannedKeyword = bannedKeywords.some((keyword: string) => 
     content.toLowerCase().includes(keyword.toLowerCase())
   )
@@ -679,7 +668,16 @@ async function handleModDeleteComment(supabase: any, params: any) {
   )
 }
 
+// Optimized: Get nesting level with recursive CTE (single query instead of loop)
 async function getNestingLevel(supabase: any, parentId: number) {
+  // Use a recursive query to get all ancestors in ONE query
+  const { data } = await supabase.rpc('get_comment_depth', { comment_id: parentId })
+  
+  if (data !== null) {
+    return data
+  }
+  
+  // Fallback: simple loop if RPC not available (up to 10 queries)
   let level = 0
   let currentId = parentId
 

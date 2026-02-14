@@ -1,5 +1,6 @@
 // Authentication utilities for admin/moderator verification
 import { verifyClientToken, VerifiedUser } from './clientAuth.ts'
+import { getConfigs } from './configCache.ts'
 
 // Check if user has admin/moderator role based on user_id only
 export async function verifyAdminAccess(supabase: any, userId: string) {
@@ -49,42 +50,29 @@ export async function verifyTokenAndAdminAccess(
   }
 }
 
-// Get user role from configuration
+// Get user role from configuration (uses cached configs)
 export async function getUserRole(supabase: any, userId: string) {
   try {
-    const { data: owners } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'owner_users')
-      .single()
+    // Get all role configs in ONE query (cached)
+    const roles = await getConfigs(supabase, ['owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
+    
+    const userIdStr = String(userId)
+    const userIdNum = parseInt(userId)
 
-    const { data: superAdmins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'super_admin_users')
-      .single()
-
-    const { data: admins } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'admin_users')
-      .single()
-
-    const { data: moderators } = await supabase
-      .from('config')
-      .select('value')
-      .eq('key', 'moderator_users')
-      .single()
-
-    const ownerList = owners ? JSON.parse(owners.value) : []
-    const superAdminList = superAdmins ? JSON.parse(superAdmins.value) : []
-    const adminList = admins ? JSON.parse(admins.value) : []
-    const moderatorList = moderators ? JSON.parse(moderators.value) : []
-
-    if (ownerList.includes(userId)) return 'owner'
-    if (superAdminList.includes(userId)) return 'super_admin'
-    if (adminList.includes(userId)) return 'admin'
-    if (moderatorList.includes(userId)) return 'moderator'
+    // Check roles in order of hierarchy
+    if (roles.owner_users?.includes(userIdStr) || roles.owner_users?.includes(userIdNum)) {
+      return 'owner'
+    }
+    if (roles.super_admin_users?.includes(userIdStr) || roles.super_admin_users?.includes(userIdNum)) {
+      return 'super_admin'
+    }
+    if (roles.admin_users?.includes(userIdStr) || roles.admin_users?.includes(userIdNum)) {
+      return 'admin'
+    }
+    if (roles.moderator_users?.includes(userIdStr) || roles.moderator_users?.includes(userIdNum)) {
+      return 'moderator'
+    }
+    
     return 'user'
   } catch (error) {
     console.error('Get user role error:', error)
