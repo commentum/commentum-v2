@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, canModerate } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
+import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -332,6 +333,22 @@ async function handleUnbanUser(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Queue Discord notification for user unbanned in background
+  queueDiscordNotification({
+    type: 'user_unbanned',
+    user: {
+      id: target_user_id,
+      username: verifiedUser.username
+    },
+    comment: {
+      client_type: target_client_type
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    }
+  })
+
   return new Response(
     JSON.stringify({ 
       success: true, 
@@ -412,6 +429,28 @@ async function handleMuteUser(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Queue Discord notification for user mute in background
+  queueDiscordNotification({
+    type: 'user_muted',
+    user: {
+      id: target_user_id,
+      username: verifiedUser.username
+    },
+    comment: {
+      client_type: target_client_type,
+      id: '',  // No specific comment tied to mute action
+      content: ''
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    reason,
+    metadata: {
+      duration: `${muteDuration} hours`
+    }
+  })
+
   return new Response(
     JSON.stringify({ 
       success: true, 
@@ -459,6 +498,22 @@ async function handleUnmuteUser(supabase: any, params: any) {
     .eq('commentum_user_id', target_user_id)
 
   if (error) throw error
+
+  // Queue Discord notification for user unmute in background
+  queueDiscordNotification({
+    type: 'user_unmuted',
+    user: {
+      id: target_user_id,
+      username: verifiedUser.username
+    },
+    comment: {
+      client_type: target_client_type
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    }
+  })
 
   return new Response(
     JSON.stringify({ 
