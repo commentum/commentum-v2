@@ -195,13 +195,17 @@ serve(async (req) => {
     // Send Discord notification if vote action occurred
     if (voteAction && currentVote !== voteTypeForNotification) {
       // Get voter username from commentum_users table
+      // The voter's client_type should be the same as the comment's client_type
+      const voterClientType = comment.client_type || 'anilist'
+
       const { data: commentumUser } = await supabase
         .from('commentum_users')
-        .select('username')
-        .eq('id', user_id)
+        .select('commentum_username')
+        .eq('commentum_client_type', voterClientType)
+        .eq('commentum_user_id', user_id)
         .single()
 
-      const voterUsername = commentumUser?.username || user_id
+      const voterUsername = commentumUser?.commentum_username || user_id
 
       const notificationData = {
         type: voteAction,
