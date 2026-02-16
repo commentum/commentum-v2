@@ -659,13 +659,13 @@ function createComponentsV2Message(data: DiscordNotificationData): any[] {
       'SYSTEM': 0x808080     // Gray
     }
     
-    const categoryEmojis: {
+    const categoryEmojis = {
       'COMMENT': '🟢 COMMENT EVENTS',
       'REPORT': '🚨 REPORT EVENTS',
       'USER MODERATION': '🔨 USER MODERATION EVENTS',
       'VOTE': '👍 VOTE EVENTS',
       'ANNOUNCEMENT': '📢 ANNOUNCEMENT',
-      'SYSTEM': '📢 SYSTEM',
+      'SYSTEM': '📢 SYSTEM'
     }
 
     components.push(buildSeparator(true, 2))
