@@ -3,7 +3,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
-  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_unpinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
+  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_unpinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' |
         'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed' | 'announcement_published';
   comment?: {
     id: number | string;
@@ -30,6 +30,7 @@ export interface DiscordNotificationData {
     pinned?: boolean;
     locked?: boolean;
     url?: string;
+    notes?: string;
   };
   user?: {
     id: string;
@@ -38,6 +39,7 @@ export interface DiscordNotificationData {
     banned?: boolean;
     banned_by?: string;
     banned_by_username?: string;
+    notes?: string;
   };
   media?: {
     id?: string;
@@ -57,6 +59,7 @@ export interface DiscordNotificationData {
   metadata?: any;
   voteType?: 'upvote' | 'downvote';
   voteScore?: number;
+  notes?: string;
 }
 
 // ====================================
@@ -678,6 +681,9 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   const commentId = data.comment?.id || ''
   const commentContent = data.comment?.content || ''
 
+  // Get notes from any source
+  const notes = data.notes || data.comment?.notes || data.user?.notes || ''
+
   // Media fields - use comment fields first, fall back to media fields
   const mediaId = data.comment?.media_id || data.media?.id || 'Unknown'
   const clientType = data.comment?.client_type || data.media?.client_type || 'Unknown'
@@ -818,7 +824,10 @@ ${mediaString}
 › ${commentContent}
 
 📄 **Report Reason:**
-› ${reportReason}`
+› ${reportReason}
+${notes ? `
+📝 **Notes:**
+› ${notes}` : ''}`
       break
 
     case 'report_resolved':
@@ -874,7 +883,10 @@ ${warnMediaString}
 › ${warnCommentContent}
 
 📄 **Reason:**
-› ${reason}`
+› ${reason}
+${notes ? `
+📝 **User Notes:**
+› ${notes}` : ''}`
       break
 
     case 'user_muted':
@@ -896,7 +908,10 @@ ${muteCommentSection}
 ⏱ **Duration:** ${duration}
 
 📄 **Reason:**
-› ${reason}`
+› ${reason}
+${notes ? `
+📝 **User Notes:**
+› ${notes}` : ''}`
       break
 
     case 'user_unmuted':
@@ -928,7 +943,10 @@ ${banCommentSection}
 ⏱ **Duration:** ${duration}
 
 📄 **Reason:**
-› ${reason}`
+› ${reason}
+${notes ? `
+📝 **User Notes:**
+› ${notes}` : ''}`
       break
 
     case 'user_unbanned':
@@ -947,7 +965,10 @@ ${banCommentSection}
 👤 **Target User:** ${authorName} (ID: ${authorId})
 
 📄 **Reason:**
-› ${reason}`
+› ${reason}
+${notes ? `
+📝 **User Notes:**
+› ${notes}` : ''}`
       break
 
     // ==================== VOTE EVENTS ====================

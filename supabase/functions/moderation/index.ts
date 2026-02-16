@@ -392,7 +392,7 @@ async function handleWarnUser(supabase: any, params: any) {
   // For now, we'll update all platforms - this could be enhanced to accept client_type parameter
   const { data: targetUsers } = await supabase
     .from('commentum_users')
-    .select('commentum_client_type, commentum_user_role, commentum_user_warnings')
+    .select('commentum_client_type, commentum_user_role, commentum_user_warnings, commentum_user_notes')
     .eq('commentum_user_id', target_user_id)
 
   // Get target user's username from comments table
@@ -403,8 +403,9 @@ async function handleWarnUser(supabase: any, params: any) {
     .order('created_at', { ascending: false })
     .limit(1)
     .single()
-  
+
   const targetUsername = targetUserComment?.username || target_user_id
+  const userNotes = targetUsers?.[0]?.commentum_user_notes || ''
 
   if (!targetUsers || targetUsers.length === 0) {
     return new Response(
@@ -497,7 +498,8 @@ async function handleWarnUser(supabase: any, params: any) {
     type: 'user_warned',
     user: {
       id: target_user_id,
-      username: targetUsername
+      username: targetUsername,
+      notes: userNotes
     },
     comment: {
       client_type: targetUsers[0]?.commentum_client_type,
@@ -508,7 +510,8 @@ async function handleWarnUser(supabase: any, params: any) {
       id: moderator_id,
       username: verifiedUser.username
     },
-    reason: `${reason}${severity ? ` (${severity})` : ''}`
+    reason: `${reason}${severity ? ` (${severity})` : ''}`,
+    notes: userNotes
   })
 
   return new Response(
@@ -541,10 +544,10 @@ async function handleBanUser(supabase: any, params: any) {
     )
   }
 
-  // Get target user's current status from commentum_users table
+  // Get target user's current status from commentum_users table, including notes
   const { data: targetUsers } = await supabase
     .from('commentum_users')
-    .select('commentum_client_type, commentum_user_role')
+    .select('commentum_client_type, commentum_user_role, commentum_user_notes')
     .eq('commentum_user_id', target_user_id)
 
   // Get target user's username from comments table
@@ -555,8 +558,9 @@ async function handleBanUser(supabase: any, params: any) {
     .order('created_at', { ascending: false })
     .limit(1)
     .single()
-  
+
   const targetUsername = targetUserComment?.username || target_user_id
+  const userNotes = targetUsers?.[0]?.commentum_user_notes || ''
 
   if (!targetUsers || targetUsers.length === 0) {
     return new Response(
@@ -592,7 +596,8 @@ async function handleBanUser(supabase: any, params: any) {
     type: shadow_ban ? 'user_shadow_banned' : 'user_banned',
     user: {
       id: target_user_id,
-      username: targetUsername
+      username: targetUsername,
+      notes: userNotes
     },
     comment: {
       client_type: targetUsers[0]?.commentum_client_type,
@@ -604,6 +609,7 @@ async function handleBanUser(supabase: any, params: any) {
       username: verifiedUser.username
     },
     reason,
+    notes: userNotes,
     metadata: {
       duration: 'Permanent'
     }
