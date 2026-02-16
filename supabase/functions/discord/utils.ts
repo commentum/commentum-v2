@@ -380,3 +380,34 @@ export function createModerationEmbed(action: string, target: string, moderator:
     }
   )
 }
+
+// Create modal response for gathering user input
+export function createModalResponse(title: string, customId: string, inputLabel: string, placeholder: string = 'Enter reason...', minLength: number = 1, maxLength: number = 500): Response {
+  return new Response(
+    JSON.stringify({
+      type: 9, // MODAL
+      data: {
+        title,
+        custom_id: customId,
+        components: [
+          {
+            type: 1, // ACTION_ROW
+            components: [
+              {
+                type: 4, // TEXT_INPUT
+                custom_id: 'reason_input',
+                label: inputLabel,
+                style: 1, // PARAGRAPH style for longer input
+                placeholder,
+                min_length: minLength,
+                max_length: maxLength,
+                required: true
+              }
+            ]
+          }
+        ]
+      }
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }
+  )
+}
