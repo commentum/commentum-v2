@@ -654,7 +654,7 @@ function createComponentsV2Message(data: DiscordNotificationData): any[] {
       'REPORT': 0xFF8C00,   // Dark Orange
       'USER MODERATION': 0xFFD700, // Gold
       'VOTE': 0xFFA500,      // Orange
-      'ANNOUNCEMENT': 0x5865F2  // Discord Blurple
+      'ANNOUNCEMENT': 0x5865F2,  // Discord Blurple
       'SYSTEM': 0x808080     // Gray
     }
     
@@ -664,11 +664,11 @@ function createComponentsV2Message(data: DiscordNotificationData): any[] {
       'USER MODERATION': '🔨 USER MODERATION EVENTS',
       'VOTE': '👍 VOTE EVENTS',
       'ANNOUNCEMENT': '📢 ANNOUNCEMENT',
-      'SYSTEM': '📢 SYSTEM'
+      'SYSTEM': '📢 SYSTEM',
     }
 
     components.push(buildSeparator(true, 2))
-    components.push(buildTextDisplay(categoryEmojis[category] || 'SYSTEM'], categoryColors[category] || 0x808080))
+    components.push(buildContainer([buildTextDisplay(categoryEmojis[category] || 'SYSTEM')], categoryColors[category] || 0x808080))
     components.push(buildSeparator(true, 1))
     components.push(buildSeparator(true, 1))
   }
