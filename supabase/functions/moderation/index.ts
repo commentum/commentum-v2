@@ -500,14 +500,15 @@ async function handleWarnUser(supabase: any, params: any) {
       username: targetUsername
     },
     comment: {
-      client_type: targetUsers[0]?.commentum_client_type
+      client_type: targetUsers[0]?.commentum_client_type,
+      id: targetUserComment?.id || '',
+      content: targetUserComment?.content || ''
     },
     moderator: {
       id: moderator_id,
       username: verifiedUser.username
     },
-    reason,
-    severity
+    reason: `${reason}${severity ? ` (${severity})` : ''}`
   })
 
   return new Response(
@@ -594,13 +595,18 @@ async function handleBanUser(supabase: any, params: any) {
       username: targetUsername
     },
     comment: {
-      client_type: targetUsers[0]?.commentum_client_type
+      client_type: targetUsers[0]?.commentum_client_type,
+      id: targetUserComment?.id || '',
+      content: targetUserComment?.content || ''
     },
     moderator: {
       id: moderator_id,
       username: verifiedUser.username
     },
-    reason
+    reason,
+    metadata: {
+      duration: 'Permanent'
+    }
   })
 
   return new Response(

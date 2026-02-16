@@ -3,7 +3,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
-  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
+  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_unpinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' | 
         'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed' | 'announcement_published';
   comment?: {
     id: number | string;
@@ -544,26 +544,54 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
 }
 
 // Determine which channel a notification type should go to
-function getChannelForNotificationType(notificationType: string): 'comments' | 'moderation' {
-  const commentsChannelTypes = [
+function getChannelForNotificationType(notificationType: string): 'user_activity' | 'updates' | 'mods' {
+  // Channel 1: User activity only (non-mod)
+  const userActivityChannelTypes = [
     'comment_created',
-    'comment_updated', 
-    'comment_deleted',
-    'comment_pinned',
-    'comment_locked',
-    'comment_unlocked',
-    'vote_cast',
-    'vote_removed',
-    'announcement_published'
+    'comment_updated'
   ]
   
-  return commentsChannelTypes.includes(notificationType) ? 'comments' : 'moderation'
+  // Channel 2: Updates + engagement (votes, announcements, pin/lock)
+  const updatesChannelTypes = [
+    'vote_cast',
+    'vote_removed',
+    'announcement_published',
+    'comment_pinned',
+    'comment_unpinned',
+    'comment_locked',
+    'comment_unlocked'
+  ]
+  
+  // Channel 3: Moderation actions only
+  const modsChannelTypes = [
+    'comment_deleted',
+    'report_filed',
+    'report_resolved',
+    'report_dismissed',
+    'user_warned',
+    'user_muted',
+    'user_unmuted',
+    'user_banned',
+    'user_unbanned',
+    'user_shadow_banned'
+  ]
+  
+  if (userActivityChannelTypes.includes(notificationType)) {
+    return 'user_activity'
+  } else if (updatesChannelTypes.includes(notificationType)) {
+    return 'updates'
+  } else if (modsChannelTypes.includes(notificationType)) {
+    return 'mods'
+  }
+  
+  // Default to mods channel for safety (if anything is forgotten)
+  return 'mods'
 }
 
 // Get the channel IDs for a specific channel type from ALL active servers
 async function getChannelConfigs(
   supabase: any, 
-  channelType: 'comments' | 'moderation'
+  channelType: 'user_activity' | 'updates' | 'mods'
 ): Promise<{ guildId: string; channelId: string }[]> {
   try {
     // Get ALL active server configurations
@@ -581,9 +609,19 @@ async function getChannelConfigs(
 
     // For each server, get the appropriate channel ID
     for (const serverConfig of serverConfigs) {
-      const channelId = channelType === 'comments' 
-        ? serverConfig.channel_id 
-        : serverConfig.moderation_channel_id
+      let channelId: string | undefined
+      
+      switch (channelType) {
+        case 'user_activity':
+          channelId = serverConfig.user_activity_channel_id
+          break
+        case 'updates':
+          channelId = serverConfig.updates_channel_id
+          break
+        case 'mods':
+          channelId = serverConfig.moderation_channel_id
+          break
+      }
 
       if (channelId) {
         channels.push({
@@ -607,7 +645,34 @@ async function getChannelConfigs(
 // Create Components V2 message based on notification type
 function createComponentsV2Message(data: DiscordNotificationData): any[] {
   const components: any[] = []
-  
+
+  // Determine the category and add category header
+  const category = getNotificationCategory(data.type)
+  if (category) {
+    const categoryColors = {
+      'COMMENT': 0x00FF00,    // Green
+      'REPORT': 0xFF8C00,   // Dark Orange
+      'USER MODERATION': 0xFFD700, // Gold
+      'VOTE': 0xFFA500,      // Orange
+      'ANNOUNCEMENT': 0x5865F2  // Discord Blurple
+      'SYSTEM': 0x808080     // Gray
+    }
+    
+    const categoryEmojis: {
+      'COMMENT': '🟢 COMMENT EVENTS',
+      'REPORT': '🚨 REPORT EVENTS',
+      'USER MODERATION': '🔨 USER MODERATION EVENTS',
+      'VOTE': '👍 VOTE EVENTS',
+      'ANNOUNCEMENT': '📢 ANNOUNCEMENT',
+      'SYSTEM': '📢 SYSTEM'
+    }
+
+    components.push(buildSeparator(true, 2))
+    components.push(buildTextDisplay(categoryEmojis[category] || 'SYSTEM'], categoryColors[category] || 0x808080))
+    components.push(buildSeparator(true, 1))
+    components.push(buildSeparator(true, 1))
+  }
+
   // Build the container with content
   const containerContent = buildNotificationContent(data)
   
@@ -626,204 +691,367 @@ function createComponentsV2Message(data: DiscordNotificationData): any[] {
   return components
 }
 
+// Get notification category for display
+function getNotificationCategory(type: string): 'COMMENT' | 'REPORT' | 'USER MODERATION' | 'VOTE' | 'ANNOUNCEMENT' | 'SYSTEM' | null {
+  switch (type) {
+    case 'comment_created':
+    case 'comment_updated':
+    case 'comment_deleted':
+    case 'comment_pinned':
+    case 'comment_unpinned':
+    case 'comment_locked':
+    case 'comment_unlocked':
+      return 'COMMENT'
+    
+    case 'report_filed':
+    case 'report_resolved':
+    case 'report_dismissed':
+      return 'REPORT'
+    
+    case 'user_warned':
+    case 'user_muted':
+    case 'user_unmuted':
+    case 'user_banned':
+    case 'user_unbanned':
+    case 'user_shadow_banned':
+      return 'USER MODERATION'
+    
+    case 'vote_cast':
+    case 'vote_removed':
+      return 'VOTE'
+    
+    case 'announcement_published':
+      return 'ANNOUNCEMENT'
+    
+    default:
+      return 'SYSTEM'
+  }
+}
+
 // Build notification content as Components V2 container
 function buildNotificationContent(data: DiscordNotificationData): ContainerComponent {
-  const lines: string[] = []
   let accentColor: number | undefined
-  
-  // Get the main username for display
-  const mainUsername = data.comment?.username || data.user?.username || 'Unknown'
-  const mainUserId = data.comment?.user_id || data.user?.id || ''
-  const clientType = data.comment?.client_type || 'anilist'
-  
-  // Build header based on type
+  let content: string = ''
+
+  // Get data
+  const authorName = data.comment?.username || data.user?.username || 'Unknown'
+  const authorId = data.comment?.user_id || data.user?.id || ''
+  const moderatorName = data.moderator?.username || 'Unknown'
+  const moderatorId = data.moderator?.id || ''
+  const commentId = data.comment?.id || ''
+  const commentContent = data.comment?.content || ''
+  const mediaTitle = data.media?.title || 'Unknown'
+  const mediaType = data.media?.type || 'anime'
+  const reason = data.reason || ''
+  const reportReason = data.reportReason || ''
+  const voteType = data.voteType === 'upvote' ? 'upvote' : 'downvote'
+  const voterName = data.user?.username || 'Unknown'
+  const voterId = data.user?.id || ''
+  const reporterName = data.user?.username || 'Unknown'
+  const reporterId = data.user?.id || ''
+  const publisherName = data.moderator?.username || 'Unknown'
+  const publisherId = data.moderator?.id || ''
+  const duration = data.metadata?.duration || 'Not specified'
+  const announcementTitle = data.reason || 'No Title'
+  const announcementContent = data.comment?.content || ''
+
+  // Build content based on event type
   switch (data.type) {
+    // ==================== COMMENT EVENTS ====================
     case 'comment_created':
-      lines.push('## 💬 New Comment Posted')
-      lines.push(`**${mainUsername}** posted a new comment`)
       accentColor = 0x00FF00 // Green
+      content = `🆕 **Comment Created**
+
+📝 **Author:** ${authorName} (ID: ${authorId})
+💬 **Comment ID:** ${commentId}
+
+📺 **Media:** ${mediaTitle} (${mediaType})
+
+📝 **Content:**
+› ${commentContent}`
       break
-      
+
     case 'comment_updated':
-      lines.push('## ✏️ Comment Edited')
-      lines.push(`**${mainUsername}** edited their comment`)
       accentColor = 0x9B59B6 // Purple
+      content = `✏️ **Comment Edited**
+
+📝 **Author:** ${authorName} (ID: ${authorId})
+💬 **Comment ID:** ${commentId}
+
+📺 **Media:** ${mediaTitle} (${mediaType})
+
+📝 **Updated Content:**
+› ${commentContent}`
       break
-      
+
     case 'comment_deleted':
-      const deleterName = data.moderator?.username || data.comment?.username || 'Unknown'
-      lines.push('## 🗑️ Comment Deleted')
-      lines.push(`**${deleterName}** deleted a comment`)
       accentColor = 0xFF0000 // Red
+      content = `🗑️ **Comment Deleted**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+📝 **Comment Author:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle} (${mediaType})
+
+📝 **Deleted Content:**
+› ${commentContent}
+
+📄 **Reason:**
+› ${reason}`
       break
-      
-    case 'vote_cast':
-      const voteEmoji = data.voteType === 'upvote' ? '👍' : '👎'
-      lines.push(`## ${voteEmoji} ${data.voteType === 'upvote' ? 'Upvote' : 'Downvote'} Cast`)
-      lines.push(`**${mainUsername}** voted on comment \`${data.comment?.id}\``)
-      accentColor = 0xFFA500 // Orange
-      break
-      
-    case 'vote_removed':
-      lines.push('## ↩️ Vote Removed')
-      lines.push(`**${mainUsername}** removed their vote from comment \`${data.comment?.id}\``)
-      accentColor = 0xFFA500 // Orange
-      break
-      
-    case 'report_filed':
-      const reporterName = data.user?.username || 'Unknown'
-      lines.push('## 🚨 Comment Reported')
-      lines.push(`**${reporterName}** reported a comment`)
-      accentColor = 0xFF8C00 // Dark Orange
-      break
-      
-    case 'user_banned':
-      const bannerName = data.moderator?.username || 'System'
-      lines.push('## 🔨 User Banned')
-      lines.push(`**${mainUsername}** was banned by **${bannerName}**`)
-      accentColor = 0x8B0000 // Dark Red
-      break
-      
-    case 'user_warned':
-      const warnerName = data.moderator?.username || 'System'
-      lines.push('## ⚠️ User Warned')
-      lines.push(`**${mainUsername}** was warned by **${warnerName}**`)
-      accentColor = 0xFFD700 // Gold
-      break
-      
-    case 'user_muted':
-      const muterName = data.moderator?.username || 'System'
-      lines.push('## 🔇 User Muted')
-      lines.push(`**${mainUsername}** was muted by **${muterName}**`)
-      accentColor = 0x808080 // Gray
-      break
-      
-    case 'user_shadow_banned':
-      const shadowBannerName = data.moderator?.username || 'System'
-      lines.push('## 👻 User Shadow Banned')
-      lines.push(`**${mainUsername}** was shadow banned by **${shadowBannerName}**`)
-      accentColor = 0x4B0082 // Indigo
-      break
-      
+
     case 'comment_pinned':
-      const pinnerName = data.moderator?.username || 'Moderator'
-      lines.push('## 📌 Comment Pinned')
-      lines.push(`**${pinnerName}** pinned a comment`)
       accentColor = 0x00BFFF // Deep Sky Blue
+      content = `📌 **Comment Pinned**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+📝 **Comment Author:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}`
       break
-      
+
+    case 'comment_unpinned':
+      accentColor = 0x00BFFF // Deep Sky Blue
+      content = `📍 **Comment Unpinned**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+📝 **Comment Author:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}`
+      break
+
     case 'comment_locked':
-      const lockerName = data.moderator?.username || 'Moderator'
-      lines.push('## 🔒 Thread Locked')
-      lines.push(`**${lockerName}** locked a comment thread`)
       accentColor = 0x8B4513 // Saddle Brown
+      content = `🔒 **Thread Locked**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+📝 **Comment Author:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}`
       break
-      
+
     case 'comment_unlocked':
-      const unlockerName = data.moderator?.username || 'Moderator'
-      lines.push('## 🔓 Thread Unlocked')
-      lines.push(`**${unlockerName}** unlocked a comment thread`)
       accentColor = 0x32CD32 // Lime Green
+      content = `🔓 **Thread Unlocked**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+📝 **Comment Author:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}`
       break
-      
+
+    // ==================== REPORT EVENTS ====================
+    case 'report_filed':
+      accentColor = 0xFF8C00 // Dark Orange
+      content = `🚨 **Report Filed**
+
+🚨 **Reporter:** ${reporterName} (ID: ${reporterId})
+📝 **Reported User:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle} (${mediaType})
+
+📝 **Comment:**
+› ${commentContent}
+
+📄 **Report Reason:**
+› ${reportReason}`
+      break
+
     case 'report_resolved':
-      const resolverName = data.moderator?.username || 'Moderator'
-      lines.push('## ✅ Report Resolved')
-      lines.push(`**${resolverName}** resolved a report`)
       accentColor = 0x00FA9A // Medium Spring Green
+      content = `✅ **Report Resolved**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+📝 **Reported User:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}`
       break
-      
+
     case 'report_dismissed':
-      const dismisserName = data.moderator?.username || 'Moderator'
-      lines.push('## ❌ Report Dismissed')
-      lines.push(`**${dismisserName}** dismissed a report`)
       accentColor = 0xDC143C // Crimson
+      content = `❌ **Report Dismissed**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+📝 **Reported User:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}`
       break
-      
-    case 'announcement_published':
-      const appName = data.comment?.client_type || 'App'
-      const appDisplayName = appName === 'anymex' ? 'AnymeX' : appName === 'shonenx' ? 'ShonenX' : appName === 'animestream' ? 'Animestream' : appName
-      lines.push('## 📢 New Announcement')
-      lines.push(`**${appDisplayName}** - New developer announcement!`)
-      accentColor = 0x5865F2 // Discord Blurple
+
+    // ==================== USER MODERATION EVENTS ====================
+    case 'user_warned':
+      accentColor = 0xFFD700 // Gold
+      const warnCommentInfo = data.comment || {}
+      const warnCommentId = warnCommentInfo.id || ''
+      const warnCommentContent = warnCommentInfo.content || ''
+      const warnCommentClientType = warnCommentInfo.client_type || 'unknown'
+
+      content = `⚠️ **Warning Issued**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+👤 **Target User:** ${authorName} (ID: ${authorId})
+
+💬 **Related Comment ID:** ${warnCommentId}
+📺 **Media:** ${mediaTitle} (${mediaType})
+
+📝 **Comment:**
+› ${warnCommentContent}
+
+📄 **Reason:**
+› ${reason}`
       break
-      
-    default:
-      lines.push('## 📢 System Notification')
-      lines.push(`Event: ${data.type}`)
+
+    case 'user_muted':
       accentColor = 0x808080 // Gray
+      const muteHasCommentInfo = commentId && commentContent
+      const muteCommentSection = muteHasCommentInfo ? 
+        `💬 **Related Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle} (${mediaType})
+
+📝 **Comment:**
+› ${commentContent}
+` : `👤 **Target User:** ${authorName} (ID: ${authorId})`
+
+      content = `🔇 **User Muted**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+${muteCommentSection}
+
+⏱ **Duration:** ${duration}
+
+📄 **Reason:**
+› ${reason}`
+      break
+
+    case 'user_unmuted':
+      accentColor = 0x32CD32 // Lime Green
+      content = `🔊 **User Unmuted**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+👤 **Target User:** ${authorName} (ID: ${authorId})`
+      break
+
+    case 'user_banned':
+      accentColor = 0x8B0000 // Dark Red
+      const banHasCommentInfo = commentId && commentContent
+      const banCommentSection = banHasCommentInfo ?
+        `💬 **Related Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle} (${mediaType})
+
+📝 **Comment:**
+› ${commentContent}
+` : `👤 **Target User:** ${authorName} (ID: ${authorId})`
+
+      content = `⛔ **User Banned**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+👤 **Target User:** ${authorName} (ID: ${authorId})
+
+${banCommentSection}
+
+⏱ **Duration:** ${duration}
+
+📄 **Reason:**
+› ${reason}`
+      break
+
+    case 'user_unbanned':
+      accentColor = 0x32CD32 // Lime Green
+      content = `♻️ **User Unbanned**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+👤 **Target User:** ${authorName} (ID: ${authorId})`
+      break
+
+    case 'user_shadow_banned':
+      accentColor = 0x4B0082 // Indigo
+      content = `👻 **User Shadow Banned**
+
+👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+👤 **Target User:** ${authorName} (ID: ${authorId})
+
+📄 **Reason:**
+› ${reason}`
+      break
+
+    // ==================== VOTE EVENTS ====================
+    case 'vote_cast':
+      accentColor = 0xFFA500 // Orange
+      content = `👍 **Vote Cast**
+
+🗳 **Voter:** ${voterName} (ID: ${voterId})
+📝 **Comment Author:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}
+
+🔼 **Vote Type:** ${voteType}`
+      break
+
+    case 'vote_removed':
+      accentColor = 0xFFA500 // Orange
+      content = `➖ **Vote Removed**
+
+🗳 **Voter:** ${voterName} (ID: ${voterId})
+📝 **Comment Author:** ${authorName} (ID: ${authorId})
+
+💬 **Comment ID:** ${commentId}
+📺 **Media:** ${mediaTitle}
+
+📝 **Comment:**
+› ${commentContent}`
+      break
+
+    // ==================== ANNOUNCEMENT ====================
+    case 'announcement_published':
+      accentColor = 0x5865F2 // Discord Blurple
+      content = `📢 **Announcement Published**
+
+📢 **Publisher:** ${publisherName} (ID: ${publisherId})
+
+📰 **Title:**
+${announcementTitle}
+
+📝 **Content:**
+› ${announcementContent}`
+      break
+
+    default:
+      accentColor = 0x808080 // Gray
+      content = `📢 **System Notification**
+
+**Event:** ${data.type}`
   }
-  
-  lines.push('')
-  
-  // Add user info (compact format) - skip for announcements
-  if (mainUserId && data.type !== 'announcement_published') {
-    lines.push(`### 👤 User Info`)
-    lines.push(`- **ID:** \`${mainUserId}\` (${mainUsername})`)
-    lines.push(`- **Client:** ${clientType}`)
-    lines.push('')
-  }
-  
-  // Add media info (compact format) - skip for announcements
-  if (data.media && data.type !== 'announcement_published') {
-    lines.push(`### 🎬 Media Info`)
-    const mediaId = data.comment?.media_id || data.media?.id || ''
-    const mediaType = data.media.type || 'anime'
-    const yearStr = data.media.year ? ` | ${data.media.year}` : ''
-    lines.push(`- **ID:** \`${mediaId}\` | ${mediaType}${yearStr}`)
-    if (data.media.title) {
-      lines.push(`- **Title:** ${data.media.title}`)
-    }
-    lines.push('')
-  }
-  
-  // Add announcement-specific content
-  if (data.type === 'announcement_published' && data.reason) {
-    lines.push(`### 📝 Announcement`)
-    lines.push(`**${data.reason}**`) // Title
-    lines.push('')
-    if (data.comment?.content) {
-      // For announcements, show content with Discord's limit (4000 chars for safety)
-      // Discord Text Display has 4096 char limit, we leave room for header/footer
-      const maxContentLength = 4000
-      const content = data.comment.content.length > maxContentLength 
-        ? data.comment.content.substring(0, maxContentLength) + '\n\n... *(Content truncated. View full announcement in app.)*'
-        : data.comment.content
-      lines.push(content)
-      lines.push('')
-    }
-    if (data.moderator?.username) {
-      lines.push(`— **${data.moderator.username}**`)
-      lines.push('')
-    }
-  }
-  
-  // Add comment content (compact) - skip for announcements
-  if (data.comment?.content && data.type !== 'announcement_published') {
-    lines.push(`### 💭 Comment`)
-    lines.push(`> ${data.comment.content}`)
-    lines.push('')
-  }
-  
-  // Add reason (compact)
-  if (data.reason) {
-    lines.push(`### 📝 Reason`)
-    lines.push(data.reason)
-    lines.push('')
-  }
-  
-  // Add report reason (compact)
-  if (data.reportReason) {
-    lines.push(`### 🚨 Report Reason`)
-    lines.push(data.reportReason)
-    lines.push('')
-  }
-  
-  // Add timestamp footer
-  lines.push(`---`)
-  lines.push(`<t:${Math.floor(Date.now() / 1000)}:R> • Commentum v2`)
-  
-  return buildContainer([buildTextDisplay(lines.join('\n'))], accentColor)
+
+  return buildContainer([buildTextDisplay(content)], accentColor)
 }
 
 // Build View URL for View button
