@@ -647,39 +647,12 @@ async function getChannelConfigs(
 function createComponentsV2Message(data: DiscordNotificationData): any[] {
   const components: any[] = []
 
-  // Determine the category and add category header
-  const category = getNotificationCategory(data.type)
-  if (category) {
-    const categoryColors = {
-      'COMMENT': 0x00FF00,    // Green
-      'REPORT': 0xFF8C00,   // Dark Orange
-      'USER MODERATION': 0xFFD700, // Gold
-      'VOTE': 0xFFA500,      // Orange
-      'ANNOUNCEMENT': 0x5865F2,  // Discord Blurple
-      'SYSTEM': 0x808080     // Gray
-    }
-    
-    const categoryEmojis = {
-      'COMMENT': '🟢 COMMENT EVENTS',
-      'REPORT': '🚨 REPORT EVENTS',
-      'USER MODERATION': '🔨 USER MODERATION EVENTS',
-      'VOTE': '👍 VOTE EVENTS',
-      'ANNOUNCEMENT': '📢 ANNOUNCEMENT',
-      'SYSTEM': '📢 SYSTEM'
-    }
-
-    components.push(buildSeparator(true, 2))
-    components.push(buildContainer([buildTextDisplay(categoryEmojis[category] || 'SYSTEM')], categoryColors[category] || 0x808080))
-    components.push(buildSeparator(true, 1))
-    components.push(buildSeparator(true, 1))
-  }
-
   // Build the container with content
   const containerContent = buildNotificationContent(data)
-  
+
   // Add container with content
   components.push(containerContent)
-  
+
   // Add separator
   components.push(buildSeparator(true, 1))
   
@@ -690,43 +663,6 @@ function createComponentsV2Message(data: DiscordNotificationData): any[] {
   }
   
   return components
-}
-
-// Get notification category for display
-function getNotificationCategory(type: string): 'COMMENT' | 'REPORT' | 'USER MODERATION' | 'VOTE' | 'ANNOUNCEMENT' | 'SYSTEM' | null {
-  switch (type) {
-    case 'comment_created':
-    case 'comment_updated':
-    case 'comment_deleted':
-    case 'comment_pinned':
-    case 'comment_unpinned':
-    case 'comment_locked':
-    case 'comment_unlocked':
-      return 'COMMENT'
-    
-    case 'report_filed':
-    case 'report_resolved':
-    case 'report_dismissed':
-      return 'REPORT'
-    
-    case 'user_warned':
-    case 'user_muted':
-    case 'user_unmuted':
-    case 'user_banned':
-    case 'user_unbanned':
-    case 'user_shadow_banned':
-      return 'USER MODERATION'
-    
-    case 'vote_cast':
-    case 'vote_removed':
-      return 'VOTE'
-    
-    case 'announcement_published':
-      return 'ANNOUNCEMENT'
-    
-    default:
-      return 'SYSTEM'
-  }
 }
 
 // Build notification content as Components V2 container
@@ -741,8 +677,17 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   const moderatorId = data.moderator?.id || ''
   const commentId = data.comment?.id || ''
   const commentContent = data.comment?.content || ''
-  const mediaTitle = data.media?.title || 'Unknown'
-  const mediaType = data.media?.type || 'anime'
+
+  // Media fields - use comment fields first, fall back to media fields
+  const mediaId = data.comment?.media_id || data.media?.id || 'Unknown'
+  const clientType = data.comment?.client_type || data.media?.client_type || 'Unknown'
+  const mediaType = data.comment?.media_type || data.media?.type || 'anime'
+  const mediaTitle = data.comment?.media_title || data.media?.title || 'Unknown'
+
+  // Build media format string
+  const mediaString = `📺 **Media:** ${mediaId} (${clientType}) (${mediaType})
+${mediaTitle}`
+
   const reason = data.reason || ''
   const reportReason = data.reportReason || ''
   const voteType = data.voteType === 'upvote' ? 'upvote' : 'downvote'
@@ -766,7 +711,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Author:** ${authorName} (ID: ${authorId})
 💬 **Comment ID:** ${commentId}
 
-📺 **Media:** ${mediaTitle} (${mediaType})
+${mediaString}
 
 📝 **Content:**
 › ${commentContent}`
@@ -779,7 +724,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Author:** ${authorName} (ID: ${authorId})
 💬 **Comment ID:** ${commentId}
 
-📺 **Media:** ${mediaTitle} (${mediaType})
+${mediaString}
 
 📝 **Updated Content:**
 › ${commentContent}`
@@ -793,7 +738,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Comment Author:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle} (${mediaType})
+${mediaString}
 
 📝 **Deleted Content:**
 › ${commentContent}
@@ -810,7 +755,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Comment Author:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}`
@@ -824,7 +769,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Comment Author:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}`
@@ -838,7 +783,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Comment Author:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}`
@@ -852,7 +797,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Comment Author:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}`
@@ -867,7 +812,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Reported User:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle} (${mediaType})
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}
@@ -884,7 +829,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Reported User:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}`
@@ -898,7 +843,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 📝 **Reported User:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}`
@@ -910,7 +855,12 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
       const warnCommentInfo = data.comment || {}
       const warnCommentId = warnCommentInfo.id || ''
       const warnCommentContent = warnCommentInfo.content || ''
-      const warnCommentClientType = warnCommentInfo.client_type || 'unknown'
+      const warnMediaId = warnCommentInfo.media_id || 'Unknown'
+      const warnClientType = warnCommentInfo.client_type || 'Unknown'
+      const warnMediaType = warnCommentInfo.media_type || 'anime'
+      const warnMediaTitle = warnCommentInfo.media_title || 'Unknown'
+      const warnMediaString = `📺 **Media:** ${warnMediaId} (${warnClientType}) (${warnMediaType})
+${warnMediaTitle}`
 
       content = `⚠️ **Warning Issued**
 
@@ -918,7 +868,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 👤 **Target User:** ${authorName} (ID: ${authorId})
 
 💬 **Related Comment ID:** ${warnCommentId}
-📺 **Media:** ${mediaTitle} (${mediaType})
+${warnMediaString}
 
 📝 **Comment:**
 › ${warnCommentContent}
@@ -930,9 +880,9 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
     case 'user_muted':
       accentColor = 0x808080 // Gray
       const muteHasCommentInfo = commentId && commentContent
-      const muteCommentSection = muteHasCommentInfo ? 
+      const muteCommentSection = muteHasCommentInfo ?
         `💬 **Related Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle} (${mediaType})
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}
@@ -962,7 +912,7 @@ ${muteCommentSection}
       const banHasCommentInfo = commentId && commentContent
       const banCommentSection = banHasCommentInfo ?
         `💬 **Related Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle} (${mediaType})
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}
@@ -1009,7 +959,7 @@ ${banCommentSection}
 📝 **Comment Author:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}
@@ -1025,7 +975,7 @@ ${banCommentSection}
 📝 **Comment Author:** ${authorName} (ID: ${authorId})
 
 💬 **Comment ID:** ${commentId}
-📺 **Media:** ${mediaTitle}
+${mediaString}
 
 📝 **Comment:**
 › ${commentContent}`
