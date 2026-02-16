@@ -957,20 +957,19 @@ ${muteCommentSection}
       break
 
     case 'user_banned':
-      accentColor = 0x8B0000 // Dark Red
-      const banHasCommentInfo = commentId && commentContent
-      const banCommentSection = banHasCommentInfo ?
-        `💬 **Related Comment ID:** ${commentId}
+  accentColor = 0x8B0000 // Dark Red
+  const banHasCommentInfo = commentId && commentContent
+  const banCommentSection = banHasCommentInfo ?
+    `💬 **Related Comment ID:** ${commentId}
 📺 **Media:** ${mediaTitle} (${mediaType})
 
 📝 **Comment:**
 › ${commentContent}
 ` : `👤 **Target User:** ${authorName} (ID: ${authorId})`
 
-      content = `⛔ **User Banned**
+  content = `⛔ **User Banned**
 
 👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-👤 **Target User:** ${authorName} (ID: ${authorId})
 
 ${banCommentSection}
 
@@ -978,7 +977,7 @@ ${banCommentSection}
 
 📄 **Reason:**
 › ${reason}`
-      break
+  break
 
     case 'user_unbanned':
       accentColor = 0x32CD32 // Lime Green
