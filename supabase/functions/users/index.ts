@@ -383,10 +383,10 @@ async function handleMuteUser(supabase: any, params: any) {
     )
   }
 
-  // Get target user to check permissions
+  // Get target user to check permissions and notes
   const { data: targetUser } = await supabase
     .from('commentum_users')
-    .select('commentum_user_role')
+    .select('commentum_user_role, commentum_user_notes')
     .eq('commentum_user_id', target_user_id)
     .eq('commentum_client_type', target_client_type)
     .single()
@@ -397,6 +397,8 @@ async function handleMuteUser(supabase: any, params: any) {
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
+
+  const userNotes = targetUser.commentum_user_notes || ''
 
   if (!canModerate(moderatorRole, targetUser.commentum_user_role)) {
     return new Response(
@@ -434,7 +436,8 @@ async function handleMuteUser(supabase: any, params: any) {
     type: 'user_muted',
     user: {
       id: target_user_id,
-      username: verifiedUser.username
+      username: verifiedUser.username,
+      notes: userNotes
     },
     comment: {
       client_type: target_client_type,
@@ -446,6 +449,7 @@ async function handleMuteUser(supabase: any, params: any) {
       username: verifiedUser.username
     },
     reason,
+    notes: userNotes,
     metadata: {
       duration: `${muteDuration} hours`
     }

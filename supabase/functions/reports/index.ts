@@ -229,6 +229,16 @@ async function handleCreateReport(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Get reporter username from commentum_users table
+  const { data: reporterUser } = await supabase
+    .from('commentum_users')
+    .select('commentum_username')
+    .eq('commentum_client_type', comment.client_type || 'anilist')
+    .eq('commentum_user_id', reporter_id)
+    .single()
+
+  const reporterUsername = reporterUser?.commentum_username || reporter_info?.username || reporter_id
+
   // Queue Discord notification for new report in background - NON-BLOCKING
   queueDiscordNotification({
     type: 'report_filed',
@@ -243,7 +253,7 @@ async function handleCreateReport(supabase: any, params: any) {
     },
     user: {
       id: reporter_id,
-      username: reporter_info?.username || reporter_id
+      username: reporterUsername
     },
     media: {
       id: comment.media_id,
@@ -253,7 +263,8 @@ async function handleCreateReport(supabase: any, params: any) {
       poster: comment.media_poster,
       client_type: comment.client_type
     },
-    reportReason: reason
+    reportReason: reason,
+    notes: notes || ''
   })
 
   return new Response(
