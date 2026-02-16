@@ -1,6 +1,7 @@
 import { handleAddCommand, handleRegisterCommand, handleStatsCommand, handleHelpCommand, getAvailableServers } from './info.ts'
 import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand, handleQueueCommand } from './moderation.ts'
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
+import { createModalResponse, createDiscordResponse } from '../utils.ts'
 
 // Discord interaction types
 const InteractionType = {
@@ -9,6 +10,205 @@ const InteractionType = {
   MESSAGE_COMPONENT: 3,  // Button clicks
   APPLICATION_COMMAND_AUTOCOMPLETE: 4,
   MODAL_SUBMIT: 5
+}
+
+// Handle modal submissions (type 5)
+async function handleModalSubmit(supabase: any, interaction: any): Promise<Response> {
+  const { data, member, user } = interaction
+  const customId = data?.custom_id
+  const components = data?.components || []
+
+  if (!customId) {
+    return new Response(
+      JSON.stringify({ type: 4, data: { content: '❌ Invalid modal submission', flags: 64 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const userId = user?.id || member?.user?.id
+  const username = user?.username || member?.user?.username || 'Unknown'
+
+  // Get user registration and role
+  const { data: registration } = await supabase
+    .from('discord_users')
+    .select('*')
+    .eq('discord_user_id', userId)
+    .eq('is_active', true)
+    .single()
+
+  const userRole = registration?.user_role || 'user'
+
+  // Extract reason from modal input
+  let reason = ''
+  for (const component of components) {
+    for (const inner of component.components || []) {
+      if (inner.custom_id === 'reason_input' && inner.value) {
+        reason = inner.value.trim()
+      }
+    }
+  }
+
+  if (!reason) {
+    return new Response(
+      JSON.stringify({ type: 4, data: { content: '❌ Reason is required', flags: 64 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Parse custom_id (format: modal_action:id1:id2)
+  const parts = customId.split(':')
+  const action = parts[0]
+  const id1 = parts[1]
+  const id2 = parts[2]
+
+  console.log(`Modal submitted: ${customId} by ${username} (${userRole}), reason: ${reason}`)
+
+  try {
+    switch (action) {
+      case 'modal_delete': {
+        // modal_delete:commentId:userId
+        const commentId = id1
+        const { error } = await supabase
+          .from('comments')
+          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+          .eq('id', commentId)
+        if (error) throw error
+        return createDiscordResponse(`✅ Comment \`${commentId}\` deleted! Reason: ${reason}`)
+      }
+
+      case 'modal_warn': {
+        // modal_warn:userId
+        const targetUserId = id1
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type, commentum_user_warnings')
+          .eq('commentum_user_id', targetUserId)
+
+        if (!targetUsers || targetUsers.length === 0) {
+          return createDiscordResponse('❌ User not found.', true)
+        }
+
+        // Warn user across all platforms
+        for (const u of targetUsers) {
+          await supabase.rpc('add_user_warning', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_warning_reason: reason,
+            p_warned_by: userId
+          })
+        }
+
+        const newWarningCount = (targetUsers[0]?.commentum_user_warnings || 0) + 1
+        return createDiscordResponse(`⚠️ User \`${targetUserId}\` warned! (Total: ${newWarningCount} warnings)\nReason: ${reason}`)
+      }
+
+      case 'modal_mute': {
+        // modal_mute:userId
+        const targetUserId = id1
+        const muteUntil = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+
+        // Mute user across all platforms
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type')
+          .eq('commentum_user_id', targetUserId)
+
+        for (const u of targetUsers || []) {
+          await supabase.rpc('mute_commentum_user', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_mute_duration_hours: 24,
+            p_mute_reason: reason,
+            p_muted_by: userId
+          })
+        }
+        return createDiscordResponse(`🔇 User \`${targetUserId}\` muted for 24 hours until ${muteUntil.toLocaleString()}!\nReason: ${reason}`)
+      }
+
+      case 'modal_ban': {
+        // modal_ban:userId
+        const targetUserId = id1
+
+        // Ban user across all platforms
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type')
+          .eq('commentum_user_id', targetUserId)
+
+        for (const u of targetUsers || []) {
+          await supabase.rpc('ban_commentum_user', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_ban_reason: reason,
+            p_banned_by: userId,
+            p_shadow_ban: false
+          })
+        }
+        return createDiscordResponse(`🔨 User \`${targetUserId}\` banned!\nReason: ${reason}`)
+      }
+
+      case 'modal_del_warn': {
+        // modal_del_warn:commentId:userId
+        const commentId = id1
+        const targetUserId = id2
+
+        // Delete comment
+        await supabase
+          .from('comments')
+          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+          .eq('id', commentId)
+
+        // Warn user
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type')
+          .eq('commentum_user_id', targetUserId)
+        for (const u of targetUsers || []) {
+          await supabase.rpc('add_user_warning', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_warning_reason: reason,
+            p_warned_by: userId
+          })
+        }
+        return createDiscordResponse(`🗑️⚠️ Comment deleted and user \`${targetUserId}\` warned!\nReason: ${reason}`)
+      }
+
+      case 'modal_del_ban': {
+        // modal_del_ban:commentId:userId
+        const commentId = id1
+        const targetUserId = id2
+
+        // Delete comment
+        await supabase
+          .from('comments')
+          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
+          .eq('id', commentId)
+
+        // Ban user
+        const { data: targetUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_client_type')
+          .eq('commentum_user_id', targetUserId)
+        for (const u of targetUsers || []) {
+          await supabase.rpc('ban_commentum_user', {
+            p_client_type: u.commentum_client_type,
+            p_user_id: targetUserId,
+            p_ban_reason: reason,
+            p_banned_by: userId,
+            p_shadow_ban: false
+          })
+        }
+        return createDiscordResponse(`🗑️🔨 Comment deleted and user \`${targetUserId}\` banned!\nReason: ${reason}`)
+      }
+
+      default:
+        return createDiscordResponse(`❌ Unknown modal action: \`${action}\``, true)
+    }
+  } catch (error) {
+    console.error('Modal submission error:', error)
+    return createDiscordResponse(`❌ Error: ${error.message}`, true)
+  }
 }
 
 // Handle button interactions from notification messages
@@ -52,18 +252,19 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can delete comments.', true)
         }
         const commentId = id1
-        
-        // Get comment to check owner's role
+        const userId = id2
+
+        // Check if already deleted
         const { data: comment } = await supabase
           .from('comments')
           .select('deleted, deleted_by, user_id')
           .eq('id', commentId)
           .single()
-        
+
         if (!comment) {
           return createButtonResponse('❌ Comment not found.', true)
         }
-        
+
         if (comment?.deleted) {
           // Get mod name who deleted
           const { data: deleter } = await supabase
@@ -74,19 +275,22 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           const deleterName = deleter?.discord_username || comment.deleted_by || 'Unknown'
           return createButtonResponse(`🗑️ Comment already deleted by **${deleterName}**.`, true)
         }
-        
+
         // Check if target user has equal or higher role
         const targetUserRole = await getTargetUserRole(supabase, comment.user_id)
         if (!canModerateUser(userRole, targetUserRole)) {
           return createButtonResponse(`❌ Cannot delete comment from **${targetUserRole}**. You need higher role.`, true)
         }
-        
-        const { error } = await supabase
-          .from('comments')
-          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
-          .eq('id', commentId)
-        if (error) throw error
-        return createButtonResponse(`✅ Comment \`${commentId}\` deleted successfully!`)
+
+        // Show modal to ask for reason
+        return createModalResponse(
+          'Delete Comment',
+          `modal_delete:${commentId}:${userId}`,
+          'Reason for deletion',
+          'Why are you deleting this comment? (required)',
+          5,
+          500
+        )
       }
       
       case 'mod_warn': {
@@ -95,35 +299,22 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can warn users.', true)
         }
         const targetUserId = id1
-        
+
         // Check if target user has equal or higher role
         const targetUserRole = await getTargetUserRole(supabase, targetUserId)
         if (!canModerateUser(userRole, targetUserRole)) {
           return createButtonResponse(`❌ Cannot warn **${targetUserRole}**. You need higher role.`, true)
         }
-        
-        // Check current warning count and who warned
-        const { data: targetUsers } = await supabase
-          .from('commentum_users')
-          .select('commentum_client_type, commentum_user_warnings, commentum_user_last_warning_by')
-          .eq('commentum_user_id', targetUserId)
-        
-        if (!targetUsers || targetUsers.length === 0) {
-          return createButtonResponse('❌ User not found.', true)
-        }
-        
-        // Warn user across all platforms
-        for (const u of targetUsers) {
-          await supabase.rpc('add_user_warning', {
-            p_client_type: u.commentum_client_type,
-            p_user_id: targetUserId,
-            p_warning_reason: 'Warned via Discord button',
-            p_warned_by: userId
-          })
-        }
-        
-        const newWarningCount = (targetUsers[0]?.commentum_user_warnings || 0) + 1
-        return createButtonResponse(`⚠️ User \`${targetUserId}\` has been warned! (Total: ${newWarningCount} warnings)`)
+
+        // Show modal to ask for reason
+        return createModalResponse(
+          'Warn User',
+          `modal_warn:${targetUserId}`,
+          'Reason for warning',
+          'Why are you warning this user? (required)',
+          5,
+          500
+        )
       }
       
       case 'mod_mute': {
@@ -132,13 +323,13 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only moderators can mute users.', true)
         }
         const targetUserId = id1
-        
+
         // Check if target user has equal or higher role
         const targetUserRole = await getTargetUserRole(supabase, targetUserId)
         if (!canModerateUser(userRole, targetUserRole)) {
           return createButtonResponse(`❌ Cannot mute **${targetUserRole}**. You need higher role.`, true)
         }
-        
+
         // Check if already muted
         const { data: userStatus } = await supabase
           .from('commentum_users')
@@ -146,7 +337,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           .eq('commentum_user_id', targetUserId)
           .limit(1)
           .single()
-        
+
         if (userStatus?.commentum_user_muted && userStatus?.commentum_user_muted_until && new Date(userStatus.commentum_user_muted_until) > new Date()) {
           // Get mod name who muted
           const { data: muter } = await supabase
@@ -157,25 +348,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           const muterName = muter?.discord_username || userStatus.commentum_user_muted_by || 'Unknown'
           return createButtonResponse(`🔇 User already muted by **${muterName}** until ${new Date(userStatus.commentum_user_muted_until).toLocaleString()}.`, true)
         }
-        
-        const muteUntil = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
-        
-        // Mute user across all platforms
-        const { data: targetUsers } = await supabase
-          .from('commentum_users')
-          .select('commentum_client_type')
-          .eq('commentum_user_id', targetUserId)
-        
-        for (const u of targetUsers || []) {
-          await supabase.rpc('mute_commentum_user', {
-            p_client_type: u.commentum_client_type,
-            p_user_id: targetUserId,
-            p_mute_duration_hours: 24,
-            p_mute_reason: 'Muted via Discord button',
-            p_muted_by: userId
-          })
-        }
-        return createButtonResponse(`🔇 User \`${targetUserId}\` muted for 24 hours until ${muteUntil.toLocaleString()}!`)
+
+        // Show modal to ask for reason
+        return createModalResponse(
+          'Mute User',
+          `modal_mute:${targetUserId}`,
+          'Reason for muting',
+          'Why are you muting this user? (required)',
+          5,
+          500
+        )
       }
       
       case 'mod_ban': {
@@ -184,13 +366,13 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse('❌ Only admins can ban users.', true)
         }
         const targetUserId = id1
-        
+
         // Check if target user has equal or higher role
         const targetUserRole = await getTargetUserRole(supabase, targetUserId)
         if (!canModerateUser(userRole, targetUserRole)) {
           return createButtonResponse(`❌ Cannot ban **${targetUserRole}**. You need higher role.`, true)
         }
-        
+
         // Check if already banned
         const { data: userStatus } = await supabase
           .from('commentum_users')
@@ -198,7 +380,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           .eq('commentum_user_id', targetUserId)
           .limit(1)
           .single()
-        
+
         if (userStatus?.commentum_user_banned) {
           // Get mod name who banned
           const { data: banner } = await supabase
@@ -209,23 +391,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           const bannerName = banner?.discord_username || userStatus.commentum_user_banned_by || 'Unknown'
           return createButtonResponse(`🔨 User already banned by **${bannerName}**.`, true)
         }
-        
-        // Ban user across all platforms
-        const { data: targetUsers } = await supabase
-          .from('commentum_users')
-          .select('commentum_client_type')
-          .eq('commentum_user_id', targetUserId)
-        
-        for (const u of targetUsers || []) {
-          await supabase.rpc('ban_commentum_user', {
-            p_client_type: u.commentum_client_type,
-            p_user_id: targetUserId,
-            p_ban_reason: 'Banned via Discord button',
-            p_banned_by: userId,
-            p_shadow_ban: false
-          })
-        }
-        return createButtonResponse(`🔨 User \`${targetUserId}\` has been banned!`)
+
+        // Show modal to ask for reason
+        return createModalResponse(
+          'Ban User',
+          `modal_ban:${targetUserId}`,
+          'Reason for banning',
+          'Why are you banning this user? (required)',
+          5,
+          500
+        )
       }
       
       case 'mod_del_warn': {
@@ -235,20 +410,20 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         }
         const commentId = id1
         const targetUserId = id2
-        
+
         // Check if target user has equal or higher role
         const targetUserRole = await getTargetUserRole(supabase, targetUserId)
         if (!canModerateUser(userRole, targetUserRole)) {
           return createButtonResponse(`❌ Cannot warn **${targetUserRole}**. You need higher role.`, true)
         }
-        
+
         // Check if already deleted
         const { data: comment } = await supabase
           .from('comments')
           .select('deleted, deleted_by')
           .eq('id', commentId)
           .single()
-        
+
         if (comment?.deleted) {
           const { data: deleter } = await supabase
             .from('discord_users')
@@ -258,29 +433,18 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           const deleterName = deleter?.discord_username || comment.deleted_by || 'Unknown'
           return createButtonResponse(`🗑️ Comment already deleted by **${deleterName}**.`, true)
         }
-        
-        // Delete comment
-        await supabase
-          .from('comments')
-          .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
-          .eq('id', commentId)
-        
-        // Warn user
-        const { data: targetUsers } = await supabase
-          .from('commentum_users')
-          .select('commentum_client_type')
-          .eq('commentum_user_id', targetUserId)
-        for (const u of targetUsers || []) {
-          await supabase.rpc('add_user_warning', {
-            p_client_type: u.commentum_client_type,
-            p_user_id: targetUserId,
-            p_warning_reason: 'Warned via delete & warn action',
-            p_warned_by: userId
-          })
-        }
-        return createButtonResponse(`🗑️⚠️ Comment deleted and user \`${targetUserId}\` warned!`)
+
+        // Show modal to ask for reason
+        return createModalResponse(
+          'Delete & Warn',
+          `modal_del_warn:${commentId}:${targetUserId}`,
+          'Reason for action',
+          'Why are you deleting and warning? (required)',
+          5,
+          500
+        )
       }
-      
+
       case 'mod_del_ban': {
         // mod_del_ban:commentId:userId
         if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
@@ -288,27 +452,27 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         }
         const commentId = id1
         const targetUserId = id2
-        
+
         // Check if target user has equal or higher role
         const targetUserRole = await getTargetUserRole(supabase, targetUserId)
         if (!canModerateUser(userRole, targetUserRole)) {
           return createButtonResponse(`❌ Cannot ban **${targetUserRole}**. You need higher role.`, true)
         }
-        
+
         // Check if already deleted and banned
         const { data: comment } = await supabase
           .from('comments')
           .select('deleted, deleted_by')
           .eq('id', commentId)
           .single()
-        
+
         const { data: userStatus } = await supabase
           .from('commentum_users')
           .select('commentum_user_banned, commentum_user_banned_by')
           .eq('commentum_user_id', targetUserId)
           .limit(1)
           .single()
-        
+
         if (comment?.deleted && userStatus?.commentum_user_banned) {
           const { data: deleter } = await supabase
             .from('discord_users')
@@ -324,32 +488,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           const bannerName = banner?.discord_username || userStatus.commentum_user_banned_by || 'Unknown'
           return createButtonResponse(`✅ Already handled: Deleted by **${deleterName}**, Banned by **${bannerName}**.`, true)
         }
-        
-        // Delete comment if not already deleted
-        if (!comment?.deleted) {
-          await supabase
-            .from('comments')
-            .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
-            .eq('id', commentId)
-        }
-        
-        // Ban user if not already banned
-        if (!userStatus?.commentum_user_banned) {
-          const { data: targetUsers } = await supabase
-            .from('commentum_users')
-            .select('commentum_client_type')
-            .eq('commentum_user_id', targetUserId)
-          for (const u of targetUsers || []) {
-            await supabase.rpc('ban_commentum_user', {
-              p_client_type: u.commentum_client_type,
-              p_user_id: targetUserId,
-              p_ban_reason: 'Banned via delete & ban action',
-              p_banned_by: userId,
-              p_shadow_ban: false
-            })
-          }
-        }
-        return createButtonResponse(`🗑️🔨 Comment deleted and user \`${targetUserId}\` banned!`)
+
+        // Show modal to ask for reason
+        return createModalResponse(
+          'Delete & Ban',
+          `modal_del_ban:${commentId}:${targetUserId}`,
+          'Reason for action',
+          'Why are you deleting and banning? (required)',
+          5,
+          500
+        )
       }
       
       case 'report_approve': {
@@ -522,6 +670,11 @@ async function getTargetUserRole(supabase: any, targetUserId: string): Promise<s
 
 export async function routeInteraction(supabase: any, interaction: any): Promise<Response> {
   const { data, guild_id, member, user } = interaction
+
+  // Handle modal submissions (type 5)
+  if (interaction.type === 5) {
+    return await handleModalSubmit(supabase, interaction)
+  }
 
   // Handle button clicks (type 3)
   if (interaction.type === 3) {
