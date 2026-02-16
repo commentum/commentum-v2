@@ -452,7 +452,7 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
     if (data.comment?.id) {
       notificationId = data.comment.id
     } else {
-      const { data: newNotification } = await supabase
+      const result = await supabase
         .from('discord_notifications')
         .insert({
           notification_type: data.type,
@@ -466,6 +466,7 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
         .select('id')
         .single()
 
+      const newNotification = result.data
       if (newNotification) {
         notificationId = newNotification.id
       }
@@ -957,19 +958,20 @@ ${muteCommentSection}
       break
 
     case 'user_banned':
-  accentColor = 0x8B0000 // Dark Red
-  const banHasCommentInfo = commentId && commentContent
-  const banCommentSection = banHasCommentInfo ?
-    `💬 **Related Comment ID:** ${commentId}
+      accentColor = 0x8B0000 // Dark Red
+      const banHasCommentInfo = commentId && commentContent
+      const banCommentSection = banHasCommentInfo ?
+        `💬 **Related Comment ID:** ${commentId}
 📺 **Media:** ${mediaTitle} (${mediaType})
 
 📝 **Comment:**
 › ${commentContent}
 ` : `👤 **Target User:** ${authorName} (ID: ${authorId})`
 
-  content = `⛔ **User Banned**
+      content = `⛔ **User Banned**
 
 👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
+👤 **Target User:** ${authorName} (ID: ${authorId})
 
 ${banCommentSection}
 
@@ -977,7 +979,7 @@ ${banCommentSection}
 
 📄 **Reason:**
 › ${reason}`
-  break
+      break
 
     case 'user_unbanned':
       accentColor = 0x32CD32 // Lime Green
