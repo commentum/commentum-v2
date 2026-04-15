@@ -328,6 +328,15 @@ async function handleCreateComment(supabase: any, params: any) {
       )
     }
 
+    // Check if any ancestor in the chain is locked
+    const ancestorLocked = await isAncestorLocked(supabase, parent_id)
+    if (ancestorLocked) {
+      return new Response(
+        JSON.stringify({ error: 'Comment thread is locked' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const nestingLevel = await getNestingLevel(supabase, parent_id)
     const maxNesting = configs.max_nesting_level ?? 10
     
@@ -666,6 +675,38 @@ async function handleModDeleteComment(supabase: any, params: any) {
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
+}
+
+// Walk up the ancestor chain to check if any ancestor is locked
+// Note: the direct parent's locked status is already checked before calling this,
+// so we start from the grandparent and walk upward
+async function isAncestorLocked(supabase: any, parentId: number): Promise<boolean> {
+  // Get the direct parent's parent_id to start walking from the grandparent
+  const { data: directParent } = await supabase
+    .from('comments')
+    .select('parent_id')
+    .eq('id', parentId)
+    .single()
+
+  if (!directParent || !directParent.parent_id) return false
+
+  let currentId: number | null = directParent.parent_id
+  let depth = 0
+
+  while (currentId && depth < 10) {
+    const { data: ancestor } = await supabase
+      .from('comments')
+      .select('parent_id, locked')
+      .eq('id', currentId)
+      .single()
+
+    if (!ancestor) break
+    if (ancestor.locked) return true
+    currentId = ancestor.parent_id
+    depth++
+  }
+
+  return false
 }
 
 // Optimized: Get nesting level with recursive CTE (single query instead of loop)

@@ -20,7 +20,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration } = await req.json()
+    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, banned, muted, shadow_banned, page, limit, username } = await req.json()
 
     // All user management actions require token authentication
     if (!client_type || !access_token) {
@@ -77,6 +77,12 @@ serve(async (req) => {
       case 'get_user_history':
         return await handleGetUserHistory(supabase, { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser })
       
+      case 'list_users':
+        return await handleListUsers(supabase, { target_client_type, moderator_id, moderatorRole, verifiedUser, role, banned, muted, shadow_banned, page, limit })
+      
+      case 'search_users':
+        return await handleSearchUsers(supabase, { username, target_client_type, moderator_id, moderatorRole, verifiedUser })
+      
       default:
         return new Response(
           JSON.stringify({ error: 'Invalid action' }),
@@ -112,10 +118,39 @@ async function handleGetUserInfo(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Enrich user data with readable field names
+  const enrichedUsers = (data || []).map((u: any) => ({
+    id: u.commentum_user_id,
+    username: u.commentum_username,
+    avatar: u.commentum_user_avatar,
+    role: getDisplayRole(u.commentum_user_role),
+    banned: u.commentum_user_banned,
+    muted: u.commentum_user_muted,
+    muted_until: u.commentum_user_muted_until,
+    shadow_banned: u.commentum_user_shadow_banned,
+    warnings: u.commentum_user_warnings,
+    notes: u.commentum_user_notes,
+    client_type: u.commentum_client_type,
+    created_at: u.commentum_created_at || u.created_at,
+    updated_at: u.commentum_updated_at || u.updated_at,
+    // Keep original fields for backwards compatibility
+    commentum_user_id: u.commentum_user_id,
+    commentum_username: u.commentum_username,
+    commentum_user_avatar: u.commentum_user_avatar,
+    commentum_user_role: getDisplayRole(u.commentum_user_role),
+    commentum_user_banned: u.commentum_user_banned,
+    commentum_user_muted: u.commentum_user_muted,
+    commentum_user_muted_until: u.commentum_user_muted_until,
+    commentum_user_shadow_banned: u.commentum_user_shadow_banned,
+    commentum_user_warnings: u.commentum_user_warnings,
+    commentum_user_notes: u.commentum_user_notes,
+    commentum_client_type: u.commentum_client_type,
+  }))
+
   return new Response(
     JSON.stringify({ 
       success: true, 
-      users: data,
+      users: enrichedUsers,
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
@@ -536,6 +571,96 @@ async function handleUnmuteUser(supabase: any, params: any) {
   )
 }
 
+async function handleListUsers(supabase: any, params: any) {
+  const { target_client_type, moderator_id, moderatorRole, verifiedUser, role, banned, muted, shadow_banned, page = 1, limit = 50 } = params
+
+  const effectiveLimit = Math.min(Math.max(limit, 1), 100)
+
+  let query = supabase
+    .from('commentum_users')
+    .select('*', { count: 'exact' })
+    .range((page - 1) * effectiveLimit, page * effectiveLimit - 1)
+    .order('created_at', { ascending: false })
+
+  if (target_client_type) query = query.eq('commentum_client_type', target_client_type)
+  if (role) query = query.eq('commentum_user_role', role)
+  if (banned !== undefined) query = query.eq('commentum_user_banned', banned)
+  if (muted !== undefined) query = query.eq('commentum_user_muted', muted)
+  if (shadow_banned !== undefined) query = query.eq('commentum_user_shadow_banned', shadow_banned)
+
+  const { data, error, count } = await query
+  if (error) throw error
+
+  const enrichedUsers = (data || []).map((u: any) => ({
+    id: u.commentum_user_id,
+    username: u.commentum_username,
+    avatar: u.commentum_user_avatar,
+    role: getDisplayRole(u.commentum_user_role),
+    banned: u.commentum_user_banned,
+    muted: u.commentum_user_muted,
+    muted_until: u.commentum_user_muted_until,
+    shadow_banned: u.commentum_user_shadow_banned,
+    warnings: u.commentum_user_warnings,
+    client_type: u.commentum_client_type,
+    created_at: u.commentum_created_at || u.created_at,
+  }))
+
+  return new Response(
+    JSON.stringify({ success: true, users: enrichedUsers, total: count, page, limit: effectiveLimit,
+      moderator: { id: moderator_id, username: verifiedUser.username, role: getDisplayRole(moderatorRole) }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleSearchUsers(supabase: any, params: any) {
+  const { username, target_client_type, moderator_id, moderatorRole, verifiedUser } = params
+
+  if (!username || username.trim().length < 2) {
+    return new Response(
+      JSON.stringify({ error: 'Username search requires at least 2 characters' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  let query = supabase
+    .from('commentum_users')
+    .select('*')
+    .ilike('commentum_username', `%${username.trim()}%`)
+    .limit(25)
+
+  if (target_client_type) {
+    query = query.eq('commentum_client_type', target_client_type)
+  }
+
+  const { data, error } = await query
+  if (error) throw error
+
+  const enrichedUsers = (data || []).map((u: any) => ({
+    id: u.commentum_user_id,
+    username: u.commentum_username,
+    avatar: u.commentum_user_avatar,
+    role: getDisplayRole(u.commentum_user_role),
+    banned: u.commentum_user_banned,
+    muted: u.commentum_user_muted,
+    muted_until: u.commentum_user_muted_until,
+    shadow_banned: u.commentum_user_shadow_banned,
+    warnings: u.commentum_user_warnings,
+    client_type: u.commentum_client_type,
+    created_at: u.commentum_created_at || u.created_at,
+  }))
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      users: enrichedUsers,
+      total: enrichedUsers.length,
+      moderator: { id: moderator_id, username: verifiedUser.username, role: getDisplayRole(moderatorRole) }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
 async function handleGetUserHistory(supabase: any, params: any) {
   const { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser } = params
 
@@ -546,14 +671,15 @@ async function handleGetUserHistory(supabase: any, params: any) {
     )
   }
 
-  // Get user information with history
+  // Get user information with comments history
   const { data, error } = await supabase
     .from('commentum_users')
     .select(`
       *,
       comments:comments(
         id, content, created_at, updated_at, deleted, pinned, locked, 
-        upvotes, downvotes, report_count, moderated, moderation_reason
+        upvotes, downvotes, report_count, moderated, moderation_reason,
+        media_id, media_title, media_type, tags
       )
     `)
     .eq('commentum_user_id', target_user_id)
@@ -562,10 +688,59 @@ async function handleGetUserHistory(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Format the user data and comments into a proper history format
+  const userComments = (data as any).comments || []
+  const history = userComments.map((c: any) => ({
+    id: c.id,
+    action: c.moderated ? 'moderated' : 'comment',
+    content: c.content,
+    reason: c.moderation_reason || '',
+    created_at: c.created_at,
+    updated_at: c.updated_at,
+    deleted: c.deleted,
+    pinned: c.pinned,
+    locked: c.locked,
+    upvotes: c.upvotes,
+    downvotes: c.downvotes,
+    report_count: c.report_count,
+    media_title: c.media_title,
+    media_type: c.media_type,
+    tags: c.tags,
+    moderator_username: c.moderation_reason ? 'System' : ''
+  }))
+
+  // Also extract moderation history from user notes if available
+  const userNotes = data.commentum_user_notes || ''
+  let moderationHistory: any[] = []
+  if (userNotes) {
+    try {
+      moderationHistory = JSON.parse(userNotes)
+      if (!Array.isArray(moderationHistory)) moderationHistory = []
+    } catch {
+      moderationHistory = []
+    }
+  }
+
   return new Response(
     JSON.stringify({ 
       success: true, 
-      user: data,
+      user: {
+        id: data.commentum_user_id,
+        username: data.commentum_username,
+        avatar: data.commentum_user_avatar,
+        role: getDisplayRole(data.commentum_user_role),
+        banned: data.commentum_user_banned,
+        muted: data.commentum_user_muted,
+        muted_until: data.commentum_user_muted_until,
+        shadow_banned: data.commentum_user_shadow_banned,
+        warnings: data.commentum_user_warnings,
+        notes: data.commentum_user_notes,
+        created_at: data.commentum_created_at || data.created_at,
+        updated_at: data.commentum_updated_at || data.updated_at,
+        client_type: data.commentum_client_type
+      },
+      history: [...moderationHistory, ...history],
+      commentCount: userComments.length,
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,

@@ -417,10 +417,42 @@ async function handleGetReportsQueue(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Collect all unique reporter IDs to batch-fetch their info
+  const reporterIds = new Set<string>()
+  for (const comment of comments) {
+    const reports = JSON.parse(comment.reports || '[]')
+    const pendingReports = reports.filter((r: any) => r.status === 'pending')
+    for (const r of pendingReports) {
+      if (r.reporter_id) reporterIds.add(r.reporter_id)
+    }
+  }
+
+  // Batch fetch reporter info from commentum_users
+  const reporterInfoMap: Record<string, { username: string; avatar: string | null }> = {}
+  if (reporterIds.size > 0) {
+    const { data: reporterUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_user_id, commentum_username, commentum_user_avatar')
+      .in('commentum_user_id', Array.from(reporterIds))
+
+    if (reporterUsers) {
+      for (const ru of reporterUsers) {
+        reporterInfoMap[ru.commentum_user_id] = {
+          username: ru.commentum_username || ru.commentum_user_id,
+          avatar: ru.commentum_user_avatar || null
+        }
+      }
+    }
+  }
+
   // Format reports
   const reportQueue = comments.map((comment: any) => {
     const reports = JSON.parse(comment.reports || '[]')
-    const pendingReports = reports.filter((r: any) => r.status === 'pending')
+    const pendingReports = reports.filter((r: any) => r.status === 'pending').map((r: any) => ({
+      ...r,
+      reporter_username: reporterInfoMap[r.reporter_id]?.username || r.reporter_id,
+      reporter_avatar: reporterInfoMap[r.reporter_id]?.avatar || null
+    }))
 
     return {
       commentId: comment.id,
