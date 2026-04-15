@@ -15,29 +15,39 @@ jobs:
         with:
           version: latest
 
-      # Export from Supabase Cloud
-      - name: Dump Cloud Database
+      # Link to cloud project first
+      - name: Link to Cloud Project
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REFV2 }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
+          supabase link \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --password "$SUPABASE_DB_PASSWORD"
+
+      # Export from Supabase Cloud
+      - name: Dump Cloud Database
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
           # Roles
           supabase db dump \
-            --project-ref "$SUPABASE_PROJECT_REF" \
+            --linked \
             --password "$SUPABASE_DB_PASSWORD" \
             --role-only \
             -f cloud_roles.sql
 
           # Schema
           supabase db dump \
-            --project-ref "$SUPABASE_PROJECT_REF" \
+            --linked \
             --password "$SUPABASE_DB_PASSWORD" \
             -f cloud_schema.sql
 
           # Data
           supabase db dump \
-            --project-ref "$SUPABASE_PROJECT_REF" \
+            --linked \
             --password "$SUPABASE_DB_PASSWORD" \
             --data-only \
             -f cloud_data.sql
