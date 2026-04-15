@@ -1,0 +1,100 @@
+name: Migrate Cloud DB to Self-Hosted
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # Export from Supabase Cloud
+      - name: Dump Cloud Database
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REFV2 }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          # Roles
+          supabase db dump \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --password "$SUPABASE_DB_PASSWORD" \
+            --role-only \
+            -f cloud_roles.sql
+
+          # Schema
+          supabase db dump \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --password "$SUPABASE_DB_PASSWORD" \
+            -f cloud_schema.sql
+
+          # Data
+          supabase db dump \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            --password "$SUPABASE_DB_PASSWORD" \
+            --data-only \
+            -f cloud_data.sql
+
+          echo "✅ Dump complete"
+
+      # Copy dumps to your server
+      - name: Copy Dumps to Server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "cloud_roles.sql,cloud_schema.sql,cloud_data.sql"
+          target: "/root/supabase/"
+
+      # Restore on your self-hosted server
+      - name: Restore to Self-Hosted
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /root/supabase/docker
+
+            echo "▶️ Restoring roles..."
+            docker compose exec -T db psql \
+              -U postgres -d postgres \
+              < /root/supabase/cloud_roles.sql
+
+            echo "▶️ Restoring schema..."
+            docker compose exec -T db psql \
+              -U postgres -d postgres \
+              < /root/supabase/cloud_schema.sql
+
+            echo "▶️ Restoring data..."
+            docker compose exec -T db psql \
+              -U postgres -d postgres \
+              < /root/supabase/cloud_data.sql
+
+            echo "✅ Migration complete!"
+
+      # Verify
+      - name: Verify Migration
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /root/supabase/docker
+
+            echo "📋 Schemas:"
+            docker compose exec -T db psql \
+              -U postgres -d postgres -c "\dn"
+
+            echo "📋 Tables:"
+            docker compose exec -T db psql \
+              -U postgres -d postgres -c "\dt *.*"
