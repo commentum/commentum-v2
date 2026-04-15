@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
-import { verifyAdminAccess, canModerate } from '../shared/auth.ts'
+import { verifyAdminAccess, canModerate, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
@@ -119,7 +119,7 @@ async function handleGetUserInfo(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -144,7 +144,7 @@ async function handleGetUserStats(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -212,7 +212,7 @@ async function handleWarnUser(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -288,7 +288,7 @@ async function handleBanUser(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -359,7 +359,7 @@ async function handleUnbanUser(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -466,7 +466,7 @@ async function handleMuteUser(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -529,7 +529,7 @@ async function handleUnmuteUser(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -569,7 +569,7 @@ async function handleGetUserHistory(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

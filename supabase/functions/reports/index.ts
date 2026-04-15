@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
-import { verifyAdminAccess } from '../shared/auth.ts'
+import { verifyAdminAccess, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
@@ -397,7 +397,7 @@ async function handleResolveReport(supabase: any, params: any) {
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -450,7 +450,7 @@ async function handleGetReportsQueue(supabase: any, params: any) {
       moderator: {
         id: queueModeratorId,
         username: verifiedUser.username,
-        role: moderatorRole
+        role: getDisplayRole(moderatorRole)
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
