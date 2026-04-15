@@ -1,0 +1,82 @@
+name: Deploy Supabase Backend
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - "supabase/migrations/**"
+  workflow_dispatch:
+    inputs:
+      deploy_functions:
+        description: "Deploy Edge Functions"
+        required: true
+        default: "true"
+      run_migrations:
+        description: "Run database migrations"
+        required: true
+        default: "false"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Deploy Edge Functions
+      - name: Deploy Edge Functions
+        if: ${{ github.event_name == 'push' || inputs.deploy_functions == 'true' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "supabase/functions/*"
+          target: "/root/supabase/docker/volumes/functions/"
+          strip_components: 2
+
+      # Restart edge functions container
+      - name: Restart Edge Functions Container
+        if: ${{ github.event_name == 'push' || inputs.deploy_functions == 'true' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /root/supabase/docker
+            docker compose restart functions
+            echo "✅ Edge functions restarted"
+
+      # Run DB migrations (only when manually triggered with run_migrations=true)
+      - name: Apply Database Migrations
+        if: ${{ inputs.run_migrations == 'true' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /root/supabase/docker
+
+            for f in /root/supabase/docker/volumes/db/migrations/*.sql; do
+              echo "▶️ Running migration: $f"
+              docker compose exec -T db psql \
+                -U postgres \
+                -d postgres \
+                -f "$f"
+            done
+
+            echo "✅ Migrations applied"
+
+      # Verify everything is running
+      - name: Verify Containers
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /root/supabase/docker
+            docker compose ps
+            echo "✅ Deploy complete"
