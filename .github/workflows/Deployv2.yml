@@ -1,4 +1,4 @@
-name: Deploy Supabase Backend
+name: Deploy Supabase Backend old
 
 on:
   push:
