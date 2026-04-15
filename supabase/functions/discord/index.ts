@@ -15,53 +15,44 @@ serve(async (req) => {
   }
 
   try {
-    // Initialize Supabase client
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
-    // Check if this is a global command sync request (bypass Discord signature verification)
-    if (req.method === 'POST') {
-      try {
-        const cloneReq = req.clone()
-        const body = await cloneReq.json()
-        if (body.action === 'sync_global_commands' || body.action === 'sync_commands') {
-          console.log('🌍 Handling global command sync request')
-          return await handleGlobalCommandSync()
-        }
-      } catch (syncError) {
-        // If it's not a sync request, continue with normal Discord processing
-        console.log('Not a sync request, continuing with normal Discord processing')
-      }
-    }
-
-    // Verify Discord signature for normal interactions
+    // Verify Discord signature first (required for ALL requests including ping)
     const signature = req.headers.get('x-signature-ed25519')
     const timestamp = req.headers.get('x-signature-timestamp')
-    
+
     if (!signature || !timestamp) {
       return new Response('Missing signature headers', { status: 401 })
     }
 
     const body = await req.text()
     const isValidSignature = await verifySignature(body, signature, timestamp)
-    
+
     if (!isValidSignature) {
       return new Response('Invalid signature', { status: 401 })
     }
 
     const interaction = JSON.parse(body)
-    
-    // Handle ping for Discord verification
+
+    // Handle Discord verification ping BEFORE anything else
     if (interaction.type === 1) {
       return new Response(
         JSON.stringify({ type: 1 }),
-        { 
-          status: 200, 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       )
+    }
+
+    // Initialize Supabase client
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
+
+    // Check if this is a global command sync request
+    if (interaction.action === 'sync_global_commands' || interaction.action === 'sync_commands') {
+      console.log('🌍 Handling global command sync request')
+      return await handleGlobalCommandSync()
     }
 
     // Route interaction to appropriate handler
