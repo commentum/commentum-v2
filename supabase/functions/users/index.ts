@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
-import { verifyAdminAccess, canModerate, getDisplayRole } from '../shared/auth.ts'
+import { verifyAdminAccess, getUserRole, canModerate, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
@@ -41,18 +41,45 @@ serve(async (req) => {
 
     const moderator_id = verifiedUser.provider_user_id
 
-    // Verify admin access
-    const adminVerification = await verifyAdminAccess(supabase, moderator_id)
-    if (!adminVerification.valid) {
-      return new Response(
-        JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    // These actions are available to all authenticated users
+    // get_user_history: anyone can view other users' public comments
+    // get_role: anyone can check their own role
+    const publicActions = ['get_user_history', 'get_role']
+
+    let moderatorRole: string
+    if (publicActions.includes(action)) {
+      moderatorRole = await getUserRole(supabase, moderator_id)
+    } else {
+      // Moderation actions require admin/moderator access
+      const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+      if (!adminVerification.valid) {
+        return new Response(
+          JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      moderatorRole = adminVerification.role
     }
 
-    const moderatorRole = adminVerification.role
-
     switch (action) {
+      case 'get_role':
+        return new Response(
+          JSON.stringify({
+            success: true,
+            role: getDisplayRole(moderatorRole),
+            user: {
+              id: moderator_id,
+              username: verifiedUser.username
+            },
+            moderator: {
+              id: moderator_id,
+              username: verifiedUser.username,
+              role: getDisplayRole(moderatorRole)
+            }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+
       case 'get_user_info':
         return await handleGetUserInfo(supabase, { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser })
       
@@ -671,6 +698,8 @@ async function handleGetUserHistory(supabase: any, params: any) {
     )
   }
 
+  const isMod = ['moderator', 'admin', 'super_admin', 'owner'].includes(moderatorRole)
+
   // Get user information with comments history
   const { data, error } = await supabase
     .from('commentum_users')
@@ -686,66 +715,106 @@ async function handleGetUserHistory(supabase: any, params: any) {
     .eq('commentum_client_type', target_client_type)
     .single()
 
-  if (error) throw error
+  if (error || !data) {
+    return new Response(
+      JSON.stringify({ success: true, user: null, history: [], commentCount: 0 }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 
-  // Format the user data and comments into a proper history format
+  // Format comments into history entries
   const userComments = (data as any).comments || []
-  const history = userComments.map((c: any) => ({
+  // Non-mod users should not see deleted comments
+  const visibleComments = isMod ? userComments : userComments.filter((c: any) => !c.deleted)
+  const commentHistory = visibleComments.map((c: any) => ({
     id: c.id,
-    action: c.moderated ? 'moderated' : 'comment',
+    action: 'comment',
     content: c.content,
-    reason: c.moderation_reason || '',
     created_at: c.created_at,
     updated_at: c.updated_at,
     deleted: c.deleted,
-    pinned: c.pinned,
-    locked: c.locked,
-    upvotes: c.upvotes,
-    downvotes: c.downvotes,
-    report_count: c.report_count,
     media_title: c.media_title,
     media_type: c.media_type,
     tags: c.tags,
-    moderator_username: c.moderation_reason ? 'System' : ''
+    ...(isMod ? {
+      pinned: c.pinned,
+      locked: c.locked,
+      upvotes: c.upvotes,
+      downvotes: c.downvotes,
+      report_count: c.report_count,
+      moderated: c.moderated,
+      moderation_reason: c.moderation_reason,
+      moderator_username: c.moderation_reason ? 'System' : ''
+    } : {})
   }))
 
-  // Also extract moderation history from user notes if available
-  const userNotes = data.commentum_user_notes || ''
-  let moderationHistory: any[] = []
-  if (userNotes) {
-    try {
-      moderationHistory = JSON.parse(userNotes)
-      if (!Array.isArray(moderationHistory)) moderationHistory = []
-    } catch {
-      moderationHistory = []
+  let allHistory = commentHistory
+
+  // Only include moderation history for moderator+ users
+  if (isMod) {
+    // Add moderated entries
+    const moderatedEntries = userComments
+      .filter((c: any) => c.moderated)
+      .map((c: any) => ({
+        id: c.id,
+        action: 'moderated',
+        content: c.content,
+        reason: c.moderation_reason || '',
+        created_at: c.created_at,
+        deleted: c.deleted,
+        media_title: c.media_title,
+        moderator_username: 'System'
+      }))
+
+    // Also extract moderation history from user notes if available
+    const userNotes = data.commentum_user_notes || ''
+    let moderationHistory: any[] = []
+    if (userNotes) {
+      try {
+        moderationHistory = JSON.parse(userNotes)
+        if (!Array.isArray(moderationHistory)) moderationHistory = []
+      } catch {
+        moderationHistory = []
+      }
     }
+
+    allHistory = [...moderationHistory, ...commentHistory]
+  }
+
+  // Build user info (limited for non-mod users)
+  const userInfo: any = {
+    id: data.commentum_user_id,
+    username: data.commentum_username,
+    avatar: data.commentum_user_avatar,
+    created_at: data.commentum_created_at || data.created_at,
+    client_type: data.commentum_client_type
+  }
+
+  // Include moderation-specific fields only for mod+ users
+  if (isMod) {
+    userInfo.role = getDisplayRole(data.commentum_user_role)
+    userInfo.banned = data.commentum_user_banned
+    userInfo.muted = data.commentum_user_muted
+    userInfo.muted_until = data.commentum_user_muted_until
+    userInfo.shadow_banned = data.commentum_user_shadow_banned
+    userInfo.warnings = data.commentum_user_warnings
+    userInfo.notes = data.commentum_user_notes
+    userInfo.updated_at = data.commentum_updated_at || data.updated_at
   }
 
   return new Response(
     JSON.stringify({ 
       success: true, 
-      user: {
-        id: data.commentum_user_id,
-        username: data.commentum_username,
-        avatar: data.commentum_user_avatar,
-        role: getDisplayRole(data.commentum_user_role),
-        banned: data.commentum_user_banned,
-        muted: data.commentum_user_muted,
-        muted_until: data.commentum_user_muted_until,
-        shadow_banned: data.commentum_user_shadow_banned,
-        warnings: data.commentum_user_warnings,
-        notes: data.commentum_user_notes,
-        created_at: data.commentum_created_at || data.created_at,
-        updated_at: data.commentum_updated_at || data.updated_at,
-        client_type: data.commentum_client_type
-      },
-      history: [...moderationHistory, ...history],
-      commentCount: userComments.length,
-      moderator: {
-        id: moderator_id,
-        username: verifiedUser.username,
-        role: getDisplayRole(moderatorRole)
-      }
+      user: userInfo,
+      history: allHistory,
+      commentCount: isMod ? userComments.length : visibleComments.length,
+      ...(isMod ? {
+        moderator: {
+          id: moderator_id,
+          username: verifiedUser.username,
+          role: getDisplayRole(moderatorRole)
+        }
+      } : {})
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
