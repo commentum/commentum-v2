@@ -700,30 +700,34 @@ async function handleGetUserHistory(supabase: any, params: any) {
 
   const isMod = ['moderator', 'admin', 'super_admin', 'owner'].includes(moderatorRole)
 
-  // Get user information with comments history
-  const { data, error } = await supabase
-    .from('commentum_users')
-    .select(`
-      *,
-      comments:comments(
-        id, content, created_at, updated_at, deleted, pinned, locked, 
-        upvotes, downvotes, report_count, moderated, moderation_reason,
-        media_id, media_title, media_type, tags
+  // Fetch user info and comments separately (no FK relationship between tables)
+  const [userResult, commentsResult] = await Promise.all([
+    supabase
+      .from('commentum_users')
+      .select('*')
+      .eq('commentum_user_id', target_user_id)
+      .eq('commentum_client_type', target_client_type)
+      .single(),
+    supabase
+      .from('comments')
+      .select('id, content, created_at, updated_at, deleted, pinned, locked, upvotes, downvotes, report_count, moderated, moderation_reason, media_id, media_title, media_type, tags')
+      .eq('user_id', target_user_id)
+      .eq('client_type', target_client_type)
+      .order('created_at', { ascending: false })
+  ])
+
+  const data = userResult.data
+  const userComments = commentsResult.data || []
+
+  if (!data) {
+    // User doesn't exist in commentum_users yet, but they might still have comments
+    if (userComments.length === 0) {
+      return new Response(
+        JSON.stringify({ success: true, user: null, history: [], commentCount: 0 }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-    `)
-    .eq('commentum_user_id', target_user_id)
-    .eq('commentum_client_type', target_client_type)
-    .single()
-
-  if (error || !data) {
-    return new Response(
-      JSON.stringify({ success: true, user: null, history: [], commentCount: 0 }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    }
   }
-
-  // Format comments into history entries
-  const userComments = (data as any).comments || []
   // Non-mod users should not see deleted comments
   const visibleComments = isMod ? userComments : userComments.filter((c: any) => !c.deleted)
   const commentHistory = visibleComments.map((c: any) => ({
@@ -782,16 +786,22 @@ async function handleGetUserHistory(supabase: any, params: any) {
   }
 
   // Build user info (limited for non-mod users)
-  const userInfo: any = {
+  const userInfo: any = data ? {
     id: data.commentum_user_id,
     username: data.commentum_username,
     avatar: data.commentum_user_avatar,
     created_at: data.commentum_created_at || data.created_at,
     client_type: data.commentum_client_type
+  } : {
+    id: target_user_id,
+    username: '',
+    avatar: null,
+    created_at: null,
+    client_type: target_client_type
   }
 
-  // Include moderation-specific fields only for mod+ users
-  if (isMod) {
+  // Include moderation-specific fields only for mod+ users (and only if user data exists)
+  if (isMod && data) {
     userInfo.role = getDisplayRole(data.commentum_user_role)
     userInfo.banned = data.commentum_user_banned
     userInfo.muted = data.commentum_user_muted
