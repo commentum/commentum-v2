@@ -567,9 +567,13 @@ async function handleDeleteComment(supabase: any, params: any) {
       content: comment.content,
       client_type: deletedComment.client_type,
       media_id: deletedComment.media_id,
-      media_type: deletedComment.media_type
+      media_type: deletedComment.media_type,
+      media_title: deletedComment.media_title
     },
-    moderator: null,
+    moderator: {
+      id: deletedComment.user_id,
+      username: deletedComment.username
+    },
     user: {
       id: deletedComment.user_id,
       username: deletedComment.username,
@@ -582,7 +586,8 @@ async function handleDeleteComment(supabase: any, params: any) {
       year: deletedComment.media_year,
       poster: deletedComment.media_poster,
       client_type: deletedComment.client_type
-    }
+    },
+    reason: 'Self-deleted by author'
   })
 
   return new Response(
