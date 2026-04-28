@@ -690,13 +690,17 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   const mediaType = data.comment?.media_type || data.media?.type || 'anime'
   const mediaTitle = data.comment?.media_title || data.media?.title || 'Unknown'
 
-  // Build media format string
-  const mediaString = `📺 **Media:** ${mediaId} (${clientType}) (${mediaType})
-${mediaTitle}`
+  // ── helpers ──────────────────────────────────────────────────────────────
+  // Clean media line: "Media Title  [media_id · client · type]"
+  const mediaLine = `${mediaTitle}  \`[${mediaId} · ${clientType} · ${mediaType}]\``
+
+  // Block section with a divider above it
+  const section = (label: string, body: string) =>
+    `**${label}**\n${'─'.repeat(32)}\n${body}`
 
   const reason = data.reason || ''
   const reportReason = data.reportReason || ''
-  const voteType = data.voteType === 'upvote' ? 'upvote' : 'downvote'
+  const voteType = data.voteType === 'upvote' ? 'Upvote ▲' : 'Downvote ▼'
   const voterName = data.user?.username || 'Unknown'
   const voterId = data.user?.id || ''
   const reporterName = data.user?.username || 'Unknown'
@@ -709,318 +713,277 @@ ${mediaTitle}`
 
   // Build content based on event type
   switch (data.type) {
-    // ==================== COMMENT EVENTS ====================
+
+    // ═══════════════════════════════════════════════════════
+    // COMMENT EVENTS
+    // ═══════════════════════════════════════════════════════
+
     case 'comment_created':
-      accentColor = 0x00FF00 // Green
-      content = `🆕 **Comment Created**
+      accentColor = 0x2ECC71 // Green
+      content = `🆕  **New Comment**
 
-📝 **Author:** ${authorName} (ID: ${authorId})
-💬 **Comment ID:** ${commentId}
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-${mediaString}
-
-📝 **Content:**
-› ${commentContent}`
+${section('Content', commentContent)}`
       break
 
     case 'comment_updated':
       accentColor = 0x9B59B6 // Purple
-      content = `✏️ **Comment Edited**
+      content = `✏️  **Comment Edited**
 
-📝 **Author:** ${authorName} (ID: ${authorId})
-💬 **Comment ID:** ${commentId}
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-${mediaString}
-
-📝 **Updated Content:**
-› ${commentContent}`
+${section('Updated Content', commentContent)}`
       break
 
     case 'comment_deleted':
-      accentColor = 0xFF0000 // Red
-      content = `🗑️ **Comment Deleted**
+      accentColor = 0xE74C3C // Red
+      content = `🗑️  **Comment Deleted**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-📝 **Comment Author:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
+${section('Deleted Content', commentContent)}
 
-📝 **Deleted Content:**
-› ${commentContent}
-
-📄 **Reason:**
-› ${reason}`
+${section('Reason', reason)}`
       break
 
     case 'comment_pinned':
-      accentColor = 0x00BFFF // Deep Sky Blue
-      content = `📌 **Comment Pinned**
+      accentColor = 0x00BFFF // Sky Blue
+      content = `📌  **Comment Pinned**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-📝 **Comment Author:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}`
+${section('Comment', commentContent)}`
       break
 
     case 'comment_unpinned':
-      accentColor = 0x00BFFF // Deep Sky Blue
-      content = `📍 **Comment Unpinned**
+      accentColor = 0x00BFFF // Sky Blue
+      content = `📍  **Comment Unpinned**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-📝 **Comment Author:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}`
+${section('Comment', commentContent)}`
       break
 
     case 'comment_locked':
-      accentColor = 0x8B4513 // Saddle Brown
-      content = `🔒 **Thread Locked**
+      accentColor = 0x8B4513 // Brown
+      content = `🔒  **Thread Locked**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-📝 **Comment Author:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}`
+${section('Comment', commentContent)}`
       break
 
     case 'comment_unlocked':
-      accentColor = 0x32CD32 // Lime Green
-      content = `🔓 **Thread Unlocked**
+      accentColor = 0x2ECC71 // Green
+      content = `🔓  **Thread Unlocked**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-📝 **Comment Author:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}`
+${section('Comment', commentContent)}`
       break
 
-    // ==================== REPORT EVENTS ====================
+    // ═══════════════════════════════════════════════════════
+    // REPORT EVENTS
+    // ═══════════════════════════════════════════════════════
+
     case 'report_filed':
-      accentColor = 0xFF8C00 // Dark Orange
-      content = `🚨 **Report Filed**
+      accentColor = 0xFF8C00 // Orange
+      content = `🚨  **Report Filed**
 
-🚨 **Reporter:** ${reporterName} (ID: ${reporterId})
-📝 **Reported User:** ${authorName} (ID: ${authorId})
+Reporter    — ${reporterName}  \`${reporterId}\`
+Reported    — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
+${section('Reported Comment', commentContent)}
 
-📝 **Comment:**
-› ${commentContent}
-
-📄 **Report Reason:**
-› ${reportReason}
-${notes ? `
-📝 **Notes:**
-› ${notes}` : ''}`
+${section('Report Reason', reportReason)}${notes ? `\n\n${section('Notes', notes)}` : ''}`
       break
 
     case 'report_resolved':
-      accentColor = 0x00FA9A // Medium Spring Green
-      content = `✅ **Report Resolved**
+      accentColor = 0x00FA9A // Spring Green
+      content = `✅  **Report Resolved**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-📝 **Reported User:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+Reported    — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}`
+${section('Comment', commentContent)}`
       break
 
     case 'report_dismissed':
       accentColor = 0xDC143C // Crimson
-      content = `❌ **Report Dismissed**
+      content = `❌  **Report Dismissed**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-📝 **Reported User:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+Reported    — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}`
+${section('Comment', commentContent)}`
       break
 
-    // ==================== USER MODERATION EVENTS ====================
-    case 'user_warned':
+    // ═══════════════════════════════════════════════════════
+    // USER MODERATION EVENTS
+    // ═══════════════════════════════════════════════════════
+
+    case 'user_warned': {
       accentColor = 0xFFD700 // Gold
-      const warnCommentInfo = data.comment || {}
-      const warnCommentId = warnCommentInfo.id || ''
-      const warnCommentContent = warnCommentInfo.content || ''
-      const warnMediaId = warnCommentInfo.media_id || 'Unknown'
-      const warnClientType = warnCommentInfo.client_type || 'Unknown'
-      const warnMediaType = warnCommentInfo.media_type || 'anime'
-      const warnMediaTitle = warnCommentInfo.media_title || 'Unknown'
-      const warnMediaString = `📺 **Media:** ${warnMediaId} (${warnClientType}) (${warnMediaType})
-${warnMediaTitle}`
+      const warnCommentId = data.comment?.id || ''
+      const warnCommentContent = data.comment?.content || ''
+      const warnMediaId = data.comment?.media_id || 'Unknown'
+      const warnClientType = data.comment?.client_type || 'Unknown'
+      const warnMediaType = data.comment?.media_type || 'anime'
+      const warnMediaTitle = data.comment?.media_title || 'Unknown'
+      const warnMediaLine = `${warnMediaTitle}  \`[${warnMediaId} · ${warnClientType} · ${warnMediaType}]\``
 
-      content = `⚠️ **Warning Issued**
+      content = `⚠️  **Warning Issued**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-👤 **Target User:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+User        — ${authorName}  \`${authorId}\`
+Comment ID  — \`${warnCommentId}\`
+Media       — ${warnMediaLine}
 
-💬 **Related Comment ID:** ${warnCommentId}
-${warnMediaString}
+${section('Comment', warnCommentContent)}
 
-📝 **Comment:**
-› ${warnCommentContent}
-
-📄 **Reason:**
-› ${reason}
-${notes ? `
-📝 **User Notes:**
-› ${notes}` : ''}`
+${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''}`
       break
+    }
 
-    case 'user_muted':
+    case 'user_muted': {
       accentColor = 0x808080 // Gray
-      const muteHasCommentInfo = commentId && commentContent
-      const muteCommentSection = muteHasCommentInfo ?
-        `💬 **Related Comment ID:** ${commentId}
-${mediaString}
+      const hasMuteComment = !!(commentId && commentContent)
+      const muteCommentBlock = hasMuteComment
+        ? `Comment ID  — \`${commentId}\`\nMedia       — ${mediaLine}\n\n${section('Comment', commentContent)}\n\n`
+        : ''
 
-📝 **Comment:**
-› ${commentContent}
-` : `👤 **Target User:** ${authorName} (ID: ${authorId})`
+      content = `🔇  **User Muted**
 
-      content = `🔇 **User Muted**
+Actor       — ${moderatorName}  \`${moderatorId}\`
+User        — ${authorName}  \`${authorId}\`
+Duration    — ${duration}
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-${muteCommentSection}
-
-⏱ **Duration:** ${duration}
-
-📄 **Reason:**
-› ${reason}
-${notes ? `
-📝 **User Notes:**
-› ${notes}` : ''}`
+${muteCommentBlock}${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''}`
       break
+    }
 
     case 'user_unmuted':
-      accentColor = 0x32CD32 // Lime Green
-      content = `🔊 **User Unmuted**
+      accentColor = 0x2ECC71 // Green
+      content = `🔊  **User Unmuted**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-👤 **Target User:** ${authorName} (ID: ${authorId})`
+Actor       — ${moderatorName}  \`${moderatorId}\`
+User        — ${authorName}  \`${authorId}\``
       break
 
-    case 'user_banned':
+    case 'user_banned': {
       accentColor = 0x8B0000 // Dark Red
-      const banHasCommentInfo = commentId && commentContent
-      const banCommentSection = banHasCommentInfo ?
-        `💬 **Related Comment ID:** ${commentId}
-${mediaString}
+      const hasBanComment = !!(commentId && commentContent)
+      const banCommentBlock = hasBanComment
+        ? `Comment ID  — \`${commentId}\`\nMedia       — ${mediaLine}\n\n${section('Comment', commentContent)}\n\n`
+        : ''
 
-📝 **Comment:**
-› ${commentContent}
-` : `👤 **Target User:** ${authorName} (ID: ${authorId})`
+      content = `⛔  **User Banned**
 
-      content = `⛔ **User Banned**
+Actor       — ${moderatorName}  \`${moderatorId}\`
+User        — ${authorName}  \`${authorId}\`
+Duration    — ${duration}
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-👤 **Target User:** ${authorName} (ID: ${authorId})
-
-${banCommentSection}
-
-⏱ **Duration:** ${duration}
-
-📄 **Reason:**
-› ${reason}
-${notes ? `
-📝 **User Notes:**
-› ${notes}` : ''}`
+${banCommentBlock}${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''}`
       break
+    }
 
     case 'user_unbanned':
-      accentColor = 0x32CD32 // Lime Green
-      content = `♻️ **User Unbanned**
+      accentColor = 0x2ECC71 // Green
+      content = `♻️  **User Unbanned**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-👤 **Target User:** ${authorName} (ID: ${authorId})`
+Actor       — ${moderatorName}  \`${moderatorId}\`
+User        — ${authorName}  \`${authorId}\``
       break
 
     case 'user_shadow_banned':
       accentColor = 0x4B0082 // Indigo
-      content = `👻 **User Shadow Banned**
+      content = `👻  **User Shadow Banned**
 
-👮 **Actor:** ${moderatorName} (ID: ${moderatorId})
-👤 **Target User:** ${authorName} (ID: ${authorId})
+Actor       — ${moderatorName}  \`${moderatorId}\`
+User        — ${authorName}  \`${authorId}\`
 
-📄 **Reason:**
-› ${reason}
-${notes ? `
-📝 **User Notes:**
-› ${notes}` : ''}`
+${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''}`
       break
 
-    // ==================== VOTE EVENTS ====================
+    // ═══════════════════════════════════════════════════════
+    // VOTE EVENTS
+    // ═══════════════════════════════════════════════════════
+
     case 'vote_cast':
       accentColor = 0xFFA500 // Orange
-      content = `👍 **Vote Cast**
+      content = `👍  **Vote Cast**
 
-🗳 **Voter:** ${voterName} (ID: ${voterId})
-📝 **Comment Author:** ${authorName} (ID: ${authorId})
+Voter       — ${voterName}  \`${voterId}\`
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Vote        — ${voteType}
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}
-
-🔼 **Vote Type:** ${voteType}`
+${section('Comment', commentContent)}`
       break
 
     case 'vote_removed':
       accentColor = 0xFFA500 // Orange
-      content = `➖ **Vote Removed**
+      content = `➖  **Vote Removed**
 
-🗳 **Voter:** ${voterName} (ID: ${voterId})
-📝 **Comment Author:** ${authorName} (ID: ${authorId})
+Voter       — ${voterName}  \`${voterId}\`
+Author      — ${authorName}  \`${authorId}\`
+Comment ID  — \`${commentId}\`
+Media       — ${mediaLine}
 
-💬 **Comment ID:** ${commentId}
-${mediaString}
-
-📝 **Comment:**
-› ${commentContent}`
+${section('Comment', commentContent)}`
       break
 
-    // ==================== ANNOUNCEMENT ====================
+    // ═══════════════════════════════════════════════════════
+    // ANNOUNCEMENT
+    // ═══════════════════════════════════════════════════════
+
     case 'announcement_published':
-      accentColor = 0x5865F2 // Discord Blurple
-      content = `📢 **Announcement Published**
+      accentColor = 0x5865F2 // Blurple
+      content = `📢  **Announcement Published**
 
-📢 **Publisher:** ${publisherName} (ID: ${publisherId})
+Publisher   — ${publisherName}  \`${publisherId}\`
 
-📰 **Title:**
-${announcementTitle}
+${section('Title', announcementTitle)}
 
-📝 **Content:**
-› ${announcementContent}`
+${section('Content', announcementContent)}`
       break
+
+    // ═══════════════════════════════════════════════════════
+    // FALLBACK
+    // ═══════════════════════════════════════════════════════
 
     default:
       accentColor = 0x808080 // Gray
-      content = `📢 **System Notification**
+      content = `⚙️  **System Event**
 
-**Event:** ${data.type}`
+Event       — \`${data.type}\``
   }
 
   return buildContainer([buildTextDisplay(content)], accentColor)
