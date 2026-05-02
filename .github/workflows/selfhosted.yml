@@ -70,12 +70,10 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             cd /root/supabase/docker
-            MIGRATIONS_DIR="/root/supabase/docker/volumes/db/migrations"
-            ls -la "$MIGRATIONS_DIR/"
-            for f in "$MIGRATIONS_DIR"/*.sql; do
+            for f in /root/supabase/docker/volumes/db/migrations/*.sql; do
               [ -f "$f" ] || continue
               echo "▶️ Running: $(basename $f)"
-              docker compose exec -T db psql -U postgres -d postgres -f "$f"
+              cat "$f" | docker compose exec -T db psql -U postgres -d postgres
             done
             echo "✅ Migrations applied"
 
