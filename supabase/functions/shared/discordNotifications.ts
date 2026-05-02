@@ -1,5 +1,3 @@
-// Enhanced Discord notification utilities for Commentum v2
-// Updated to use Discord Bot API with Components V2 for interactive buttons
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
 export interface DiscordNotificationData {
