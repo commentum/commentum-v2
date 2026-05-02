@@ -35,6 +35,18 @@ jobs:
           target: "/root/supabase/docker/volumes/functions/"
           strip_components: 2
 
+      # Copy migration files to server
+      - name: Copy Migration Files
+        if: ${{ inputs.run_migrations == 'true' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "supabase/migrations/*"
+          target: "/root/supabase/docker/volumes/db/migrations/"
+          strip_components: 2
+
       # Restart edge functions container
       - name: Restart Edge Functions Container
         if: ${{ github.event_name == 'push' || inputs.deploy_functions == 'true' }}
@@ -48,7 +60,7 @@ jobs:
             docker compose restart functions
             echo "✅ Edge functions restarted"
 
-      # Run DB migrations (only when manually triggered with run_migrations=true)
+      # Run DB migrations (only when manually triggered)
       - name: Apply Database Migrations
         if: ${{ inputs.run_migrations == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
@@ -58,15 +70,26 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             cd /root/supabase/docker
+            MIGRATIONS_DIR="/root/supabase/docker/volumes/db/migrations"
 
-            for f in /root/supabase/docker/volumes/db/migrations/*.sql; do
-              echo "▶️ Running migration: $f"
-              docker compose exec -T db psql \
-                -U postgres \
-                -d postgres \
-                -f "$f"
+            # Track which migrations already ran
+            TRACK_TABLE="CREATE TABLE IF NOT EXISTS _migration_history (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW());"
+            docker compose exec -T db psql -U postgres -d postgres -c "$TRACK_TABLE"
+
+            for f in "$MIGRATIONS_DIR"/*.sql; do
+              [ -f "$f" ] || continue
+              MIGRATION_NAME=$(basename "$f")
+              ALREADY_RAN=$(docker compose exec -T db psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM _migration_history WHERE id='$MIGRATION_NAME';")
+              
+              if [ "$ALREADY_RAN" -gt 0 ]; then
+                echo "⏭️ Skipping (already applied): $MIGRATION_NAME"
+              else
+                echo "▶️ Running migration: $MIGRATION_NAME"
+                docker compose exec -T db psql -U postgres -d postgres -f "$f"
+                docker compose exec -T db psql -U postgres -d postgres -c "INSERT INTO _migration_history (id) VALUES ('$MIGRATION_NAME');"
+                echo "✅ Applied: $MIGRATION_NAME"
+              fi
             done
-
             echo "✅ Migrations applied"
 
       # Verify everything is running
