@@ -988,31 +988,16 @@ Event       — \`${data.type}\``
 }
 
 // Build View URL for View button
-// Uses actual platform URLs with #comment tab anchor
+// Discord link buttons require https:// — anymex:// deep links are rejected.
+// This points to the /open redirect route on your Flask server which bounces
+// the user to:  anymex://{source}/{type}/{id}#comment
 function buildDeepLinkUrl(data: DiscordNotificationData): string {
   const clientType = data.comment?.client_type || data.media?.client_type || 'anilist'
-  const mediaType = data.comment?.media_type || data.media?.type || 'anime'
-  const mediaId = data.comment?.media_id || data.media?.id || ''
-  
-  // Build platform-specific URLs
-  switch (clientType) {
-    case 'anilist':
-      // https://anilist.co/anime/20958#comment
-      return `https://anilist.co/${mediaType}/${mediaId}#comment`
-    
-    case 'myanimelist':
-    case 'mal':
-      // https://myanimelist.net/anime/5114#comment
-      return `https://myanimelist.net/${mediaType}/${mediaId}#comment`
-    
-    case 'simkl':
-      // https://simkl.com/anime/40991#comment
-      return `https://simkl.com/${mediaType}/${mediaId}#comment`
-    
-    default:
-      // Fallback to AniList
-      return `https://anilist.co/${mediaType}/${mediaId}#comment`
-  }
+  const mediaType  = data.comment?.media_type  || data.media?.type        || 'anime'
+  const mediaId    = data.comment?.media_id    || data.media?.id          || ''
+
+  const base = 'https://anymex-support-ai.onrender.com/open'
+  return `${base}?source=${clientType}&type=${mediaType}&id=${mediaId}`
 }
 
 // Build interactive buttons based on notification type
