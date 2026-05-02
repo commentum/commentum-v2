@@ -35,6 +35,16 @@ jobs:
           target: "/root/supabase/docker/volumes/functions/"
           strip_components: 2
 
+      # Create migrations directory on server first!
+      - name: Create Migrations Directory
+        if: ${{ inputs.run_migrations == 'true' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: mkdir -p /root/supabase/docker/volumes/db/migrations
+
       # Copy migration files to server
       - name: Copy Migration Files
         if: ${{ inputs.run_migrations == 'true' }}
@@ -71,16 +81,12 @@ jobs:
           script: |
             cd /root/supabase/docker
             MIGRATIONS_DIR="/root/supabase/docker/volumes/db/migrations"
-
-            # Track which migrations already ran
             TRACK_TABLE="CREATE TABLE IF NOT EXISTS _migration_history (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW());"
             docker compose exec -T db psql -U postgres -d postgres -c "$TRACK_TABLE"
-
             for f in "$MIGRATIONS_DIR"/*.sql; do
               [ -f "$f" ] || continue
               MIGRATION_NAME=$(basename "$f")
               ALREADY_RAN=$(docker compose exec -T db psql -U postgres -d postgres -tAc "SELECT COUNT(*) FROM _migration_history WHERE id='$MIGRATION_NAME';")
-              
               if [ "$ALREADY_RAN" -gt 0 ]; then
                 echo "⏭️ Skipping (already applied): $MIGRATION_NAME"
               else
