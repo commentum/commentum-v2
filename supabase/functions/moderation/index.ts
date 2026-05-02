@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 import { verifyAdminAccess, getUserRole, canModerate, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken, VerifiedUser } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -176,6 +177,25 @@ async function handlePinComment(supabase: any, params: any) {
     reason
   })
 
+  // FCM: Notify the comment author their comment was pinned
+  queueFcmNotification({
+    type: 'comment_pinned',
+    targetUserId: updatedComment.user_id,
+    targetClientType: updatedComment.client_type,
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title,
+    },
+    moderator: { id: moderator_id, username: verifiedUser.username },
+    media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
+    reason,
+  })
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -312,6 +332,25 @@ async function handleLockThread(supabase: any, params: any) {
       poster: updatedComment.media_poster
     },
     reason
+  })
+
+  // FCM: Notify the comment author their thread was locked
+  queueFcmNotification({
+    type: 'comment_locked',
+    targetUserId: updatedComment.user_id,
+    targetClientType: updatedComment.client_type,
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title,
+    },
+    moderator: { id: moderator_id, username: verifiedUser.username },
+    media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
+    reason,
   })
 
   return new Response(
@@ -493,6 +532,19 @@ async function handleWarnUser(supabase: any, params: any) {
     autoAction = `AUTO-MUTED - User exceeded ${muteThreshold} warnings (${muteDuration} hours)`
   }
 
+  // FCM: Notify the warned user
+  for (const user of targetUsers) {
+    queueFcmNotification({
+      type: 'user_warned',
+      targetUserId: target_user_id,
+      targetClientType: user.commentum_client_type,
+      user: { id: target_user_id, username: targetUsername },
+      moderator: { id: moderator_id, username: verifiedUser.username },
+      reason: `${reason}${severity ? ` (${severity})` : ''}`,
+      duration: duration || 'Not specified',
+    })
+  }
+
   // Queue Discord notification for user warning in background - NON-BLOCKING
   queueDiscordNotification({
     type: 'user_warned',
@@ -589,6 +641,17 @@ async function handleBanUser(supabase: any, params: any) {
         p_banned_by: moderator_id,
         p_shadow_ban: shadow_ban || false
       })
+
+    // FCM: Notify the banned user
+    queueFcmNotification({
+      type: shadow_ban ? 'user_shadow_banned' : 'user_banned',
+      targetUserId: target_user_id,
+      targetClientType: user.commentum_client_type,
+      user: { id: target_user_id, username: targetUsername, notes: userNotes },
+      moderator: { id: moderator_id, username: verifiedUser.username },
+      reason,
+      duration: 'Permanent',
+    })
   }
 
   // Queue Discord notification for user ban in background - NON-BLOCKING
@@ -668,6 +731,16 @@ async function handleUnbanUser(supabase: any, params: any) {
       })
       .eq('commentum_client_type', user.commentum_client_type)
       .eq('commentum_user_id', target_user_id)
+
+    // FCM: Notify the unbanned user
+    queueFcmNotification({
+      type: 'user_unbanned',
+      targetUserId: target_user_id,
+      targetClientType: user.commentum_client_type,
+      user: { id: target_user_id, username: targetUsername },
+      moderator: { id: moderator_id, username: verifiedUser.username },
+      reason,
+    })
   }
 
   return new Response(

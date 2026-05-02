@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 import { verifyAdminAccess, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -267,6 +268,32 @@ async function handleCreateReport(supabase: any, params: any) {
     notes: notes || ''
   })
 
+  // FCM: Notify the comment author someone reported their comment
+  if (comment.user_id !== reporter_id) {
+    queueFcmNotification({
+      type: 'report_filed',
+      targetUserId: comment.user_id,
+      targetClientType: comment.client_type || 'anilist',
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      actor: { id: reporter_id, username: reporterUsername },
+      media: {
+        id: comment.media_id,
+        title: comment.media_title,
+        type: comment.media_type,
+        client_type: comment.client_type,
+      },
+      reportReason: reason,
+    })
+  }
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -386,6 +413,30 @@ async function handleResolveReport(supabase: any, params: any) {
     },
     reason: review_notes || `Report ${resolution}`,
     reportReason: reports[reportIndex].reason
+  })
+
+  // FCM: Notify the comment author about report resolution
+  queueFcmNotification({
+    type: resolution === 'resolved' ? 'report_resolved' : 'report_dismissed',
+    targetUserId: fullComment.user_id,
+    targetClientType: fullComment.client_type || 'anilist',
+    comment: {
+      id: fullComment.id,
+      username: fullComment.username,
+      content: fullComment.content,
+      client_type: fullComment.client_type,
+      media_id: fullComment.media_id,
+      media_type: fullComment.media_type,
+      media_title: fullComment.media_title,
+    },
+    moderator: { id: moderator_id, username: verifiedUser.username },
+    media: {
+      id: fullComment.media_id,
+      title: fullComment.media_title,
+      type: fullComment.media_type,
+      client_type: fullComment.client_type,
+    },
+    reportReason: reports[reportIndex].reason,
   })
 
   return new Response(

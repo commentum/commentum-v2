@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -230,6 +231,33 @@ serve(async (req) => {
 
       // Queue Discord notification (non-blocking)
       queueDiscordNotification(notificationData)
+
+      // Queue FCM Push Notification (non-blocking) - notify the comment author
+      // Don't send if user is voting on their own comment
+      if (comment.user_id !== user_id) {
+        queueFcmNotification({
+          type: voteAction === 'vote_removed' ? 'vote_removed' : 'vote_cast',
+          targetUserId: comment.user_id,
+          targetClientType: comment.client_type || 'anilist',
+          comment: {
+            id: comment.id,
+            user_id: comment.user_id,
+            username: comment.username,
+            content: comment.content,
+            client_type: comment.client_type,
+            media_id: comment.media_id,
+            media_type: comment.media_type,
+            media_title: comment.media_title,
+          },
+          actor: {
+            id: user_id,
+            username: voterUsername,
+          },
+          media: mediaInfo,
+          voteType: voteTypeForNotification as 'upvote' | 'downvote',
+          voteScore: newVoteScore,
+        })
+      }
     }
 
     return new Response(

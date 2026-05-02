@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { sendDiscordNotificationBlocking } from '../shared/discordNotifications.ts'
+import { queueFcmNotification, getFcmAccessToken } from '../shared/fcmNotifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -520,6 +521,9 @@ async function handleCreateAnnouncement(supabase: any, req: Request) {
       },
       reason: title
     })
+
+    // Queue FCM notifications for all users of this app
+    await sendAnnouncementFcmNotifications(supabase, announcement, adminCheck)
   }
 
   return new Response(
@@ -683,6 +687,9 @@ async function handlePublishAnnouncement(supabase: any, announcementId: number, 
     reason: announcement.title
   })
 
+  // Queue FCM notifications for all users of this app
+  await sendAnnouncementFcmNotifications(supabase, announcement, adminCheck)
+
   return new Response(
     JSON.stringify({ success: true, announcement, message: 'Announcement published' }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -725,4 +732,115 @@ async function handleArchiveAnnouncement(supabase: any, announcementId: number, 
     JSON.stringify({ success: true, announcement, message: 'Announcement archived' }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
+}
+
+// ====================================
+// FCM NOTIFICATION FOR ANNOUNCEMENTS
+// ====================================
+
+async function sendAnnouncementFcmNotifications(supabase: any, announcement: any, adminCheck: any) {
+  try {
+    const appId = announcement.app_id
+
+    // Get all active FCM tokens for this app
+    const { data: activeTokens } = await supabase
+      .from('fcm_tokens')
+      .select('user_id, fcm_token')
+      .eq('client_type', appId)
+      .eq('is_active', true)
+
+    if (!activeTokens || activeTokens.length === 0) {
+      return // No users to notify
+    }
+
+    // Get unique user IDs
+    const uniqueUserIds = [...new Set(activeTokens.map((t: any) => t.user_id))]
+
+    const announcementTitle = `📢 ${announcement.title}`
+    const announcementBody = announcement.short_description || 'Tap to read more.'
+
+    // Store in notifications table for each user (batch insert with chunking)
+    const CHUNK_SIZE = 500
+    const notificationRows = uniqueUserIds.map((userId: string) => ({
+      client_type: appId,
+      user_id: userId,
+      type: 'announcement_published',
+      title: announcementTitle,
+      body: announcementBody,
+      media_id: null,
+      media_type: null,
+      media_title: null,
+      actor_id: adminCheck.userId,
+      actor_username: announcement.author_name,
+      click_action: 'anymex://notifications',
+      is_read: false,
+      fcm_sent: true,
+    }))
+
+    // Chunk the batch insert for large user bases
+    for (let i = 0; i < notificationRows.length; i += CHUNK_SIZE) {
+      const chunk = notificationRows.slice(i, i + CHUNK_SIZE)
+      const { error: insertError } = await supabase
+        .from('notifications')
+        .insert(chunk)
+
+      if (insertError) {
+        console.error('Failed to store announcement notifications (chunk):', insertError)
+      }
+    }
+
+    // Send FCM multicast to all tokens
+    let accessToken: string
+    try {
+      accessToken = await getFcmAccessToken()
+    } catch (err) {
+      console.error('Failed to get FCM access token for announcement:', err)
+      return
+    }
+
+    // FCM multicast supports up to 500 tokens per request
+    for (let i = 0; i < activeTokens.length; i += CHUNK_SIZE) {
+      const tokenChunk = activeTokens.slice(i, i + CHUNK_SIZE)
+
+      try {
+        const fcmResponse = await fetch('https://fcm.googleapis.com/fcm/send', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            notification: {
+              title: announcementTitle,
+              body: announcementBody,
+              sound: 'default',
+            },
+            data: {
+              type: 'announcement_published',
+              announcement_id: announcement.id.toString(),
+              client_type: appId,
+              click_action: 'anymex://notifications',
+              timestamp: new Date().toISOString(),
+            },
+            android: {
+              priority: 'high',
+              notification: {
+                channel_id: 'announcements',
+              },
+            },
+            tokens: tokenChunk.map((t: any) => t.fcm_token),
+          }),
+        })
+
+        if (!fcmResponse.ok) {
+          console.error('FCM announcement error:', await fcmResponse.text())
+        }
+      } catch (fcmErr) {
+        console.error('FCM announcement send failed:', fcmErr)
+      }
+    }
+
+  } catch (err) {
+    console.error('sendAnnouncementFcmNotifications error:', err)
+  }
 }

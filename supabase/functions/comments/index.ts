@@ -4,6 +4,7 @@ import { validateUserInfo, validateMediaInfo, UserInfo, MediaInfo } from '../sha
 import { verifyAdminAccess, getUserRole, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
+import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
 
 const corsHeaders = {
@@ -414,6 +415,92 @@ async function handleCreateComment(supabase: any, params: any) {
     }
   })
 
+  // Queue FCM Push Notification - NON-BLOCKING
+  if (parent_id) {
+    // Reply: notify the parent comment author
+    const { data: parentComment } = await supabase
+      .from('comments')
+      .select('user_id, username')
+      .eq('id', parent_id)
+      .single()
+
+    if (parentComment && parentComment.user_id !== userInfo.user_id) {
+      queueFcmNotification({
+        type: 'comment_reply',
+        targetUserId: parentComment.user_id,
+        targetClientType: comment.client_type,
+        comment: {
+          id: comment.id,
+          user_id: comment.user_id,
+          username: comment.username,
+          content: comment.content,
+          client_type: comment.client_type,
+          media_id: comment.media_id,
+          media_type: comment.media_type,
+          media_title: comment.media_title,
+          parent_id: comment.parent_id,
+        },
+        actor: {
+          id: userInfo.user_id,
+          username: userInfo.username,
+          avatar: userInfo.avatar,
+        },
+        media: {
+          id: mediaInfo.media_id,
+          title: mediaInfo.title,
+          type: mediaInfo.type,
+          client_type: comment.client_type,
+        },
+      })
+    }
+  } else {
+    // New top-level comment: notify anyone who commented on this media recently
+    const { data: recentCommenters } = await supabase
+      .from('comments')
+      .select('user_id')
+      .eq('client_type', comment.client_type)
+      .eq('media_id', comment.media_id)
+      .neq('user_id', userInfo.user_id)
+      .eq('deleted', false)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (recentCommenters && recentCommenters.length > 0) {
+      const notifiedUserIds = new Set<string>()
+      for (const recentUser of recentCommenters) {
+        if (!notifiedUserIds.has(recentUser.user_id)) {
+          notifiedUserIds.add(recentUser.user_id)
+          queueFcmNotification({
+            type: 'comment_created',
+            targetUserId: recentUser.user_id,
+            targetClientType: comment.client_type,
+            comment: {
+              id: comment.id,
+              user_id: comment.user_id,
+              username: comment.username,
+              content: comment.content,
+              client_type: comment.client_type,
+              media_id: comment.media_id,
+              media_type: comment.media_type,
+              media_title: comment.media_title,
+            },
+            actor: {
+              id: userInfo.user_id,
+              username: userInfo.username,
+              avatar: userInfo.avatar,
+            },
+            media: {
+              id: mediaInfo.media_id,
+              title: mediaInfo.title,
+              type: mediaInfo.type,
+              client_type: comment.client_type,
+            },
+          })
+        }
+      }
+    }
+  }
+
   return new Response(
     JSON.stringify({ success: true, comment }),
     { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -507,6 +594,29 @@ async function handleEditComment(supabase: any, params: any) {
     }
   })
 
+  // FCM: Notify comment author their comment was edited
+  queueFcmNotification({
+    type: 'comment_updated',
+    targetUserId: updatedComment.user_id,
+    targetClientType: updatedComment.client_type,
+    comment: {
+      id: updatedComment.id,
+      user_id: updatedComment.user_id,
+      username: updatedComment.username,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title,
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      type: updatedComment.media_type,
+      client_type: updatedComment.client_type,
+    },
+  })
+
   return new Response(
     JSON.stringify({ success: true, comment: updatedComment }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -590,6 +700,34 @@ async function handleDeleteComment(supabase: any, params: any) {
     reason: 'Self-deleted by author'
   })
 
+  // FCM: Notify comment author their comment was deleted (self-delete, low priority)
+  queueFcmNotification({
+    type: 'comment_deleted',
+    targetUserId: deletedComment.user_id,
+    targetClientType: deletedComment.client_type,
+    comment: {
+      id: deletedComment.id,
+      user_id: deletedComment.user_id,
+      username: deletedComment.username,
+      content: comment.content,
+      client_type: deletedComment.client_type,
+      media_id: deletedComment.media_id,
+      media_type: deletedComment.media_type,
+      media_title: deletedComment.media_title,
+    },
+    moderator: {
+      id: deletedComment.user_id,
+      username: deletedComment.username,
+    },
+    media: {
+      id: deletedComment.media_id,
+      title: deletedComment.media_title,
+      type: deletedComment.media_type,
+      client_type: deletedComment.client_type,
+    },
+    reason: 'Self-deleted by author',
+  })
+
   return new Response(
     JSON.stringify({ success: true, comment: deletedComment }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -667,6 +805,35 @@ async function handleModDeleteComment(supabase: any, params: any) {
       client_type: deletedComment.client_type
     }
   })
+
+  // FCM: Notify the comment author their comment was mod-deleted
+  if (deletedComment.user_id !== user_id) {
+    queueFcmNotification({
+      type: 'comment_deleted',
+      targetUserId: deletedComment.user_id,
+      targetClientType: deletedComment.client_type,
+      comment: {
+        id: deletedComment.id,
+        user_id: deletedComment.user_id,
+        username: deletedComment.username,
+        content: comment.content,
+        client_type: deletedComment.client_type,
+        media_id: deletedComment.media_id,
+        media_type: deletedComment.media_type,
+        media_title: deletedComment.media_title,
+      },
+      moderator: {
+        id: user_id,
+        username: verifiedUserFromToken?.username || `Moderator ${user_id}`,
+      },
+      media: {
+        id: deletedComment.media_id,
+        title: deletedComment.media_title,
+        type: deletedComment.media_type,
+        client_type: deletedComment.client_type,
+      },
+    })
+  }
 
   return new Response(
     JSON.stringify({ 
