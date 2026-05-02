@@ -722,9 +722,9 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
       accentColor = 0x2ECC71 // Green
       content = `🆕  **New Comment**
 
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Content', commentContent)}`
       break
@@ -733,9 +733,9 @@ ${section('Content', commentContent)}`
       accentColor = 0x9B59B6 // Purple
       content = `✏️  **Comment Edited**
 
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Updated Content', commentContent)}`
       break
@@ -744,10 +744,10 @@ ${section('Updated Content', commentContent)}`
       accentColor = 0xE74C3C // Red
       content = `🗑️  **Comment Deleted**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Deleted Content', commentContent)}
 
@@ -758,10 +758,10 @@ ${section('Reason', reason)}`
       accentColor = 0x00BFFF // Sky Blue
       content = `📌  **Comment Pinned**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -770,10 +770,10 @@ ${section('Comment', commentContent)}`
       accentColor = 0x00BFFF // Sky Blue
       content = `📍  **Comment Unpinned**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -782,10 +782,10 @@ ${section('Comment', commentContent)}`
       accentColor = 0x8B4513 // Brown
       content = `🔒  **Thread Locked**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -794,10 +794,10 @@ ${section('Comment', commentContent)}`
       accentColor = 0x2ECC71 // Green
       content = `🔓  **Thread Unlocked**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -810,10 +810,10 @@ ${section('Comment', commentContent)}`
       accentColor = 0xFF8C00 // Orange
       content = `🚨  **Report Filed**
 
-Reporter    — ${reporterName}  \`${reporterId}\`
-Reported    — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Reporter: ${reporterName}  \`${reporterId}\`
+Reported: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Reported Comment', commentContent)}
 
@@ -824,10 +824,10 @@ ${section('Report Reason', reportReason)}${notes ? `\n\n${section('Notes', notes
       accentColor = 0x00FA9A // Spring Green
       content = `✅  **Report Resolved**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-Reported    — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+Reported: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -836,10 +836,10 @@ ${section('Comment', commentContent)}`
       accentColor = 0xDC143C // Crimson
       content = `❌  **Report Dismissed**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-Reported    — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+Reported: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -860,10 +860,10 @@ ${section('Comment', commentContent)}`
 
       content = `⚠️  **Warning Issued**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-User        — ${authorName}  \`${authorId}\`
-Comment ID  — \`${warnCommentId}\`
-Media       — ${warnMediaLine}
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\`
+Comment ID: \`${warnCommentId}\`
+Media: ${warnMediaLine}
 
 ${section('Comment', warnCommentContent)}
 
@@ -880,9 +880,9 @@ ${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''
 
       content = `🔇  **User Muted**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-User        — ${authorName}  \`${authorId}\`
-Duration    — ${duration}
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\`
+Duration: ${duration}
 
 ${muteCommentBlock}${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''}`
       break
@@ -892,8 +892,8 @@ ${muteCommentBlock}${section('Reason', reason)}${notes ? `\n\n${section('User No
       accentColor = 0x2ECC71 // Green
       content = `🔊  **User Unmuted**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-User        — ${authorName}  \`${authorId}\``
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\``
       break
 
     case 'user_banned': {
@@ -905,9 +905,9 @@ User        — ${authorName}  \`${authorId}\``
 
       content = `⛔  **User Banned**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-User        — ${authorName}  \`${authorId}\`
-Duration    — ${duration}
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\`
+Duration: ${duration}
 
 ${banCommentBlock}${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''}`
       break
@@ -917,16 +917,16 @@ ${banCommentBlock}${section('Reason', reason)}${notes ? `\n\n${section('User Not
       accentColor = 0x2ECC71 // Green
       content = `♻️  **User Unbanned**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-User        — ${authorName}  \`${authorId}\``
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\``
       break
 
     case 'user_shadow_banned':
       accentColor = 0x4B0082 // Indigo
       content = `👻  **User Shadow Banned**
 
-Actor       — ${moderatorName}  \`${moderatorId}\`
-User        — ${authorName}  \`${authorId}\`
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\`
 
 ${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''}`
       break
@@ -939,11 +939,11 @@ ${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''
       accentColor = 0xFFA500 // Orange
       content = `👍  **Vote Cast**
 
-Voter       — ${voterName}  \`${voterId}\`
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Vote        — ${voteType}
-Media       — ${mediaLine}
+Voter: ${voterName}  \`${voterId}\`
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Vote: ${voteType}
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -952,10 +952,10 @@ ${section('Comment', commentContent)}`
       accentColor = 0xFFA500 // Orange
       content = `➖  **Vote Removed**
 
-Voter       — ${voterName}  \`${voterId}\`
-Author      — ${authorName}  \`${authorId}\`
-Comment ID  — \`${commentId}\`
-Media       — ${mediaLine}
+Voter: ${voterName}  \`${voterId}\`
+Author: ${authorName}  \`${authorId}\`
+Comment ID: \`${commentId}\`
+Media: ${mediaLine}
 
 ${section('Comment', commentContent)}`
       break
@@ -968,7 +968,7 @@ ${section('Comment', commentContent)}`
       accentColor = 0x5865F2 // Blurple
       content = `📢  **Announcement Published**
 
-Publisher   — ${publisherName}  \`${publisherId}\`
+Publisher: ${publisherName}  \`${publisherId}\`
 
 ${section('Title', announcementTitle)}
 
