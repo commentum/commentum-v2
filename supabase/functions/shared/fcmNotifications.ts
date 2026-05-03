@@ -104,19 +104,19 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
     case 'comment_created':
       return {
         title: '💬 New Comment',
-        body: `${actorName} commented on ${mediaTitle}${commentPreview ? ': "${commentPreview}"' : ''}`
+        body: `${actorName} commented on ${mediaTitle}${commentPreview ? `: "${commentPreview}"` : ''}`
       }
 
     case 'comment_reply':
       return {
         title: '↩️ New Reply',
-        body: `${actorName} replied to your comment on ${mediaTitle}${commentPreview ? ': "${commentPreview}"' : ''}`
+        body: `${actorName} replied to your comment on ${mediaTitle}${commentPreview ? `: "${commentPreview}"` : ''}`
       }
 
     case 'comment_updated':
       return {
         title: '✏️ Comment Edited',
-        body: `Your comment on ${mediaTitle} was edited${commentPreview ? ': "${commentPreview}"' : ''}`
+        body: `Your comment on ${mediaTitle} was edited${commentPreview ? `: "${commentPreview}"` : ''}`
       }
 
     case 'comment_deleted':
