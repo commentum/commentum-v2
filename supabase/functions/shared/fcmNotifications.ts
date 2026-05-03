@@ -351,8 +351,17 @@ export async function getFcmAccessToken(): Promise<string> {
   const unsignedJwt = `${encode(header)}.${encode(payload)}`
 
   // Sign JWT with private key using Web Crypto API
+  // Parse PEM: strip headers, base64-decode to get raw DER bytes
   const privateKeyClean = privateKey.replace(/\\n/g, '\n')
-  const keyData = new TextEncoder().encode(privateKeyClean)
+  const pemContents = privateKeyClean
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .trim()
+  const binaryKey = atob(pemContents)
+  const keyData = new Uint8Array(binaryKey.length)
+  for (let i = 0; i < binaryKey.length; i++) {
+    keyData[i] = binaryKey.charCodeAt(i)
+  }
   const cryptoKey = await crypto.subtle.importKey(
     'pkcs8',
     keyData,
