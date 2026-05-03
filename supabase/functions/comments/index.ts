@@ -453,52 +453,6 @@ async function handleCreateComment(supabase: any, params: any) {
         },
       })
     }
-  } else {
-    // New top-level comment: notify anyone who commented on this media recently
-    const { data: recentCommenters } = await supabase
-      .from('comments')
-      .select('user_id')
-      .eq('client_type', comment.client_type)
-      .eq('media_id', comment.media_id)
-      .neq('user_id', userInfo.user_id)
-      .eq('deleted', false)
-      .order('created_at', { ascending: false })
-      .limit(20)
-
-    if (recentCommenters && recentCommenters.length > 0) {
-      const notifiedUserIds = new Set<string>()
-      for (const recentUser of recentCommenters) {
-        if (!notifiedUserIds.has(recentUser.user_id)) {
-          notifiedUserIds.add(recentUser.user_id)
-          queueFcmNotification({
-            type: 'comment_created',
-            targetUserId: recentUser.user_id,
-            targetClientType: comment.client_type,
-            comment: {
-              id: comment.id,
-              user_id: comment.user_id,
-              username: comment.username,
-              content: comment.content,
-              client_type: comment.client_type,
-              media_id: comment.media_id,
-              media_type: comment.media_type,
-              media_title: comment.media_title,
-            },
-            actor: {
-              id: userInfo.user_id,
-              username: userInfo.username,
-              avatar: userInfo.avatar,
-            },
-            media: {
-              id: mediaInfo.media_id,
-              title: mediaInfo.title,
-              type: mediaInfo.type,
-              client_type: comment.client_type,
-            },
-          })
-        }
-      }
-    }
   }
 
   return new Response(
