@@ -518,39 +518,83 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       return
     }
 
-    const fcmResponse = await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    })
+    // 6. Send via FCM v1 API (multicast: one request per token)
+    const projectId = Deno.env.get('FCM_PROJECT_ID')!
+    let totalSuccess = 0
+    let totalFailure = 0
+    const invalidTokens: string[] = []
 
-    if (!fcmResponse.ok) {
-      const errText = await fcmResponse.text()
-      console.error(`FCM API error (${fcmResponse.status}):`, errText)
-      return
-    }
-
-    const result = await fcmResponse.json()
-    
-    // 7. Clean up invalid tokens
-    if (result.results) {
-      const invalidTokens: string[] = []
-      for (let i = 0; i < result.results.length; i++) {
-        if (result.results[i].error === 'NotRegistered' || 
-            result.results[i].error === 'InvalidRegistration') {
-          invalidTokens.push(tokens[i].fcm_token)
+    for (const tokenRecord of tokens) {
+      const fcmMessage: any = {
+        message: {
+          token: tokenRecord.fcm_token,
+          notification: {
+            title,
+            body,
+          },
+          data: {
+            type: payload.type,
+            comment_id: payload.comment?.id?.toString() || '',
+            media_id: payload.comment?.media_id || payload.media?.id || '',
+            media_type: payload.comment?.media_type || payload.media?.type || '',
+            media_title: payload.comment?.media_title || payload.media?.title || '',
+            client_type: payload.targetClientType,
+            click_action: clickAction,
+            timestamp: new Date().toISOString(),
+          },
+          android: {
+            priority: 'HIGH' as const,
+            notification: {
+              sound: 'default',
+              default_sound: true,
+              default_vibrate_timings: true,
+              channel_id: getAndroidChannelId(payload.type),
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: 'default',
+                badge: 1,
+              }
+            }
+          },
         }
       }
-      
-      if (invalidTokens.length > 0) {
-        await supabase
-          .from('fcm_tokens')
-          .update({ is_active: false })
-          .in('fcm_token', invalidTokens)
+
+      const fcmResponse = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(fcmMessage),
+        }
+      )
+
+      if (!fcmResponse.ok) {
+        const errData = await fcmResponse.json().catch(() => ({}))
+        const errMsg = errData?.error?.message || await fcmResponse.text()
+        console.error(`FCM v1 error for token ${tokenRecord.fcm_token.substring(0, 20)}...: (${fcmResponse.status}) ${errMsg}`)
+        totalFailure++
+
+        // Mark token as invalid if unregistered
+        if (fcmResponse.status === 404 || errMsg.includes('NotRegistered') || errMsg.includes('registration-token-not-registered')) {
+          invalidTokens.push(tokenRecord.fcm_token)
+        }
+      } else {
+        totalSuccess++
       }
+    }
+
+    // 7. Clean up invalid tokens
+    if (invalidTokens.length > 0) {
+      await supabase
+        .from('fcm_tokens')
+        .update({ is_active: false })
+        .in('fcm_token', invalidTokens)
     }
 
     // 8. Update last_used_at for active tokens
@@ -563,8 +607,8 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
 
     // 9. Store notification in history table
     const fcmSent = true
-    const fcmDelivered = result.success >= 1
-    const fcmError = (!result.success || result.failure > 0) ? `success: ${result.success}, failure: ${result.failure}` : null
+    const fcmDelivered = totalSuccess >= 1
+    const fcmError = totalFailure > 0 ? `success: ${totalSuccess}, failure: ${totalFailure}` : null
 
     storeNotificationToDb(supabase, payload, title, body, clickAction, fcmSent, fcmDelivered, fcmError).catch(err => {
       console.error('Failed to store notification history:', err)
