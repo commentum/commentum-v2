@@ -1,5 +1,6 @@
 import { createDiscordResponse, createErrorResponse, createCommentEmbed, createUserEmbed, createModerationEmbed } from '../utils.ts'
 import { canModerate } from '../../shared/auth.ts'
+import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 
 // Handle ban command
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -44,6 +45,16 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
           p_banned_by: moderatorId,
           p_shadow_ban: shadow
         })
+
+      // FCM: Notify banned user
+      queueFcmNotification({
+        type: shadow ? 'user_shadow_banned' : 'user_banned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+        duration: 'Permanent',
+      })
     }
 
     return createModerationEmbed(
@@ -98,6 +109,15 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
         })
         .eq('commentum_client_type', user.commentum_client_type)
         .eq('commentum_user_id', targetUserId)
+
+      // FCM: Notify unbanned user
+      queueFcmNotification({
+        type: 'user_unbanned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+      })
     }
 
     return createDiscordResponse(
@@ -157,6 +177,16 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
           p_banned_by: moderatorId,
           p_shadow_ban: true
         })
+
+      // FCM: Notify shadowbanned user
+      queueFcmNotification({
+        type: 'user_shadow_banned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+        duration: 'Permanent',
+      })
     }
 
     return createDiscordResponse(
@@ -213,6 +243,15 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
         })
         .eq('commentum_client_type', user.commentum_client_type)
         .eq('commentum_user_id', targetUserId)
+
+      // FCM: Notify unshadowbanned user
+      queueFcmNotification({
+        type: 'user_unbanned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+      })
     }
 
     return createDiscordResponse(

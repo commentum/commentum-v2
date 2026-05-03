@@ -1,5 +1,6 @@
 import { createDiscordResponse, createErrorResponse, createModerationEmbed } from '../utils.ts'
 import { canModerate } from '../../shared/auth.ts'
+import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 
 // Handle warn command
 export async function handleWarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -105,6 +106,18 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
           })
       }
       autoAction = `AUTO-MUTED - User exceeded ${muteThreshold} warnings (${muteDuration} hours)`
+    }
+
+    // FCM: Notify warned user
+    for (const user of targetUsers) {
+      queueFcmNotification({
+        type: 'user_warned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: `${reason}${autoAction ? ` (${autoAction})` : ''}`,
+        duration: 'Not specified',
+      })
     }
 
     return createModerationEmbed(
@@ -242,6 +255,18 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
 
     const muteUntil = new Date(Date.now() + duration * 60 * 60 * 1000).toISOString()
 
+    // FCM: Notify muted user
+    for (const user of targetUsers) {
+      queueFcmNotification({
+        type: 'user_muted',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+        duration: `${duration} hours`,
+      })
+    }
+
     return createModerationEmbed(
       'mute',
       targetUserId,
@@ -291,6 +316,15 @@ export async function handleUnmuteCommand(supabase: any, moderatorId: string, mo
         })
         .eq('commentum_client_type', user.commentum_client_type)
         .eq('commentum_user_id', targetUserId)
+
+      // FCM: Notify unmuted user
+      queueFcmNotification({
+        type: 'user_unmuted',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+      })
     }
 
     return createModerationEmbed(
@@ -357,6 +391,24 @@ export async function handlePinCommand(supabase: any, moderatorId: string, moder
 
     if (error) throw error
 
+    // FCM: Notify comment author their comment was pinned
+    queueFcmNotification({
+      type: 'comment_pinned',
+      targetUserId: comment.user_id,
+      targetClientType: comment.client_type,
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason,
+    })
+
     return createModerationEmbed(
       'pin',
       `Comment ${commentId} by ${comment.username}`,
@@ -416,6 +468,24 @@ export async function handleUnpinCommand(supabase: any, moderatorId: string, mod
       .eq('id', commentId)
 
     if (error) throw error
+
+    // FCM: Notify comment author their comment was unpinned
+    queueFcmNotification({
+      type: 'comment_unpinned',
+      targetUserId: comment.user_id,
+      targetClientType: comment.client_type,
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason,
+    })
 
     return createModerationEmbed(
       'unpin',
@@ -477,6 +547,24 @@ export async function handleLockCommand(supabase: any, moderatorId: string, mode
 
     if (error) throw error
 
+    // FCM: Notify comment author their thread was locked
+    queueFcmNotification({
+      type: 'comment_locked',
+      targetUserId: comment.user_id,
+      targetClientType: comment.client_type,
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason,
+    })
+
     return createDiscordResponse(
       `🔒 **Thread Locked**\n\n` +
       `💬 **Comment ID:** ${commentId}\n` +
@@ -537,6 +625,24 @@ export async function handleUnlockCommand(supabase: any, moderatorId: string, mo
       .eq('id', commentId)
 
     if (error) throw error
+
+    // FCM: Notify comment author their thread was unlocked
+    queueFcmNotification({
+      type: 'comment_unlocked',
+      targetUserId: comment.user_id,
+      targetClientType: comment.client_type,
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason,
+    })
 
     return createDiscordResponse(
       `🔓 **Thread Unlocked**\n\n` +
@@ -602,6 +708,26 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
     if (error) throw error
 
     const deleterRole = comment.user_id === moderatorId ? 'Owner' : 'Moderator'
+
+    // FCM: Notify comment author their comment was deleted
+    if (comment.user_id !== moderatorId) {
+      queueFcmNotification({
+        type: 'comment_deleted',
+        targetUserId: comment.user_id,
+        targetClientType: comment.client_type,
+        comment: {
+          id: comment.id,
+          username: comment.username,
+          content: comment.content,
+          client_type: comment.client_type,
+          media_id: comment.media_id,
+          media_type: comment.media_type,
+          media_title: comment.media_title,
+        },
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: 'Deleted via Discord bot',
+      })
+    }
     
     return createDiscordResponse(
       `🗑️ **Comment Deleted**\n\n` +
@@ -807,6 +933,16 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
 
     if (error) throw error
 
+    // FCM: Notify banned user
+    queueFcmNotification({
+      type: 'user_banned',
+      targetUserId: targetUserId,
+      targetClientType: 'anilist',
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason,
+      duration: 'Permanent',
+    })
+
     return createDiscordResponse(
       `🔨 **User Banned**\n\n` +
       `👤 **User:** ${targetUserId}\n` +
@@ -849,6 +985,15 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
       .eq('user_id', targetUserId)
 
     if (error) throw error
+
+    // FCM: Notify unbanned user
+    queueFcmNotification({
+      type: 'user_unbanned',
+      targetUserId: targetUserId,
+      targetClientType: 'anilist',
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason,
+    })
 
     return createDiscordResponse(
       `🔓 **User Unbanned**\n\n` +
@@ -908,6 +1053,16 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
 
     if (error) throw error
 
+    // FCM: Notify shadowbanned user
+    queueFcmNotification({
+      type: 'user_shadow_banned',
+      targetUserId: targetUserId,
+      targetClientType: 'anilist',
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason,
+      duration: 'Permanent',
+    })
+
     return createDiscordResponse(
       `🕶️ **User Shadowbanned**\n\n` +
       `👤 **User:** ${targetUserId}\n` +
@@ -951,6 +1106,15 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
       .eq('user_id', targetUserId)
 
     if (error) throw error
+
+    // FCM: Notify unshadowbanned user
+    queueFcmNotification({
+      type: 'user_unbanned',
+      targetUserId: targetUserId,
+      targetClientType: 'anilist',
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: reason || 'Shadowban lifted',
+    })
 
     return createDiscordResponse(
       `🌟 **User Unshadowbanned**\n\n` +

@@ -2,6 +2,7 @@ import { handleAddCommand, handleRegisterCommand, handleStatsCommand, handleHelp
 import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand, handleQueueCommand } from './moderation.ts'
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
 import { createModalResponse, createDiscordResponse } from '../utils.ts'
+import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 
 // Discord interaction types
 const InteractionType = {
@@ -68,11 +69,26 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
       case 'modal_delete': {
         // modal_delete:commentId:userId
         const commentId = id1
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('user_id, client_type')
+          .eq('id', commentId)
+          .single()
         const { error } = await supabase
           .from('comments')
           .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
           .eq('id', commentId)
         if (error) throw error
+        // FCM: Notify comment author
+        if (comment && comment.user_id !== id2) {
+          queueFcmNotification({
+            type: 'comment_deleted',
+            targetUserId: comment.user_id,
+            targetClientType: comment.client_type || 'anilist',
+            moderator: { id: userId, username: username },
+            reason: reason,
+          })
+        }
         return createDiscordResponse(`✅ Comment \`${commentId}\` deleted! Reason: ${reason}`)
       }
 
@@ -95,6 +111,15 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             p_user_id: targetUserId,
             p_warning_reason: reason,
             p_warned_by: userId
+          })
+          // FCM: Notify warned user
+          queueFcmNotification({
+            type: 'user_warned',
+            targetUserId: targetUserId,
+            targetClientType: u.commentum_client_type,
+            moderator: { id: userId, username: username },
+            reason: reason,
+            duration: 'Not specified',
           })
         }
 
@@ -121,6 +146,15 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             p_mute_reason: reason,
             p_muted_by: userId
           })
+          // FCM: Notify muted user
+          queueFcmNotification({
+            type: 'user_muted',
+            targetUserId: targetUserId,
+            targetClientType: u.commentum_client_type,
+            moderator: { id: userId, username: username },
+            reason: reason,
+            duration: '24 hours',
+          })
         }
         return createDiscordResponse(`🔇 User \`${targetUserId}\` muted for 24 hours until ${muteUntil.toLocaleString()}!\nReason: ${reason}`)
       }
@@ -143,6 +177,15 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             p_banned_by: userId,
             p_shadow_ban: false
           })
+          // FCM: Notify banned user
+          queueFcmNotification({
+            type: 'user_banned',
+            targetUserId: targetUserId,
+            targetClientType: u.commentum_client_type,
+            moderator: { id: userId, username: username },
+            reason: reason,
+            duration: 'Permanent',
+          })
         }
         return createDiscordResponse(`🔨 User \`${targetUserId}\` banned!\nReason: ${reason}`)
       }
@@ -153,10 +196,26 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
         const targetUserId = id2
 
         // Delete comment
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('user_id, client_type')
+          .eq('id', commentId)
+          .single()
         await supabase
           .from('comments')
           .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
           .eq('id', commentId)
+
+        // FCM: Notify comment author about deletion
+        if (comment && comment.user_id !== targetUserId) {
+          queueFcmNotification({
+            type: 'comment_deleted',
+            targetUserId: comment.user_id,
+            targetClientType: comment.client_type || 'anilist',
+            moderator: { id: userId, username: username },
+            reason: reason,
+          })
+        }
 
         // Warn user
         const { data: targetUsers } = await supabase
@@ -170,6 +229,15 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             p_warning_reason: reason,
             p_warned_by: userId
           })
+          // FCM: Notify warned user
+          queueFcmNotification({
+            type: 'user_warned',
+            targetUserId: targetUserId,
+            targetClientType: u.commentum_client_type,
+            moderator: { id: userId, username: username },
+            reason: reason,
+            duration: 'Not specified',
+          })
         }
         return createDiscordResponse(`🗑️⚠️ Comment deleted and user \`${targetUserId}\` warned!\nReason: ${reason}`)
       }
@@ -180,10 +248,26 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
         const targetUserId = id2
 
         // Delete comment
+        const { data: comment } = await supabase
+          .from('comments')
+          .select('user_id, client_type')
+          .eq('id', commentId)
+          .single()
         await supabase
           .from('comments')
           .update({ deleted: true, deleted_at: new Date().toISOString(), deleted_by: userId })
           .eq('id', commentId)
+
+        // FCM: Notify comment author about deletion
+        if (comment && comment.user_id !== targetUserId) {
+          queueFcmNotification({
+            type: 'comment_deleted',
+            targetUserId: comment.user_id,
+            targetClientType: comment.client_type || 'anilist',
+            moderator: { id: userId, username: username },
+            reason: reason,
+          })
+        }
 
         // Ban user
         const { data: targetUsers } = await supabase
@@ -197,6 +281,15 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             p_ban_reason: reason,
             p_banned_by: userId,
             p_shadow_ban: false
+          })
+          // FCM: Notify banned user
+          queueFcmNotification({
+            type: 'user_banned',
+            targetUserId: targetUserId,
+            targetClientType: u.commentum_client_type,
+            moderator: { id: userId, username: username },
+            reason: reason,
+            duration: 'Permanent',
           })
         }
         return createDiscordResponse(`🗑️🔨 Comment deleted and user \`${targetUserId}\` banned!\nReason: ${reason}`)
