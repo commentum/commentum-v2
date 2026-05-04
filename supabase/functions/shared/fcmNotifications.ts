@@ -680,9 +680,8 @@ function buildClickAction(payload: FcmNotificationPayload): string {
   const mediaId = payload.comment?.media_id || payload.media?.id || ''
 
   if (mediaId) {
-    // Deep link: anymex://{clientType}/{mediaType}/{mediaId}#comment-{commentId}
-    const commentSuffix = payload.comment?.id ? `#comment-${payload.comment.id}` : ''
-    return `anymex://${clientType}/${mediaType}/${mediaId}${commentSuffix}`
+    // Deep link: anymex://{clientType}/{mediaType}/{mediaId}#comment
+    return `anymex://${clientType}/${mediaType}/${mediaId}#comment`
   }
   return 'anymex://notifications'
 }
