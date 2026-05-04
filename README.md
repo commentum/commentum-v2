@@ -612,22 +612,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-## 🎉 Summary
-
-**Commentum v2 is a backend API service that:**
-
-✅ Provides comment functionality via REST API
-✅ Integrates with AniList, MAL, SIMKL platforms
-✅ Handles moderation, voting, reporting
-✅ Requires minimal setup to deploy
-✅ Can serve multiple applications
-✅ Offers Discord bot integration
-✅ No API keys required for basic use
-
-**Apps integrate with Commentum v2, users interact with apps.**
-
-**Commentum v2 handles all the backend complexity.**
-
----
-
 **Ready to integrate?** Start with the [Quick Start Guide](./docs/QUICK_START.md) 🚀
