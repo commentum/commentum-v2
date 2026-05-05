@@ -6,6 +6,7 @@ import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
+import { parseMentions } from '../shared/mentionUtils.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -452,6 +453,97 @@ async function handleCreateComment(supabase: any, params: any) {
           client_type: comment.client_type,
         },
       })
+    }
+  } else {
+    // New top-level comment: notify anyone who commented on this media recently
+    const { data: recentCommenters } = await supabase
+      .from('comments')
+      .select('user_id')
+      .eq('client_type', comment.client_type)
+      .eq('media_id', comment.media_id)
+      .neq('user_id', userInfo.user_id)
+      .eq('deleted', false)
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (recentCommenters && recentCommenters.length > 0) {
+      const notifiedUserIds = new Set<string>()
+      for (const recentUser of recentCommenters) {
+        if (!notifiedUserIds.has(recentUser.user_id)) {
+          notifiedUserIds.add(recentUser.user_id)
+          queueFcmNotification({
+            type: 'comment_created',
+            targetUserId: recentUser.user_id,
+            targetClientType: comment.client_type,
+            comment: {
+              id: comment.id,
+              user_id: comment.user_id,
+              username: comment.username,
+              content: comment.content,
+              client_type: comment.client_type,
+              media_id: comment.media_id,
+              media_type: comment.media_type,
+              media_title: comment.media_title,
+            },
+            actor: {
+              id: userInfo.user_id,
+              username: userInfo.username,
+              avatar: userInfo.avatar,
+            },
+            media: {
+              id: mediaInfo.media_id,
+              title: mediaInfo.title,
+              type: mediaInfo.type,
+              client_type: comment.client_type,
+            },
+          })
+        }
+      }
+    }
+
+    // Queue FCM Mention Notifications - NON-BLOCKING
+    const mentionedUsernames = parseMentions(content)
+    if (mentionedUsernames.length > 0) {
+      const usernameFilters = mentionedUsernames.map(u => `commentum_username.ilike.${u}`).join(',')
+      const { data: mentionedUsers } = await supabase
+        .from('commentum_users')
+        .select('commentum_user_id, commentum_client_type')
+        .eq('commentum_client_type', comment.client_type)
+        .or(usernameFilters)
+        .limit(20)
+
+      if (mentionedUsers && mentionedUsers.length > 0) {
+        for (const mentionedUser of mentionedUsers) {
+          if (mentionedUser.commentum_user_id === userInfo.user_id) continue
+
+          queueFcmNotification({
+            type: 'user_mentioned',
+            targetUserId: mentionedUser.commentum_user_id,
+            targetClientType: comment.client_type,
+            comment: {
+              id: comment.id,
+              user_id: comment.user_id,
+              username: comment.username,
+              content: comment.content,
+              client_type: comment.client_type,
+              media_id: comment.media_id,
+              media_type: comment.media_type,
+              media_title: comment.media_title,
+            },
+            actor: {
+              id: userInfo.user_id,
+              username: userInfo.username,
+              avatar: userInfo.avatar,
+            },
+            media: {
+              id: mediaInfo.media_id,
+              title: mediaInfo.title,
+              type: mediaInfo.type,
+              client_type: comment.client_type,
+            },
+          })
+        }
+      }
     }
   }
 

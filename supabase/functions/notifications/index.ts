@@ -276,8 +276,7 @@ async function handleGetHistory(supabase: any, body: any) {
     .eq('user_id', user_id)
 
   if (type) {
-    // Use LIKE with prefix match so 'comment' matches 'comment_reply', 'comment_pinned', etc.
-    query = query.like('type', `${type}%`)
+    query = query.eq('type', type)
   }
 
   if (unreadOnly === true) {
@@ -380,8 +379,7 @@ async function handleMarkAllRead(supabase: any, body: any) {
     .eq('is_read', false)
 
   if (type) {
-    // Use LIKE with prefix match so 'comment' matches 'comment_reply', 'comment_pinned', etc.
-    query = query.like('type', `${type}%`)
+    query = query.eq('type', type)
   }
 
   const { data: updatedRows, error } = await query
