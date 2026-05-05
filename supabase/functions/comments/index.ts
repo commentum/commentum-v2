@@ -503,19 +503,27 @@ async function handleCreateComment(supabase: any, params: any) {
 
     // Queue FCM Mention Notifications - NON-BLOCKING
     const mentionedUsernames = parseMentions(content)
+    console.log(`[MENTIONS] Parsed mentions from content: ${JSON.stringify(mentionedUsernames)}`)
     if (mentionedUsernames.length > 0) {
       const usernameFilters = mentionedUsernames.map(u => `commentum_username.ilike.%${u}%`).join(',')
-      const { data: mentionedUsers } = await supabase
+      console.log(`[MENTIONS] Querying users with filter: ${usernameFilters}`)
+      const { data: mentionedUsers, error: mentionError } = await supabase
         .from('commentum_users')
         .select('commentum_user_id, commentum_client_type')
         .eq('commentum_client_type', comment.client_type)
         .or(usernameFilters)
         .limit(20)
 
+      if (mentionError) {
+        console.error(`[MENTIONS] DB error finding mentioned users:`, mentionError)
+      }
+      console.log(`[MENTIONS] Found ${mentionedUsers?.length || 0} matching users, author id: ${userInfo.user_id}`)
+
       if (mentionedUsers && mentionedUsers.length > 0) {
         for (const mentionedUser of mentionedUsers) {
           if (mentionedUser.commentum_user_id === userInfo.user_id) continue
 
+          console.log(`[MENTIONS] Queueing FCM notification for user ${mentionedUser.commentum_user_id}`)
           queueFcmNotification({
             type: 'user_mentioned',
             targetUserId: mentionedUser.commentum_user_id,
