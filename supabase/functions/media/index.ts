@@ -91,6 +91,10 @@ serve(async (req) => {
     // Build nested structure
     const nestedComments = buildNestedStructure(sanitizedComments)
 
+    // Prune deleted comments that have no visible (non-deleted) replies
+    // Keep [deleted] only when it has live replies underneath to preserve thread structure
+    const prunedComments = pruneDeletedComments(nestedComments)
+
     // Get media statistics (exclude deleted)
     const { data: stats } = await supabase
       .from('comments')
@@ -115,7 +119,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         media: mediaInfo,
-        comments: nestedComments,
+        comments: prunedComments,
         stats: {
           commentCount: count || 0,
           totalUpvotes,
@@ -174,4 +178,26 @@ function buildNestedStructure(comments: any[]) {
   })
   
   return roots
+}
+
+// Recursively prune deleted comments that have no visible (non-deleted) replies.
+// Keep [deleted] placeholder only when it has at least one live reply underneath,
+// so the thread structure is preserved. Otherwise, completely hide it.
+function pruneDeletedComments(comments: any[]): any[] {
+  return comments
+    .map(comment => {
+      // Recursively prune children first (bottom-up)
+      const prunedReplies = comment.replies && comment.replies.length > 0
+        ? pruneDeletedComments(comment.replies)
+        : []
+      return { ...comment, replies: prunedReplies }
+    })
+    .filter(comment => {
+      // Non-deleted comments always stay
+      if (!comment.deleted) return true
+      // Deleted comment with visible replies → keep as [deleted] placeholder
+      if (comment.replies && comment.replies.length > 0) return true
+      // Deleted comment with no visible replies → hide completely
+      return false
+    })
 }
