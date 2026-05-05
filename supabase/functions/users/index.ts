@@ -691,55 +691,6 @@ async function handleSearchUsers(supabase: any, params: any) {
   )
 }
 
-async function handleSearchUsersPublic(supabase: any, params: any) {
-  const { username, target_client_type, moderator_id, verifiedUser } = params
-
-  if (!username || username.trim().length < 2) {
-    return new Response(
-      JSON.stringify({ error: 'Username search requires at least 2 characters' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
-  if (username.trim().length > 50) {
-    return new Response(
-      JSON.stringify({ error: 'Username search query too long' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
-
-  let query = supabase
-    .from('commentum_users')
-    .select('commentum_user_id, commentum_username, commentum_user_avatar, commentum_client_type')
-    .ilike('commentum_username', `%${username.trim()}%`)
-    .eq('commentum_user_banned', false)
-    .eq('commentum_user_active', true)
-    .limit(15)
-
-  if (target_client_type) {
-    query = query.eq('commentum_client_type', target_client_type)
-  }
-
-  const { data, error } = await query
-  if (error) throw error
-
-  const users = (data || []).map((u: any) => ({
-    id: u.commentum_user_id,
-    username: u.commentum_username,
-    avatar: u.commentum_user_avatar,
-    client_type: u.commentum_client_type,
-  }))
-
-  return new Response(
-    JSON.stringify({
-      success: true,
-      users,
-      total: users.length,
-    }),
-    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
-}
-
 async function handleGetUserHistory(supabase: any, params: any) {
   const { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser } = params
 
@@ -877,6 +828,55 @@ async function handleGetUserHistory(supabase: any, params: any) {
           role: getDisplayRole(moderatorRole)
         }
       } : {})
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleSearchUsersPublic(supabase: any, params: any) {
+  const { username, target_client_type, moderator_id, verifiedUser } = params
+
+  if (!username || username.trim().length < 2) {
+    return new Response(
+      JSON.stringify({ error: 'Username search requires at least 2 characters' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (username.trim().length > 50) {
+    return new Response(
+      JSON.stringify({ error: 'Username search query too long' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  let query = supabase
+    .from('commentum_users')
+    .select('commentum_user_id, commentum_username, commentum_user_avatar, commentum_client_type')
+    .ilike('commentum_username', `%${username.trim()}%`)
+    .eq('commentum_user_banned', false)
+    .eq('commentum_user_active', true)
+    .limit(15)
+
+  if (target_client_type) {
+    query = query.eq('commentum_client_type', target_client_type)
+  }
+
+  const { data, error } = await query
+  if (error) throw error
+
+  const users = (data || []).map((u: any) => ({
+    id: u.commentum_user_id,
+    username: u.commentum_username,
+    avatar: u.commentum_user_avatar,
+    client_type: u.commentum_client_type,
+  }))
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      users,
+      total: users.length,
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )

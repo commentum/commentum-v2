@@ -15,11 +15,11 @@ let tokenExpiryTime: number = 0
 export type FcmNotificationType = 
   | 'comment_created'      // New comment on media user commented on
   | 'comment_reply'        // Someone replied to user's comment
-  | 'user_mentioned'       // Someone @mentioned user in a comment
   | 'comment_updated'      // User's comment was edited (their own)
   | 'comment_deleted'      // User's comment was deleted
   | 'comment_pinned'       // User's comment was pinned
   | 'comment_unpinned'     // User's comment was unpinned
+  | 'user_mentioned'       // Someone @mentioned user in a comment
   | 'comment_locked'       // Thread containing user's comment was locked
   | 'comment_unlocked'     // Thread was unlocked
   | 'vote_cast'            // Someone voted on user's comment
@@ -104,25 +104,25 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
     case 'comment_created':
       return {
         title: '💬 New Comment',
-        body: `${actorName} commented on ${mediaTitle}${commentPreview ? ': "${commentPreview}"' : ''}`
+        body: `${actorName} commented on ${mediaTitle}${commentPreview ? `: "${commentPreview}"` : ''}`
       }
 
     case 'comment_reply':
       return {
         title: '↩️ New Reply',
-        body: `${actorName} replied to your comment on ${mediaTitle}${commentPreview ? ': "${commentPreview}"' : ''}`
+        body: `${actorName} replied to your comment on ${mediaTitle}${commentPreview ? ': "' + commentPreview + '"' : ''}`
       }
 
     case 'user_mentioned':
       return {
         title: '💬 You Were Mentioned',
-        body: `${actorName} mentioned you on ${mediaTitle}${commentPreview ? ': "${commentPreview}"' : ''}`
+        body: `${actorName} mentioned you on ${mediaTitle}${commentPreview ? ': "' + commentPreview + '"' : ''}`
       }
 
     case 'comment_updated':
       return {
         title: '✏️ Comment Edited',
-        body: `Your comment on ${mediaTitle} was edited${commentPreview ? ': "${commentPreview}"' : ''}`
+        body: `Your comment on ${mediaTitle} was edited${commentPreview ? `: "${commentPreview}"` : ''}`
       }
 
     case 'comment_deleted':
@@ -258,7 +258,6 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
 const NOTIFICATION_PREF_MAP: Record<FcmNotificationType, string> = {
   'comment_created': 'notify_on_reply',    // New comments on media you interacted with
   'comment_reply': 'notify_on_reply',
-  'user_mentioned': 'notify_on_mention',
   'comment_updated': 'notify_on_mod_action',
   'comment_deleted': 'notify_on_comment_delete',
   'comment_pinned': 'notify_on_mod_action',
@@ -270,6 +269,7 @@ const NOTIFICATION_PREF_MAP: Record<FcmNotificationType, string> = {
   'report_filed': 'notify_on_mod_action',
   'report_resolved': 'notify_on_mod_action',
   'report_dismissed': 'notify_on_mod_action',
+  'user_mentioned': 'notify_on_mention',
   'user_warned': 'notify_on_mod_action',
   'user_muted': 'notify_on_mod_action',
   'user_unmuted': 'notify_on_mod_action',
@@ -358,8 +358,8 @@ export async function getFcmAccessToken(): Promise<string> {
   const unsignedJwt = `${encode(header)}.${encode(payload)}`
 
   // Sign JWT with private key using Web Crypto API
-  const privateKeyClean = privateKey.replace(/\\n/g, '\n')
   // Parse PEM: strip headers, base64-decode to get raw DER bytes
+  const privateKeyClean = privateKey.replace(/\\n/g, '\n')
   const pemContents = privateKeyClean
     .replace('-----BEGIN PRIVATE KEY-----', '')
     .replace('-----END PRIVATE KEY-----', '')
@@ -525,39 +525,83 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       return
     }
 
-    const fcmResponse = await fetch('https://fcm.googleapis.com/fcm/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    })
+    // 6. Send via FCM v1 API (multicast: one request per token)
+    const projectId = Deno.env.get('FCM_PROJECT_ID')!
+    let totalSuccess = 0
+    let totalFailure = 0
+    const invalidTokens: string[] = []
 
-    if (!fcmResponse.ok) {
-      const errText = await fcmResponse.text()
-      console.error(`FCM API error (${fcmResponse.status}):`, errText)
-      return
-    }
-
-    const result = await fcmResponse.json()
-    
-    // 7. Clean up invalid tokens
-    if (result.results) {
-      const invalidTokens: string[] = []
-      for (let i = 0; i < result.results.length; i++) {
-        if (result.results[i].error === 'NotRegistered' || 
-            result.results[i].error === 'InvalidRegistration') {
-          invalidTokens.push(tokens[i].fcm_token)
+    for (const tokenRecord of tokens) {
+      const fcmMessage: any = {
+        message: {
+          token: tokenRecord.fcm_token,
+          notification: {
+            title,
+            body,
+          },
+          data: {
+            type: payload.type,
+            comment_id: payload.comment?.id?.toString() || '',
+            media_id: payload.comment?.media_id || payload.media?.id || '',
+            media_type: payload.comment?.media_type || payload.media?.type || '',
+            media_title: payload.comment?.media_title || payload.media?.title || '',
+            client_type: payload.targetClientType,
+            click_action: clickAction,
+            timestamp: new Date().toISOString(),
+          },
+          android: {
+            priority: 'HIGH' as const,
+            notification: {
+              sound: 'default',
+              default_sound: true,
+              default_vibrate_timings: true,
+              channel_id: getAndroidChannelId(payload.type),
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: 'default',
+                badge: 1,
+              }
+            }
+          },
         }
       }
-      
-      if (invalidTokens.length > 0) {
-        await supabase
-          .from('fcm_tokens')
-          .update({ is_active: false })
-          .in('fcm_token', invalidTokens)
+
+      const fcmResponse = await fetch(
+        `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(fcmMessage),
+        }
+      )
+
+      if (!fcmResponse.ok) {
+        const errData = await fcmResponse.json().catch(() => ({}))
+        const errMsg = errData?.error?.message || await fcmResponse.text()
+        console.error(`FCM v1 error for token ${tokenRecord.fcm_token.substring(0, 20)}...: (${fcmResponse.status}) ${errMsg}`)
+        totalFailure++
+
+        // Mark token as invalid if unregistered
+        if (fcmResponse.status === 404 || errMsg.includes('NotRegistered') || errMsg.includes('registration-token-not-registered')) {
+          invalidTokens.push(tokenRecord.fcm_token)
+        }
+      } else {
+        totalSuccess++
       }
+    }
+
+    // 7. Clean up invalid tokens
+    if (invalidTokens.length > 0) {
+      await supabase
+        .from('fcm_tokens')
+        .update({ is_active: false })
+        .in('fcm_token', invalidTokens)
     }
 
     // 8. Update last_used_at for active tokens
@@ -570,8 +614,8 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
 
     // 9. Store notification in history table
     const fcmSent = true
-    const fcmDelivered = result.success >= 1
-    const fcmError = (!result.success || result.failure > 0) ? `success: ${result.success}, failure: ${result.failure}` : null
+    const fcmDelivered = totalSuccess >= 1
+    const fcmError = totalFailure > 0 ? `success: ${totalSuccess}, failure: ${totalFailure}` : null
 
     storeNotificationToDb(supabase, payload, title, body, clickAction, fcmSent, fcmDelivered, fcmError).catch(err => {
       console.error('Failed to store notification history:', err)

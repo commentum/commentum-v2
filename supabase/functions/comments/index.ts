@@ -5,8 +5,8 @@ import { verifyAdminAccess, getUserRole, getDisplayRole } from '../shared/auth.t
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
-import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
 import { parseMentions } from '../shared/mentionUtils.ts'
+import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -459,7 +459,7 @@ async function handleCreateComment(supabase: any, params: any) {
     const { data: recentCommenters } = await supabase
       .from('comments')
       .select('user_id')
-      .eq('client_type', comment.client_type)
+      .eq('client_type', comment.comment_type)
       .eq('media_id', comment.media_id)
       .neq('user_id', userInfo.user_id)
       .eq('deleted', false)
