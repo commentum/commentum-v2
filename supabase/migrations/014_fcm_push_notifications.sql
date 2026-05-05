@@ -73,5 +73,5 @@ ON CONFLICT (key) DO NOTHING;
 -- Add notification_types to config for granular control
 INSERT INTO config (key, value) VALUES (
     'fcm_notification_types',
-    '["comment_reply","comment_vote","comment_delete","mod_action"]'
+    '["comment_created","comment_reply","comment_updated","comment_deleted","comment_pinned","comment_locked","comment_unlocked","user_mentioned","vote_cast","vote_removed","report_filed","report_resolved","report_dismissed","user_warned","user_muted","user_banned","user_shadow_banned","user_unbanned","announcement_published","moderation_action"]'
 ) ON CONFLICT (key) DO NOTHING;

@@ -49,12 +49,13 @@ serve(async (req) => {
     const offset = (page - 1) * limit
 
     // Get comments for this media
+    // Include deleted comments (soft-deleted) so replies to deleted parents are preserved
+    // Reddit-style: deleted comments show as "[deleted]" with no content
     const { data: comments, error } = await supabase
       .from('comments')
       .select('*')
       .eq('media_id', media_id)
       .eq('client_type', client_type)
-      .eq('deleted', false)
       .eq('user_banned', false)
       .eq('user_shadow_banned', false)
       .order('created_at', { ascending: sort === 'oldest' })
@@ -62,7 +63,22 @@ serve(async (req) => {
 
     if (error) throw error
 
-    // Get total count
+    // Sanitize deleted comments: strip content but keep structure for replies
+    const sanitizedComments = (comments || []).map((comment: any) => {
+      if (comment.deleted) {
+        return {
+          ...comment,
+          content: '[deleted]',
+          username: '[deleted]',
+          user_avatar: null,
+          user_role: null,
+          // Keep: id, parent_id, replies, created_at, deleted, vote_score, tags
+        }
+      }
+      return comment
+    })
+
+    // Get total count (exclude deleted for count)
     const { count } = await supabase
       .from('comments')
       .select('*', { count: 'exact', head: true })
@@ -73,9 +89,9 @@ serve(async (req) => {
       .eq('user_shadow_banned', false)
 
     // Build nested structure
-    const nestedComments = buildNestedStructure(comments || [])
+    const nestedComments = buildNestedStructure(sanitizedComments)
 
-    // Get media statistics
+    // Get media statistics (exclude deleted)
     const { data: stats } = await supabase
       .from('comments')
       .select('upvotes, downvotes')
@@ -83,16 +99,17 @@ serve(async (req) => {
       .eq('client_type', client_type)
       .eq('deleted', false)
 
-    const totalUpvotes = stats?.reduce((sum, comment) => sum + comment.upvotes, 0) || 0
-    const totalDownvotes = stats?.reduce((sum, comment) => sum + comment.downvotes, 0) || 0
+    const totalUpvotes = stats?.reduce((sum: number, comment: any) => sum + comment.upvotes, 0) || 0
+    const totalDownvotes = stats?.reduce((sum: number, comment: any) => sum + comment.downvotes, 0) || 0
 
-    // Get media info from first comment
-    const mediaInfo = comments && comments.length > 0 ? {
-      mediaId: comments[0].media_id,
-      mediaType: comments[0].media_type,
-      mediaTitle: comments[0].media_title,
-      mediaYear: comments[0].media_year,
-      mediaPoster: comments[0].media_poster
+    // Get media info from first non-deleted comment
+    const firstNonDeleted = (comments || []).find((c: any) => !c.deleted)
+    const mediaInfo = firstNonDeleted ? {
+      mediaId: firstNonDeleted.media_id,
+      mediaType: firstNonDeleted.media_type,
+      mediaTitle: firstNonDeleted.media_title,
+      mediaYear: firstNonDeleted.media_year,
+      mediaPoster: firstNonDeleted.media_poster
     } : null
 
     return new Response(
@@ -146,6 +163,10 @@ function buildNestedStructure(comments: any[]) {
       const parent = commentMap[comment.parent_id]
       if (parent) {
         parent.replies.push(commentMap[comment.id])
+      } else {
+        // Parent not in current page (could be deleted or on different page)
+        // Still show as root so reply isn't lost
+        roots.push(commentMap[comment.id])
       }
     } else {
       roots.push(commentMap[comment.id])
