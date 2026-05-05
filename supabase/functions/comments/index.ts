@@ -504,7 +504,7 @@ async function handleCreateComment(supabase: any, params: any) {
     // Queue FCM Mention Notifications - NON-BLOCKING
     const mentionedUsernames = parseMentions(content)
     if (mentionedUsernames.length > 0) {
-      const usernameFilters = mentionedUsernames.map(u => `commentum_username.ilike.${u}`).join(',')
+      const usernameFilters = mentionedUsernames.map(u => `commentum_username.ilike.%${u}%`).join(',')
       const { data: mentionedUsers } = await supabase
         .from('commentum_users')
         .select('commentum_user_id, commentum_client_type')
