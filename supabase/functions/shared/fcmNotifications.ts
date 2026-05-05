@@ -478,6 +478,9 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
     // Build click action (deep link into the app)
     const clickAction = buildClickAction(payload)
 
+    // Determine the correct service type (from the comment/media, NOT the target user)
+    const serviceClientType = payload.comment?.client_type || payload.media?.client_type || payload.targetClientType || 'anilist'
+
     // Build the FCM message
     const message: any = {
       notification: {
@@ -492,7 +495,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
         media_id: payload.comment?.media_id || payload.media?.id || '',
         media_type: payload.comment?.media_type || payload.media?.type || '',
         media_title: payload.comment?.media_title || payload.media?.title || '',
-        client_type: payload.targetClientType,
+        client_type: serviceClientType,
         click_action: clickAction,
         timestamp: new Date().toISOString(),
       },
@@ -545,7 +548,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
             media_id: payload.comment?.media_id || payload.media?.id || '',
             media_type: payload.comment?.media_type || payload.media?.type || '',
             media_title: payload.comment?.media_title || payload.media?.title || '',
-            client_type: payload.targetClientType,
+            client_type: serviceClientType,
             click_action: clickAction,
             timestamp: new Date().toISOString(),
           },
