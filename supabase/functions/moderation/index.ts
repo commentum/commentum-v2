@@ -191,7 +191,7 @@ async function handlePinComment(supabase: any, params: any) {
       media_type: updatedComment.media_type,
       media_title: updatedComment.media_title,
     },
-    moderator: { id: moderator_id, username: verifiedUser.username },
+    moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
     media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
     reason,
   })
@@ -348,7 +348,7 @@ async function handleLockThread(supabase: any, params: any) {
       media_type: updatedComment.media_type,
       media_title: updatedComment.media_title,
     },
-    moderator: { id: moderator_id, username: verifiedUser.username },
+    moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
     media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
     reason,
   })
@@ -539,7 +539,7 @@ async function handleWarnUser(supabase: any, params: any) {
       targetUserId: target_user_id,
       targetClientType: user.commentum_client_type,
       user: { id: target_user_id, username: targetUsername },
-      moderator: { id: moderator_id, username: verifiedUser.username },
+      moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
       reason: `${reason}${severity ? ` (${severity})` : ''}`,
       duration: duration || 'Not specified',
     })
@@ -648,7 +648,7 @@ async function handleBanUser(supabase: any, params: any) {
       targetUserId: target_user_id,
       targetClientType: user.commentum_client_type,
       user: { id: target_user_id, username: targetUsername, notes: userNotes },
-      moderator: { id: moderator_id, username: verifiedUser.username },
+      moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
       reason,
       duration: 'Permanent',
     })
@@ -738,7 +738,7 @@ async function handleUnbanUser(supabase: any, params: any) {
       targetUserId: target_user_id,
       targetClientType: user.commentum_client_type,
       user: { id: target_user_id, username: targetUsername },
-      moderator: { id: moderator_id, username: verifiedUser.username },
+      moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
       reason,
     })
   }

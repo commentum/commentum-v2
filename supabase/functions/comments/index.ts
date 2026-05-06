@@ -648,28 +648,7 @@ async function handleEditComment(supabase: any, params: any) {
     }
   })
 
-  // FCM: Notify comment author their comment was edited
-  queueFcmNotification({
-    type: 'comment_updated',
-    targetUserId: updatedComment.user_id,
-    targetClientType: updatedComment.client_type,
-    comment: {
-      id: updatedComment.id,
-      user_id: updatedComment.user_id,
-      username: updatedComment.username,
-      content: updatedComment.content,
-      client_type: updatedComment.client_type,
-      media_id: updatedComment.media_id,
-      media_type: updatedComment.media_type,
-      media_title: updatedComment.media_title,
-    },
-    media: {
-      id: updatedComment.media_id,
-      title: updatedComment.media_title,
-      type: updatedComment.media_type,
-      client_type: updatedComment.client_type,
-    },
-  })
+  // No FCM notification for self-edits — user already knows they edited their own comment
 
   return new Response(
     JSON.stringify({ success: true, comment: updatedComment }),
@@ -754,33 +733,7 @@ async function handleDeleteComment(supabase: any, params: any) {
     reason: 'Self-deleted by author'
   })
 
-  // FCM: Notify comment author their comment was deleted (self-delete, low priority)
-  queueFcmNotification({
-    type: 'comment_deleted',
-    targetUserId: deletedComment.user_id,
-    targetClientType: deletedComment.client_type,
-    comment: {
-      id: deletedComment.id,
-      user_id: deletedComment.user_id,
-      username: deletedComment.username,
-      content: comment.content,
-      client_type: deletedComment.client_type,
-      media_id: deletedComment.media_id,
-      media_type: deletedComment.media_type,
-      media_title: deletedComment.media_title,
-    },
-    moderator: {
-      id: deletedComment.user_id,
-      username: deletedComment.username,
-    },
-    media: {
-      id: deletedComment.media_id,
-      title: deletedComment.media_title,
-      type: deletedComment.media_type,
-      client_type: deletedComment.client_type,
-    },
-    reason: 'Self-deleted by author',
-  })
+  // No FCM notification for self-deletes — user already knows they deleted their own comment
 
   return new Response(
     JSON.stringify({ success: true, comment: deletedComment }),

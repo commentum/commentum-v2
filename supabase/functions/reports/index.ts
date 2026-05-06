@@ -230,15 +230,16 @@ async function handleCreateReport(supabase: any, params: any) {
 
   if (error) throw error
 
-  // Get reporter username from commentum_users table
+  // Get reporter username and avatar from commentum_users table
   const { data: reporterUser } = await supabase
     .from('commentum_users')
-    .select('commentum_username')
+    .select('commentum_username, commentum_avatar')
     .eq('commentum_client_type', comment.client_type || 'anilist')
     .eq('commentum_user_id', reporter_id)
     .single()
 
   const reporterUsername = reporterUser?.commentum_username || reporter_info?.username || reporter_id
+  const reporterAvatar = reporterUser?.commentum_avatar || reporter_info?.avatar || null
 
   // Queue Discord notification for new report in background - NON-BLOCKING
   queueDiscordNotification({
@@ -283,7 +284,7 @@ async function handleCreateReport(supabase: any, params: any) {
         media_type: comment.media_type,
         media_title: comment.media_title,
       },
-      actor: { id: reporter_id, username: reporterUsername },
+      actor: { id: reporter_id, username: reporterUsername, avatar: reporterAvatar },
       media: {
         id: comment.media_id,
         title: comment.media_title,
@@ -429,7 +430,7 @@ async function handleResolveReport(supabase: any, params: any) {
       media_type: fullComment.media_type,
       media_title: fullComment.media_title,
     },
-    moderator: { id: moderator_id, username: verifiedUser.username },
+    moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
     media: {
       id: fullComment.media_id,
       title: fullComment.media_title,

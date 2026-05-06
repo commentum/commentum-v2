@@ -475,6 +475,15 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
     // 5. Build notification message
     const { title, body } = getNotificationContent(payload)
 
+    // Resolve effective actor: use actor if available, fall back to moderator
+    const effectiveActor = payload.actor || (payload.moderator ? {
+      id: payload.moderator.id || '',
+      username: payload.moderator.username || '',
+      avatar: (payload.moderator as any).avatar || '',
+    } : null)
+    const actorAvatar = effectiveActor?.avatar || undefined
+    const actorUsername = effectiveActor?.username || ''
+
     // Build click action (deep link into the app)
     const clickAction = buildClickAction(payload)
 
@@ -486,7 +495,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       notification: {
         title,
         body,
-        image: payload.actor?.avatar || undefined,
+        image: actorAvatar,
         sound: 'default',
         badge: '1',
       },
@@ -497,8 +506,8 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
         media_type: payload.comment?.media_type || payload.media?.type || '',
         media_title: payload.comment?.media_title || payload.media?.title || '',
         client_type: serviceClientType,
-        actor_username: payload.actor?.username || '',
-        actor_avatar: payload.actor?.avatar || '',
+        actor_username: actorUsername,
+        actor_avatar: actorAvatar || '',
         click_action: clickAction,
         timestamp: new Date().toISOString(),
       },
@@ -544,7 +553,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
           notification: {
             title,
             body,
-            image: payload.actor?.avatar || undefined,
+            image: actorAvatar,
           },
           data: {
             type: payload.type,
@@ -553,8 +562,8 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
             media_type: payload.comment?.media_type || payload.media?.type || '',
             media_title: payload.comment?.media_title || payload.media?.title || '',
             client_type: serviceClientType,
-            actor_username: payload.actor?.username || '',
-            actor_avatar: payload.actor?.avatar || '',
+            actor_username: actorUsername,
+            actor_avatar: actorAvatar || '',
             click_action: clickAction,
             timestamp: new Date().toISOString(),
           },
@@ -660,9 +669,9 @@ async function storeNotificationToDb(
       media_id: payload.comment?.media_id || payload.media?.id || null,
       media_type: payload.comment?.media_type || payload.media?.type || null,
       media_title: payload.comment?.media_title || payload.media?.title || null,
-      actor_id: payload.actor?.id || null,
-      actor_username: payload.actor?.username || null,
-      actor_avatar: payload.actor?.avatar || null,
+      actor_id: payload.actor?.id || payload.moderator?.id || null,
+      actor_username: payload.actor?.username || payload.moderator?.username || null,
+      actor_avatar: payload.actor?.avatar || (payload.moderator as any)?.avatar || null,
       moderator_id: payload.moderator?.id || null,
       moderator_username: payload.moderator?.username || null,
       reason: payload.reason || payload.reportReason || null,
