@@ -486,6 +486,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       notification: {
         title,
         body,
+        image: payload.actor?.avatar || undefined,
         sound: 'default',
         badge: '1',
       },
@@ -496,6 +497,8 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
         media_type: payload.comment?.media_type || payload.media?.type || '',
         media_title: payload.comment?.media_title || payload.media?.title || '',
         client_type: serviceClientType,
+        actor_username: payload.actor?.username || '',
+        actor_avatar: payload.actor?.avatar || '',
         click_action: clickAction,
         timestamp: new Date().toISOString(),
       },
@@ -541,6 +544,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
           notification: {
             title,
             body,
+            image: payload.actor?.avatar || undefined,
           },
           data: {
             type: payload.type,
@@ -549,6 +553,8 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
             media_type: payload.comment?.media_type || payload.media?.type || '',
             media_title: payload.comment?.media_title || payload.media?.title || '',
             client_type: serviceClientType,
+            actor_username: payload.actor?.username || '',
+            actor_avatar: payload.actor?.avatar || '',
             click_action: clickAction,
             timestamp: new Date().toISOString(),
           },
@@ -656,6 +662,7 @@ async function storeNotificationToDb(
       media_title: payload.comment?.media_title || payload.media?.title || null,
       actor_id: payload.actor?.id || null,
       actor_username: payload.actor?.username || null,
+      actor_avatar: payload.actor?.avatar || null,
       moderator_id: payload.moderator?.id || null,
       moderator_username: payload.moderator?.username || null,
       reason: payload.reason || payload.reportReason || null,
