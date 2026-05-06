@@ -109,49 +109,49 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
 
     case 'comment_reply':
       return {
-        title: '↩️ New Reply',
+        title: 'New Reply',
         body: `${actorName} replied to your comment on ${mediaTitle}${commentPreview ? ': "' + commentPreview + '"' : ''}`
       }
 
     case 'user_mentioned':
       return {
-        title: '💬 You Were Mentioned',
+        title: 'You Were Mentioned',
         body: `${actorName} mentioned you on ${mediaTitle}${commentPreview ? ': "' + commentPreview + '"' : ''}`
       }
 
     case 'comment_updated':
       return {
-        title: '✏️ Comment Edited',
+        title: 'Comment Edited',
         body: `Your comment on ${mediaTitle} was edited${commentPreview ? `: "${commentPreview}"` : ''}`
       }
 
     case 'comment_deleted':
       return {
-        title: '🗑️ Comment Deleted',
+        title: 'Comment Deleted',
         body: `Your comment on ${mediaTitle} was deleted by ${modName}.${payload.reason ? ` Reason: ${payload.reason}` : ''}`
       }
 
     case 'comment_pinned':
       return {
-        title: '📌 Comment Pinned',
+        title: 'Comment Pinned',
         body: `${modName} pinned your comment on ${mediaTitle}!${commentPreview ? ` "${commentPreview}"` : ''}`
       }
 
     case 'comment_unpinned':
       return {
-        title: '📍 Comment Unpinned',
+        title: 'Comment Unpinned',
         body: `${modName} unpinned your comment on ${mediaTitle}.`
       }
 
     case 'comment_locked':
       return {
-        title: '🔒 Thread Locked',
+        title: 'Thread Locked',
         body: `${modName} locked the comment thread on ${mediaTitle}.`
       }
 
     case 'comment_unlocked':
       return {
-        title: '🔓 Thread Unlocked',
+        title: 'Thread Unlocked',
         body: `${modName} unlocked the comment thread on ${mediaTitle}.`
       }
 
@@ -164,70 +164,70 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
 
     case 'vote_removed':
       return {
-        title: '➖ Vote Removed',
+        title: 'Vote Removed',
         body: `${actorName} removed their vote on your comment on ${mediaTitle} (Score: ${payload.voteScore ?? 0})`
       }
 
     // ── REPORT EVENTS ──
     case 'report_filed':
       return {
-        title: '🚨 Comment Reported',
+        title: 'Comment Reported',
         body: `Your comment on ${mediaTitle} was reported.${payload.reportReason ? ` Reason: ${payload.reportReason}` : ''}`
       }
 
     case 'report_resolved':
       return {
-        title: '✅ Report Resolved',
+        title: 'Report Resolved',
         body: `The report on your comment on ${mediaTitle} was resolved.`
       }
 
     case 'report_dismissed':
       return {
-        title: '❌ Report Dismissed',
+        title: 'Report Dismissed',
         body: `The report on your comment on ${mediaTitle} was dismissed.`
       }
 
     // ── USER MODERATION EVENTS ──
     case 'user_warned':
       return {
-        title: '⚠️ Warning Received',
+        title: 'Warning Received',
         body: `${modName} issued you a warning.${payload.reason ? ` Reason: ${payload.reason}` : ''}`
       }
 
     case 'user_muted':
       return {
-        title: '🔇 You Have Been Muted',
+        title: 'You Have Been Muted',
         body: `${modName} muted you for ${duration}.${payload.reason ? ` Reason: ${payload.reason}` : ''}`
       }
 
     case 'user_unmuted':
       return {
-        title: '🔊 Unmuted',
+        title: 'Unmuted',
         body: `${modName} has unmuted you. You can now post comments again.`
       }
 
     case 'user_banned':
       return {
-        title: '⛔ Banned',
+        title: 'Banned',
         body: `${modName} banned you for ${duration}.${payload.reason ? ` Reason: ${payload.reason}` : ''}`
       }
 
     case 'user_unbanned':
       return {
-        title: '♻️ Unbanned',
+        title: 'Unbanned',
         body: `${modName} has unbanned you. Welcome back!`
       }
 
     case 'user_shadow_banned':
       return {
-        title: '👻 Restricted',
+        title: 'Restricted',
         body: `Your account has been restricted by ${modName}.${payload.reason ? ` Reason: ${payload.reason}` : ''}`
       }
 
     // ── ANNOUNCEMENT ──
     case 'announcement_published':
       return {
-        title: `📢 ${payload.announcementTitle || 'New Announcement'}`,
+        title: `${payload.announcementTitle || 'New Announcement'}`,
         body: payload.announcementContent 
           ? (payload.announcementContent.length > 120 
               ? payload.announcementContent.substring(0, 120) + '...' 
@@ -238,13 +238,13 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
     // ── GENERIC MODERATION ──
     case 'moderation_action':
       return {
-        title: '⚙️ Moderation Action',
+        title: 'Moderation Action',
         body: `${modName} performed an action on your account.${payload.reason ? ` Reason: ${payload.reason}` : ''}`
       }
 
     default:
       return {
-        title: '🔔 Notification',
+        title: 'Notification',
         body: 'Something happened. Tap to view details.'
       }
   }
