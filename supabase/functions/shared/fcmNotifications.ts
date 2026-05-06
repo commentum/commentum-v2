@@ -490,43 +490,23 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
     // Determine the correct service type (from the comment/media, NOT the target user)
     const serviceClientType = payload.comment?.client_type || payload.media?.client_type || payload.targetClientType || 'anilist'
 
-    // Build the FCM message
-    const message: any = {
-      notification: {
-        title,
-        body,
-      },
-      data: {
-        type: payload.type,
-        comment_id: payload.comment?.id?.toString() || '',
-        media_id: payload.comment?.media_id || payload.media?.id || '',
-        media_type: payload.comment?.media_type || payload.media?.type || '',
-        media_title: payload.comment?.media_title || payload.media?.title || '',
-        client_type: serviceClientType,
-        actor_username: actorUsername,
-        actor_avatar: actorAvatar || '',
-        click_action: clickAction,
-        timestamp: new Date().toISOString(),
-      },
-      android: {
-        priority: 'high',
-        notification: {
-          sound: 'default',
-          default_sound: true,
-          default_vibrate_timings: true,
-          channel_id: getAndroidChannelId(payload.type),
-          ...(actorAvatar ? { large_icon: actorAvatar } : {}),
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-            badge: 1,
-          }
-        }
-      },
-      tokens: tokens.map(t => t.fcm_token),
+    // Build DATA-ONLY FCM message (like WhatsApp/Discord)
+    // No 'notification' field — the app handles everything including largeIcon avatar
+    // title and body are passed via data so the app can show them in a custom notification
+    const messageData = {
+      type: payload.type,
+      title,
+      body,
+      comment_id: payload.comment?.id?.toString() || '',
+      media_id: payload.comment?.media_id || payload.media?.id || '',
+      media_type: payload.comment?.media_type || payload.media?.type || '',
+      media_title: payload.comment?.media_title || payload.media?.title || '',
+      client_type: serviceClientType,
+      actor_username: actorUsername,
+      actor_avatar: actorAvatar || '',
+      click_action: clickAction,
+      timestamp: new Date().toISOString(),
+      channel_id: getAndroidChannelId(payload.type),
     }
 
     // 6. Send via FCM v1 API
@@ -548,31 +528,10 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       const fcmMessage: any = {
         message: {
           token: tokenRecord.fcm_token,
-          notification: {
-            title,
-            body,
-          },
-          data: {
-            type: payload.type,
-            comment_id: payload.comment?.id?.toString() || '',
-            media_id: payload.comment?.media_id || payload.media?.id || '',
-            media_type: payload.comment?.media_type || payload.media?.type || '',
-            media_title: payload.comment?.media_title || payload.media?.title || '',
-            client_type: serviceClientType,
-            actor_username: actorUsername,
-            actor_avatar: actorAvatar || '',
-            click_action: clickAction,
-            timestamp: new Date().toISOString(),
-          },
+          data: messageData,
           android: {
             priority: 'HIGH' as const,
-            notification: {
-              sound: 'default',
-              default_sound: true,
-              default_vibrate_timings: true,
-              channel_id: getAndroidChannelId(payload.type),
-              ...(actorAvatar ? { large_icon: actorAvatar } : {}),
-            },
+            // Data-only with high priority ensures the background handler runs
           },
           apns: {
             payload: {
