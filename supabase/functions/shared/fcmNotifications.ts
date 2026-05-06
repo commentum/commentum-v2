@@ -495,9 +495,8 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       notification: {
         title,
         body,
-        image: actorAvatar,
-        sound: 'default',
-        badge: '1',
+        // NO 'image' here — notification.image shows as a large banner at bottom.
+        // The small left avatar (largeIcon) is set by the app's foreground handler.
       },
       data: {
         type: payload.type,
@@ -553,7 +552,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
           notification: {
             title,
             body,
-            image: actorAvatar,
+            // NO 'image' — avatar is handled by app foreground handler as largeIcon
           },
           data: {
             type: payload.type,
