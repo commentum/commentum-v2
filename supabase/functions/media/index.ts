@@ -63,6 +63,23 @@ serve(async (req) => {
 
     if (error) throw error
 
+    // Get user points for all unique user_ids in this page
+    const userIds = [...new Set((comments || [])
+      .filter((c: any) => !c.deleted && c.user_id)
+      .map((c: any) => c.user_id))]
+
+    let userPointsMap: Record<string, any> = {}
+    if (userIds.length > 0) {
+      const { data: pointsData } = await supabase
+        .rpc('get_batch_user_points_cached', {
+          p_client_type: client_type,
+          p_user_ids: userIds
+        })
+      if (pointsData) {
+        userPointsMap = pointsData
+      }
+    }
+
     // Sanitize deleted comments: strip content but keep structure for replies
     const sanitizedComments = (comments || []).map((comment: any) => {
       if (comment.deleted) {
@@ -72,10 +89,14 @@ serve(async (req) => {
           username: '[deleted]',
           user_avatar: null,
           user_role: null,
-          // Keep: id, parent_id, replies, created_at, deleted, vote_score, tags
         }
       }
-      return comment
+      const points = userPointsMap[comment.user_id]
+      return {
+        ...comment,
+        user_tier: points?.tier || null,
+        user_points: points?.total_points || null,
+      }
     })
 
     // Get total count (exclude deleted for count)

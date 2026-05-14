@@ -47,9 +47,15 @@ serve(async (req) => {
       case 'get_batch_user_points':
         return await handleGetBatchUserPoints(supabase, { client_type, user_ids })
 
+      case 'refresh_user':
+        return await handleRefreshUser(supabase, { target_user_id, target_client_type, client_type })
+
+      case 'refresh_all':
+        return await handleRefreshAll(supabase, { client_type: target_client_type })
+
       default:
         return new Response(
-          JSON.stringify({ error: 'Invalid action. Must be get_user_points, get_leaderboard, get_points_config, or get_batch_user_points' }),
+          JSON.stringify({ error: 'Invalid action. Must be get_user_points, get_leaderboard, get_points_config, get_batch_user_points, refresh_user, or refresh_all' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }
@@ -247,6 +253,69 @@ async function handleGetBatchUserPoints(supabase: any, params: any) {
       success: true,
       users: data
     }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+/**
+ * refresh_user
+ * Force recalculate and store points for a single user
+ */
+async function handleRefreshUser(supabase: any, params: any) {
+  const { target_user_id, target_client_type, client_type } = params
+
+  const queryClientType = target_client_type || client_type
+  const queryUserId = target_user_id
+
+  if (!queryUserId || !queryClientType) {
+    return new Response(
+      JSON.stringify({ error: 'target_user_id and client_type (or target_client_type) are required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const { error } = await supabase
+    .rpc('refresh_user_points', {
+      p_client_type: queryClientType,
+      p_user_id: queryUserId
+    })
+
+  if (error) {
+    console.error('refresh_user_points RPC error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Failed to refresh user points' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({ success: true, message: `Points refreshed for user ${queryUserId}` }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+/**
+ * refresh_all
+ * Recalculate and store points for all users (maintenance)
+ */
+async function handleRefreshAll(supabase: any, params: any) {
+  const { client_type } = params
+
+  const { data, error } = await supabase
+    .rpc('refresh_all_user_points', {
+      p_client_type: client_type || null
+    })
+
+  if (error) {
+    console.error('refresh_all_user_points RPC error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Failed to refresh all user points' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({ success: true, refreshed_count: data }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
