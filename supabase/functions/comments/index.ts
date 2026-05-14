@@ -13,6 +13,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'content-type',
 }
 
+const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
+
+function stripSensitiveFields(obj: any): any {
+  if (!obj) return obj
+  const stripped: any = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (!FIELDS_TO_STRIP.includes(key)) {
+      stripped[key] = value
+    }
+  }
+  return stripped
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -556,7 +569,7 @@ async function handleCreateComment(supabase: any, params: any) {
   }
 
   return new Response(
-    JSON.stringify({ success: true, comment }),
+    JSON.stringify({ success: true, comment: stripSensitiveFields(comment) }),
     { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
@@ -651,7 +664,7 @@ async function handleEditComment(supabase: any, params: any) {
   // No FCM notification for self-edits — user already knows they edited their own comment
 
   return new Response(
-    JSON.stringify({ success: true, comment: updatedComment }),
+    JSON.stringify({ success: true, comment: stripSensitiveFields(updatedComment) }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
@@ -736,7 +749,7 @@ async function handleDeleteComment(supabase: any, params: any) {
   // No FCM notification for self-deletes — user already knows they deleted their own comment
 
   return new Response(
-    JSON.stringify({ success: true, comment: deletedComment }),
+    JSON.stringify({ success: true, comment: stripSensitiveFields(deletedComment) }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
@@ -845,7 +858,7 @@ async function handleModDeleteComment(supabase: any, params: any) {
   return new Response(
     JSON.stringify({ 
       success: true, 
-      comment: deletedComment,
+      comment: stripSensitiveFields(deletedComment),
       moderator: {
         id: user_id,
         username: verifiedUserFromToken?.username,

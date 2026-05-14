@@ -80,23 +80,28 @@ serve(async (req) => {
       }
     }
 
-    // Sanitize deleted comments: strip content but keep structure for replies
+    const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
+
     const sanitizedComments = (comments || []).map((comment: any) => {
-      if (comment.deleted) {
-        return {
-          ...comment,
-          content: '[deleted]',
-          username: '[deleted]',
-          user_avatar: null,
-          user_role: null,
+      const stripped: any = {}
+      for (const [key, value] of Object.entries(comment)) {
+        if (!FIELDS_TO_STRIP.includes(key)) {
+          stripped[key] = value
         }
       }
-      const points = userPointsMap[comment.user_id]
-      return {
-        ...comment,
-        user_tier: points?.tier || null,
-        user_points: points?.total_points || null,
+
+      if (comment.deleted) {
+        stripped.content = '[deleted]'
+        stripped.username = '[deleted]'
+        stripped.user_avatar = null
+        stripped.user_role = null
+      } else {
+        const points = userPointsMap[comment.user_id]
+        stripped.user_tier = points?.tier || null
+        stripped.user_points = points?.total_points || null
       }
+
+      return stripped
     })
 
     // Get total count (exclude deleted for count)

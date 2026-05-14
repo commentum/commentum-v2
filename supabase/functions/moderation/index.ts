@@ -10,6 +10,19 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'content-type',
 }
 
+const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
+
+function stripSensitiveFields(obj: any): any {
+  if (!obj) return obj
+  const stripped: any = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (!FIELDS_TO_STRIP.includes(key)) {
+      stripped[key] = value
+    }
+  }
+  return stripped
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -199,7 +212,7 @@ async function handlePinComment(supabase: any, params: any) {
   return new Response(
     JSON.stringify({
       success: true,
-      comment: updatedComment,
+      comment: stripSensitiveFields(updatedComment),
       action: 'pinned',
       moderator: {
         id: moderator_id,
@@ -256,7 +269,7 @@ async function handleUnpinComment(supabase: any, params: any) {
   return new Response(
     JSON.stringify({
       success: true,
-      comment: updatedComment,
+      comment: stripSensitiveFields(updatedComment),
       action: 'unpinned',
       moderator: {
         id: moderator_id,
@@ -356,7 +369,7 @@ async function handleLockThread(supabase: any, params: any) {
   return new Response(
     JSON.stringify({
       success: true,
-      comment: updatedComment,
+      comment: stripSensitiveFields(updatedComment),
       action: 'locked',
       moderator: {
         id: moderator_id,
@@ -413,7 +426,7 @@ async function handleUnlockThread(supabase: any, params: any) {
   return new Response(
     JSON.stringify({
       success: true,
-      comment: updatedComment,
+      comment: stripSensitiveFields(updatedComment),
       action: 'unlocked',
       moderator: {
         id: moderator_id,
@@ -772,7 +785,7 @@ async function handleGetModerationQueue(supabase: any) {
 
   return new Response(
     JSON.stringify({
-      comments,
+      comments: (comments || []).map(stripSensitiveFields),
       total: comments.length
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
