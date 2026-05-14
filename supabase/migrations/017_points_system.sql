@@ -1,6 +1,6 @@
 -- ====================================
 -- POINTS SYSTEM MIGRATION
--- Adds points calculation, leaderboard, and streak tracking
+-- Adds points calculation, leaderboard, streak tracking, and role bonuses
 -- ====================================
 
 -- ====================================
@@ -29,25 +29,76 @@ INSERT INTO config (key, value) VALUES
     -- elite = 5000+
     ('points_leaderboard_enabled', 'true'),
     ('points_leaderboard_page_size', '50'),
-    ('points_streak_max_lookback_days', '60');
+    ('points_streak_max_lookback_days', '60'),
+    -- Role bonuses (promote = instant bonus, demote = instant removal)
+    ('points_role_bonus_owner', '500'),
+    ('points_role_bonus_super_admin', '300'),
+    ('points_role_bonus_admin', '150'),
+    ('points_role_bonus_moderator', '50')
+ON CONFLICT (key) DO NOTHING;
 
 -- ====================================
 -- INDEX: Optimise points queries
 -- ====================================
 
 -- Index for streak calculation (distinct dates per user)
-CREATE INDEX IF NOT EXISTS idx_comments_user_streak 
-    ON comments(client_type, user_id, created_at) 
+CREATE INDEX IF NOT EXISTS idx_comments_user_streak
+    ON comments(client_type, user_id, created_at)
     WHERE deleted = false;
 
 -- Index for pinned comment count
-CREATE INDEX IF NOT EXISTS idx_comments_pinned_by_user 
-    ON comments(client_type, user_id) 
+CREATE INDEX IF NOT EXISTS idx_comments_pinned_by_user
+    ON comments(client_type, user_id)
     WHERE pinned = true AND deleted = false;
 
 -- ====================================
+-- HELPER FUNCTION: get_user_role
+-- Resolves a user's actual role (checks owner in config, then falls back to cached role)
+-- ====================================
+
+CREATE OR REPLACE FUNCTION get_user_role(
+    p_client_type TEXT,
+    p_user_id TEXT
+)
+RETURNS TEXT AS $$
+DECLARE
+    owner_list TEXT;
+    v_role TEXT;
+BEGIN
+    -- Check owner first (highest priority, stored in config JSON array)
+    SELECT value INTO owner_list FROM config WHERE key = 'owner_users';
+    IF owner_list IS NOT NULL AND owner_list::jsonb ? p_user_id THEN
+        RETURN 'owner';
+    END IF;
+
+    -- Fall back to cached role from commentum_users
+    SELECT commentum_user_role INTO v_role
+    FROM commentum_users
+    WHERE commentum_client_type = p_client_type
+    AND commentum_user_id = p_user_id;
+
+    RETURN COALESCE(v_role, 'user');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ====================================
+-- HELPER FUNCTION: get_role_bonus
+-- Returns the bonus points for a given role
+-- ====================================
+
+CREATE OR REPLACE FUNCTION get_role_bonus(p_role TEXT)
+RETURNS INTEGER AS $$
+DECLARE
+    bonus INTEGER;
+BEGIN
+    SELECT value::INTEGER INTO bonus FROM config WHERE key = 'points_role_bonus_' || p_role;
+    RETURN COALESCE(bonus, 0);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER IMMUTABLE;
+
+-- ====================================
 -- FUNCTION: get_user_points
--- Calculates points for a single user, excluding self-votes
+-- Calculates points for a single user, excluding self-votes, with role bonus
 -- ====================================
 
 CREATE OR REPLACE FUNCTION get_user_points(
@@ -72,6 +123,8 @@ DECLARE
     penalty_mod_deletes INTEGER;
     penalty_ban INTEGER;
     streak_bonus INTEGER;
+    role_bonus INTEGER;
+    user_role TEXT;
     next_tier_points INTEGER;
     p_per_comment INTEGER;
     p_per_reply INTEGER;
@@ -115,69 +168,73 @@ BEGIN
 
     -- Fetch user record
     SELECT * INTO user_record FROM commentum_users
-    WHERE commentum_client_type = p_client_type 
+    WHERE commentum_client_type = p_client_type
     AND commentum_user_id = p_user_id;
 
-    IF NOT FOUND THEN 
+    IF NOT FOUND THEN
         RETURN jsonb_build_object(
             'points', 0,
             'tier', 'newcomer',
             'streak', 0,
+            'role', 'user',
+            'role_bonus', 0,
             'breakdown', '{}'::jsonb,
             'next_tier_at', 100
         );
     END IF;
 
+    -- Resolve user role (owner from config, then cached role)
+    user_role := get_user_role(p_client_type, p_user_id);
+    role_bonus := get_role_bonus(user_role);
+
     -- Count top-level comments vs replies
-    SELECT 
+    SELECT
         COUNT(*) FILTER (WHERE parent_id IS NULL),
         COUNT(*) FILTER (WHERE parent_id IS NOT NULL)
     INTO top_level_count, reply_count
     FROM comments
-    WHERE user_id = p_user_id 
-    AND client_type = p_client_type 
+    WHERE user_id = p_user_id
+    AND client_type = p_client_type
     AND deleted = false;
 
     -- Count upvotes from OTHERS (exclude self-votes)
-    -- user_votes is JSON: { "user_id_1": "upvote", "user_id_2": "downvote" }
-    -- If the author's own user_id appears in user_votes as "upvote", subtract 1
     SELECT COALESCE(SUM(
-        upvotes - 
-        CASE 
-            WHEN user_votes IS NOT NULL 
-            AND user_votes::jsonb ? p_user_id 
-            AND (user_votes::jsonb->>p_user_id) = 'upvote' 
-            THEN 1 
-            ELSE 0 
+        upvotes -
+        CASE
+            WHEN user_votes IS NOT NULL
+            AND user_votes::jsonb ? p_user_id
+            AND (user_votes::jsonb->>p_user_id) = 'upvote'
+            THEN 1
+            ELSE 0
         END
     ), 0) INTO upvotes_from_others
-    FROM comments 
-    WHERE user_id = p_user_id 
-    AND client_type = p_client_type 
+    FROM comments
+    WHERE user_id = p_user_id
+    AND client_type = p_client_type
     AND deleted = false;
 
     -- Count downvotes from OTHERS (exclude self-downvotes)
     SELECT COALESCE(SUM(
-        downvotes - 
-        CASE 
-            WHEN user_votes IS NOT NULL 
-            AND user_votes::jsonb ? p_user_id 
-            AND (user_votes::jsonb->>p_user_id) = 'downvote' 
-            THEN 1 
-            ELSE 0 
+        downvotes -
+        CASE
+            WHEN user_votes IS NOT NULL
+            AND user_votes::jsonb ? p_user_id
+            AND (user_votes::jsonb->>p_user_id) = 'downvote'
+            THEN 1
+            ELSE 0
         END
     ), 0) INTO downvotes_from_others
-    FROM comments 
-    WHERE user_id = p_user_id 
-    AND client_type = p_client_type 
+    FROM comments
+    WHERE user_id = p_user_id
+    AND client_type = p_client_type
     AND deleted = false;
 
     -- Pinned comments (mods only pin = not farmable)
     SELECT COUNT(*) INTO pinned_count
-    FROM comments 
-    WHERE user_id = p_user_id 
-    AND client_type = p_client_type 
-    AND pinned = true 
+    FROM comments
+    WHERE user_id = p_user_id
+    AND client_type = p_client_type
+    AND pinned = true
     AND deleted = false;
 
     -- Calculate individual components
@@ -191,23 +248,18 @@ BEGIN
     penalty_ban           := CASE WHEN user_record.commentum_user_banned THEN p_penalty_ban ELSE 0 END;
 
     -- Streak calculation
-    -- A streak is consecutive days with at least 1 comment
-    -- Only counts if user commented in the last 2 days (otherwise streak is broken)
     streak_days := 0;
     IF user_record.commentum_user_last_comment_at > NOW() - INTERVAL '2 days' THEN
-        -- Count distinct days the user commented in the lookback period
         SELECT COUNT(DISTINCT DATE(created_at)) INTO streak_days
         FROM comments
-        WHERE user_id = p_user_id 
+        WHERE user_id = p_user_id
         AND client_type = p_client_type
         AND created_at > NOW() - INTERVAL '60 days'
         AND deleted = false;
-        
-        -- Verify the streak is actually consecutive from today/yesterday
-        -- Check if user commented today or yesterday (streak start)
+
         IF NOT EXISTS (
             SELECT 1 FROM comments
-            WHERE user_id = p_user_id 
+            WHERE user_id = p_user_id
             AND client_type = p_client_type
             AND created_at > CURRENT_DATE - INTERVAL '1 day'
             AND deleted = false
@@ -224,13 +276,14 @@ BEGIN
         streak_bonus := p_streak_7;
     END IF;
 
-    -- Total points
+    -- Total points (includes role bonus)
     total_points := (
         points_from_comments +
         points_from_upvotes +
         points_from_votes_cast +
         points_from_pinned +
-        streak_bonus -
+        streak_bonus +
+        role_bonus -
         points_from_downvotes -
         penalty_warnings -
         penalty_mod_deletes -
@@ -262,11 +315,13 @@ BEGIN
         'points', total_points,
         'tier', current_tier,
         'streak', streak_days,
+        'role', user_role,
+        'role_bonus', role_bonus,
         'next_tier_at', next_tier_points,
-        'points_to_next_tier', CASE 
-            WHEN next_tier_points IS NOT NULL 
-            THEN next_tier_points - total_points 
-            ELSE NULL 
+        'points_to_next_tier', CASE
+            WHEN next_tier_points IS NOT NULL
+            THEN next_tier_points - total_points
+            ELSE NULL
         END,
         'breakdown', jsonb_build_object(
             'from_comments', points_from_comments,
@@ -275,6 +330,7 @@ BEGIN
             'from_votes_cast', points_from_votes_cast,
             'from_pinned', points_from_pinned,
             'from_streak_bonus', streak_bonus,
+            'from_role_bonus', role_bonus,
             'penalty_warnings', -penalty_warnings,
             'penalty_mod_deletes', -penalty_mod_deletes,
             'penalty_ban', -penalty_ban
@@ -295,7 +351,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ====================================
 -- FUNCTION: get_points_leaderboard
--- Returns top users ranked by points
+-- Returns top users ranked by points (includes role bonus)
 -- ====================================
 
 CREATE OR REPLACE FUNCTION get_points_leaderboard(
@@ -321,11 +377,8 @@ BEGIN
     effective_limit := LEAST(GREATEST(p_limit, 1), 100);
     effective_offset := (GREATEST(p_page, 1) - 1) * effective_limit;
 
-    -- Build leaderboard by computing points for each user
-    -- Uses the commentum_users table + aggregated comment data
-    -- Note: For large datasets, consider a materialized points cache
     WITH user_points AS (
-        SELECT 
+        SELECT
             cu.commentum_user_id,
             cu.commentum_username,
             cu.commentum_user_avatar,
@@ -335,13 +388,18 @@ BEGIN
             cu.commentum_user_warnings,
             cu.commentum_user_banned,
             cu.commentum_user_last_comment_at,
-            -- Calculate points inline for ranking
+            cu.commentum_user_role,
+            -- Calculate points inline for ranking (includes role bonus)
             GREATEST(0, (
                 (cu.commentum_user_comment_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_comment'), 5)) +
                 (cu.commentum_user_vote_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_vote_cast'), 1)) -
                 (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20)) -
-                (CASE WHEN cu.commentum_user_banned THEN COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_ban'), 100) ELSE 0 END)
-            )) as estimated_points
+                (CASE WHEN cu.commentum_user_banned THEN COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_ban'), 100) ELSE 0 END) +
+                -- Role bonus
+                get_role_bonus(get_user_role(cu.commentum_client_type, cu.commentum_user_id))
+            )) as estimated_points,
+            -- Resolve display role
+            get_user_role(cu.commentum_client_type, cu.commentum_user_id) as resolved_role
         FROM commentum_users cu
         WHERE cu.commentum_user_active = true
         AND cu.commentum_user_banned = false
@@ -349,7 +407,7 @@ BEGIN
         AND (p_client_type IS NULL OR cu.commentum_client_type = p_client_type)
     ),
     ranked_users AS (
-        SELECT 
+        SELECT
             ROW_NUMBER() OVER (ORDER BY estimated_points DESC, commentum_user_comment_count DESC) as rank,
             commentum_user_id,
             commentum_username,
@@ -357,6 +415,7 @@ BEGIN
             commentum_client_type,
             commentum_user_comment_count,
             estimated_points,
+            resolved_role,
             -- Tier from estimated points
             CASE
                 WHEN estimated_points >= 5000 THEN 'elite'
@@ -377,6 +436,7 @@ BEGIN
                 'client_type', commentum_client_type,
                 'points', estimated_points,
                 'tier', tier,
+                'role', resolved_role,
                 'comment_count', commentum_user_comment_count
             ) ORDER BY rank)
             FROM ranked_users
@@ -428,6 +488,13 @@ BEGIN
             'warning', COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20),
             'mod_delete', COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_mod_delete'), 10),
             'ban', COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_ban'), 100)
+        ),
+        'role_bonuses', jsonb_build_object(
+            'owner', COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_role_bonus_owner'), 500),
+            'super_admin', COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_role_bonus_super_admin'), 300),
+            'admin', COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_role_bonus_admin'), 150),
+            'moderator', COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_role_bonus_moderator'), 50),
+            'user', 0
         )
     ) INTO result;
 
@@ -438,7 +505,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- ====================================
 -- FUNCTION: get_batch_user_points
 -- Get points for multiple users at once (for embedding in comment lists)
--- This is efficient for showing badges next to usernames in comments
+-- Includes role bonus in tier estimation
 -- ====================================
 
 CREATE OR REPLACE FUNCTION get_batch_user_points(
@@ -449,9 +516,6 @@ RETURNS JSONB AS $$
 DECLARE
     result JSONB;
 BEGIN
-    -- For each user in the array, compute their tier only (lightweight)
-    -- Full points calculation is expensive in batch, so we estimate tier
-    -- from commentum_user_comment_count + vote_count
     SELECT jsonb_object_agg(
         cu.commentum_user_id,
         jsonb_build_object(
@@ -459,25 +523,30 @@ BEGIN
                 WHEN GREATEST(0, (
                     (cu.commentum_user_comment_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_comment'), 5)) +
                     (cu.commentum_user_vote_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_vote_cast'), 1)) -
-                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20))
+                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20)) +
+                    get_role_bonus(get_user_role(cu.commentum_client_type, cu.commentum_user_id))
                 )) >= 5000 THEN 'elite'
                 WHEN GREATEST(0, (
                     (cu.commentum_user_comment_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_comment'), 5)) +
                     (cu.commentum_user_vote_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_vote_cast'), 1)) -
-                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20))
+                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20)) +
+                    get_role_bonus(get_user_role(cu.commentum_client_type, cu.commentum_user_id))
                 )) >= 1500 THEN 'veteran'
                 WHEN GREATEST(0, (
                     (cu.commentum_user_comment_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_comment'), 5)) +
                     (cu.commentum_user_vote_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_vote_cast'), 1)) -
-                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20))
+                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20)) +
+                    get_role_bonus(get_user_role(cu.commentum_client_type, cu.commentum_user_id))
                 )) >= 500 THEN 'active'
                 WHEN GREATEST(0, (
                     (cu.commentum_user_comment_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_comment'), 5)) +
                     (cu.commentum_user_vote_count * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_per_vote_cast'), 1)) -
-                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20))
+                    (cu.commentum_user_warnings * COALESCE((SELECT value::INTEGER FROM config WHERE key = 'points_penalty_warning'), 20)) +
+                    get_role_bonus(get_user_role(cu.commentum_client_type, cu.commentum_user_id))
                 )) >= 100 THEN 'regular'
                 ELSE 'newcomer'
             END,
+            'role', get_user_role(cu.commentum_client_type, cu.commentum_user_id),
             'username', cu.commentum_username,
             'avatar', cu.commentum_user_avatar
         )
