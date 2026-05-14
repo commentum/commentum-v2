@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { getUserRole } from '../shared/auth.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,11 +33,11 @@ serve(async (req) => {
     }
 
     const body = await req.json()
-    const { action, user_info, client_type, target_user_id, target_client_type, user_ids, page, limit } = body
+    const { action, user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, user_ids, page, limit } = body
 
     switch (action) {
       case 'get_user_points':
-        return await handleGetUserPoints(supabase, { user_info, client_type, target_user_id, target_client_type })
+        return await handleGetUserPoints(supabase, { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type })
 
       case 'get_leaderboard':
         return await handleGetLeaderboard(supabase, { client_type: target_client_type, page, limit })
@@ -76,10 +77,13 @@ serve(async (req) => {
  * 1. Own points: pass user_info (no token needed)
  * 2. Other user's points: pass target_user_id + target_client_type (no token needed)
  * 
- * Points are public — anyone can see anyone's points.
+ * Privacy: Negative breakdown (warnings, mod_deletions, banned) is only shown if:
+ * - The requester is viewing their own points (requester_user_id matches target)
+ * - The requester is mod+ role
+ * Otherwise, negative breakdown is stripped from the response.
  */
 async function handleGetUserPoints(supabase: any, params: any) {
-  const { user_info, client_type, target_user_id, target_client_type } = params
+  const { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type } = params
 
   let query_client_type: string
   let query_user_id: string
@@ -114,13 +118,37 @@ async function handleGetUserPoints(supabase: any, params: any) {
     )
   }
 
+  // Determine if requester can see full breakdown (including negatives)
+  const effectiveRequesterId = requester_user_id || user_info?.user_id
+  const effectiveRequesterClient = requester_client_type || client_type
+  const isSelf = effectiveRequesterId && String(effectiveRequesterId) === String(query_user_id) && effectiveRequesterClient === query_client_type
+  
+  let isModPlus = false
+  if (!isSelf && effectiveRequesterId && effectiveRequesterClient) {
+    const requesterRole = await getUserRole(supabase, effectiveRequesterId)
+    isModPlus = ['moderator', 'admin', 'super_admin', 'owner'].includes(requesterRole)
+  }
+
+  const canSeeFullBreakdown = isSelf || isModPlus
+
+  // Strip negative breakdown if requester can't see it
+  let responseData = { ...data }
+  if (!canSeeFullBreakdown && responseData.breakdown) {
+    const breakdown = { ...responseData.breakdown }
+    delete breakdown.from_downvotes_received
+    delete breakdown.penalty_warnings
+    delete breakdown.penalty_mod_deletes
+    delete breakdown.penalty_ban
+    responseData.breakdown = breakdown
+  }
+
   return new Response(
     JSON.stringify({
       success: true,
       data: {
         user_id: query_user_id,
         client_type: query_client_type,
-        ...data
+        ...responseData
       }
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -192,21 +220,13 @@ async function handleGetPointsConfig(supabase: any) {
  * 
  * Get tier info for multiple users at once.
  * Used for embedding badges in comment lists.
+ * Only returns public info (tier, username, avatar) — no breakdown.
  * 
  * Request:
  * {
  *   "action": "get_batch_user_points",
  *   "client_type": "anilist",
  *   "user_ids": ["12345", "67890", "11111"]
- * }
- * 
- * Response:
- * {
- *   "success": true,
- *   "users": {
- *     "12345": { "tier": "veteran", "username": "User1", "avatar": "..." },
- *     "67890": { "tier": "newcomer", "username": "User2", "avatar": "..." }
- *   }
  * }
  */
 async function handleGetBatchUserPoints(supabase: any, params: any) {
