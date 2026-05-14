@@ -1,0 +1,252 @@
+import { serve } from 'https://deno.land/std@0.168.0/http/function.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'content-type',
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
+
+    // Check if points system is enabled
+    const { data: pointsConfig } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'points_enabled')
+      .single()
+
+    if (pointsConfig && JSON.parse(pointsConfig.value) === false) {
+      return new Response(
+        JSON.stringify({ error: 'Points system is disabled' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const body = await req.json()
+    const { action, user_info, client_type, target_user_id, target_client_type, user_ids, page, limit } = body
+
+    switch (action) {
+      case 'get_user_points':
+        return await handleGetUserPoints(supabase, { user_info, client_type, target_user_id, target_client_type })
+
+      case 'get_leaderboard':
+        return await handleGetLeaderboard(supabase, { client_type: target_client_type, page, limit })
+
+      case 'get_points_config':
+        return await handleGetPointsConfig(supabase)
+
+      case 'get_batch_user_points':
+        return await handleGetBatchUserPoints(supabase, { client_type, user_ids })
+
+      default:
+        return new Response(
+          JSON.stringify({ error: 'Invalid action. Must be get_user_points, get_leaderboard, get_points_config, or get_batch_user_points' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+    }
+
+  } catch (error) {
+    console.error('Points API error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Internal server error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+})
+
+/**
+ * get_user_points
+ * 
+ * Get points for a user. Two modes:
+ * 1. Own points: pass user_info (no token needed)
+ * 2. Other user's points: pass target_user_id + target_client_type (no token needed)
+ * 
+ * Points are public — anyone can see anyone's points.
+ */
+async function handleGetUserPoints(supabase: any, params: any) {
+  const { user_info, client_type, target_user_id, target_client_type } = params
+
+  let query_client_type: string
+  let query_user_id: string
+
+  // If target_user_id provided, look up that user
+  if (target_user_id && target_client_type) {
+    query_client_type = target_client_type
+    query_user_id = target_user_id
+  } else if (user_info?.user_id && client_type) {
+    // Otherwise, look up the requesting user
+    query_client_type = client_type
+    query_user_id = user_info.user_id
+  } else {
+    return new Response(
+      JSON.stringify({ error: 'Provide either (user_info + client_type) or (target_user_id + target_client_type)' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Call the SQL function
+  const { data, error } = await supabase
+    .rpc('get_user_points', {
+      p_client_type: query_client_type,
+      p_user_id: query_user_id
+    })
+
+  if (error) {
+    console.error('get_user_points RPC error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Failed to calculate points' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      data: {
+        user_id: query_user_id,
+        client_type: query_client_type,
+        ...data
+      }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+/**
+ * get_leaderboard
+ * 
+ * Public endpoint — no auth needed.
+ * Returns top users ranked by points.
+ */
+async function handleGetLeaderboard(supabase: any, params: any) {
+  const { client_type, page = 1, limit = 50 } = params
+
+  const { data, error } = await supabase
+    .rpc('get_points_leaderboard', {
+      p_client_type: client_type || null,
+      p_page: page,
+      p_limit: limit
+    })
+
+  if (error) {
+    console.error('get_points_leaderboard RPC error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Failed to fetch leaderboard' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      ...data
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+/**
+ * get_points_config
+ * 
+ * Public endpoint — no auth needed.
+ * Returns tier definitions and point values (for client UI).
+ */
+async function handleGetPointsConfig(supabase: any) {
+  const { data, error } = await supabase
+    .rpc('get_points_config')
+
+  if (error) {
+    console.error('get_points_config RPC error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Failed to fetch points config' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      config: data
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+/**
+ * get_batch_user_points
+ * 
+ * Get tier info for multiple users at once.
+ * Used for embedding badges in comment lists.
+ * 
+ * Request:
+ * {
+ *   "action": "get_batch_user_points",
+ *   "client_type": "anilist",
+ *   "user_ids": ["12345", "67890", "11111"]
+ * }
+ * 
+ * Response:
+ * {
+ *   "success": true,
+ *   "users": {
+ *     "12345": { "tier": "veteran", "username": "User1", "avatar": "..." },
+ *     "67890": { "tier": "newcomer", "username": "User2", "avatar": "..." }
+ *   }
+ * }
+ */
+async function handleGetBatchUserPoints(supabase: any, params: any) {
+  const { client_type, user_ids } = params
+
+  if (!client_type) {
+    return new Response(
+      JSON.stringify({ error: 'client_type is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'user_ids must be a non-empty array' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Cap at 100 users per request
+  if (user_ids.length > 100) {
+    return new Response(
+      JSON.stringify({ error: 'Maximum 100 user_ids per request' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const { data, error } = await supabase
+    .rpc('get_batch_user_points', {
+      p_client_type: client_type,
+      p_user_ids: user_ids
+    })
+
+  if (error) {
+    console.error('get_batch_user_points RPC error:', error)
+    return new Response(
+      JSON.stringify({ error: 'Failed to fetch batch user points' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      users: data
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
