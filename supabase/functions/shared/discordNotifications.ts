@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { getLanguageName } from './translate.ts'
 
 export interface DiscordNotificationData {
   type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_unpinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' |
@@ -29,6 +30,8 @@ export interface DiscordNotificationData {
     locked?: boolean;
     url?: string;
     notes?: string;
+    translated_content?: string;
+    original_language?: string;
   };
   user?: {
     id: string;
@@ -678,6 +681,14 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   const moderatorId = data.moderator?.id || ''
   const commentId = data.comment?.id || ''
   const commentContent = data.comment?.content || ''
+  const translatedContent = data.comment?.translated_content || null
+  const originalLanguage = data.comment?.original_language || null
+
+  // Build translation block for Discord message
+  // Shows original content with language label + English translation when available
+  const translationBlock = (translatedContent && originalLanguage && originalLanguage !== 'en')
+    ? `\n\n${section(`Translated (${getLanguageName(originalLanguage)} → English)`, translatedContent)}`
+    : ''
 
   // Get notes from any source
   const notes = data.notes || data.comment?.notes || data.user?.notes || ''
@@ -724,7 +735,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Content', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Content (${getLanguageName(originalLanguage)})` : 'Content', commentContent)}${translationBlock}`
       break
 
     case 'comment_updated':
@@ -735,7 +746,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Updated Content', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Updated Content (${getLanguageName(originalLanguage)})` : 'Updated Content', commentContent)}${translationBlock}`
       break
 
     case 'comment_deleted':
@@ -747,7 +758,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Deleted Content', commentContent)}
+${section(originalLanguage && originalLanguage !== 'en' ? `Deleted Content (${getLanguageName(originalLanguage)})` : 'Deleted Content', commentContent)}${translationBlock}
 
 ${section('Reason', reason)}`
       break
@@ -761,7 +772,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     case 'comment_unpinned':
@@ -773,7 +784,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     case 'comment_locked':
@@ -785,7 +796,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     case 'comment_unlocked':
@@ -797,7 +808,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     // ═══════════════════════════════════════════════════════
@@ -813,7 +824,7 @@ Reported: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Reported Comment', commentContent)}
+${section(originalLanguage && originalLanguage !== 'en' ? `Reported Comment (${getLanguageName(originalLanguage)})` : 'Reported Comment', commentContent)}${translationBlock}
 
 ${section('Report Reason', reportReason)}${notes ? `\n\n${section('Notes', notes)}` : ''}`
       break
@@ -827,7 +838,7 @@ Reported: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     case 'report_dismissed':
@@ -839,7 +850,7 @@ Reported: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     // ═══════════════════════════════════════════════════════
@@ -943,7 +954,7 @@ Comment ID: \`${commentId}\`
 Vote: ${voteType}
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     case 'vote_removed':
@@ -955,7 +966,7 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section('Comment', commentContent)}`
+${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
 
     // ═══════════════════════════════════════════════════════

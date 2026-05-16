@@ -463,7 +463,9 @@ async function handleCreateComment(supabase: any, params: any) {
       client_type: comment.client_type,
       media_id: comment.media_id,
       media_type: comment.media_type,
-      parent_id: comment.parent_id
+      parent_id: comment.parent_id,
+      translated_content: comment.translated_content || null,
+      original_language: comment.original_language || null
     },
     user: userInfo,
     media: {
@@ -721,7 +723,9 @@ async function handleEditComment(supabase: any, params: any) {
       content: updatedComment.content,
       client_type: updatedComment.client_type,
       media_id: updatedComment.media_id,
-      media_type: updatedComment.media_type
+      media_type: updatedComment.media_type,
+      translated_content: updatedComment.translated_content || null,
+      original_language: updatedComment.original_language || null
     },
     user: {
       id: updatedComment.user_id,
