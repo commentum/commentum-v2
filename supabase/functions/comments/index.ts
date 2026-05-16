@@ -7,6 +7,7 @@ import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { parseMentions } from '../shared/mentionUtils.ts'
 import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
+import { translateText, getLanguageName } from '../shared/translate.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,7 +38,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info, access_token } = await req.json()
+    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info, access_token, target_language } = await req.json()
 
     switch (action) {
       case 'create':
@@ -77,10 +78,20 @@ serve(async (req) => {
           )
         }
         break
+
+      case 'translate':
+        // On-demand translation — translate a comment to the target language
+        if (!comment_id) {
+          return new Response(
+            JSON.stringify({ error: 'comment_id is required for translate action' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        break
         
       default:
         return new Response(
-          JSON.stringify({ error: 'Invalid action. Must be create, edit, delete, or mod_delete' }),
+          JSON.stringify({ error: 'Invalid action. Must be create, edit, delete, mod_delete, or translate' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }
@@ -274,7 +285,7 @@ serve(async (req) => {
           mediaInfo,
           userRole,
           req,
-          configs // Pass cached configs
+          configs
         })
 
       case 'edit':
@@ -301,6 +312,12 @@ serve(async (req) => {
           userRole,
           req,
           verifiedUserFromToken
+        })
+
+      case 'translate':
+        return await handleTranslateComment(supabase, {
+          comment_id,
+          target_language: target_language || 'en'
         })
 
       default:
@@ -376,6 +393,10 @@ async function handleCreateComment(supabase: any, params: any) {
     )
   }
 
+  // Auto-translate comment content in the background (non-blocking)
+  // Translation runs in parallel with DB insert to avoid delaying the response
+  const translationPromise = translateText(content, 'en')
+
   const { data: comment, error } = await supabase
     .from('comments')
     .insert({
@@ -399,11 +420,37 @@ async function handleCreateComment(supabase: any, params: any) {
       id, client_type, user_id, media_id, content, username, user_avatar, user_role,
       media_type, media_title, media_year, media_poster, parent_id, created_at, updated_at,
       deleted, pinned, locked, edited, edit_count, upvotes, downvotes, vote_score,
-      user_banned, user_shadow_banned, user_warnings, reported, report_count, tags
+      user_banned, user_shadow_banned, user_warnings, reported, report_count, tags,
+      translated_content, original_language, translated_at
     `)
     .single()
 
   if (error) throw error
+
+  // Wait for translation result and save to DB (non-blocking for the user, but we do it before response)
+  const translation = await translationPromise
+  if (translation.originalLanguage) {
+    const updateFields: Record<string, any> = {
+      original_language: translation.originalLanguage
+    }
+    if (translation.translatedContent) {
+      updateFields.translated_content = translation.translatedContent
+      updateFields.translated_at = new Date().toISOString()
+    }
+    // Save translation to DB in background (fire and forget)
+    supabase
+      .from('comments')
+      .update(updateFields)
+      .eq('id', comment.id)
+      .then(() => {
+        console.log(`[Translate] Saved translation for comment ${comment.id}: ${translation.originalLanguage} → en`)
+      })
+
+    // Attach translation data to response immediately
+    comment.translated_content = translation.translatedContent || null
+    comment.original_language = translation.originalLanguage
+    comment.translated_at = translation.translatedContent ? new Date().toISOString() : null
+  }
 
   // Queue Discord notification in background - NON-BLOCKING
   queueDiscordNotification({
@@ -619,6 +666,9 @@ async function handleEditComment(supabase: any, params: any) {
     editedBy: user_id
   })
 
+  // Re-translate the edited content in the background
+  const translationPromise = translateText(content, 'en')
+
   const { data: updatedComment, error } = await supabase
     .from('comments')
     .update({
@@ -633,6 +683,33 @@ async function handleEditComment(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Update translation for the edited content
+  const translation = await translationPromise
+  if (translation.originalLanguage) {
+    const updateFields: Record<string, any> = {
+      original_language: translation.originalLanguage
+    }
+    if (translation.translatedContent) {
+      updateFields.translated_content = translation.translatedContent
+      updateFields.translated_at = new Date().toISOString()
+    } else {
+      // Already English — clear previous translation
+      updateFields.translated_content = null
+      updateFields.translated_at = null
+    }
+    supabase
+      .from('comments')
+      .update(updateFields)
+      .eq('id', comment_id)
+      .then(() => {
+        console.log(`[Translate] Updated translation for edited comment ${comment_id}: ${translation.originalLanguage} → en`)
+      })
+
+    updatedComment.translated_content = translation.translatedContent || null
+    updatedComment.original_language = translation.originalLanguage
+    updatedComment.translated_at = translation.translatedContent ? new Date().toISOString() : null
+  }
 
   // Queue Discord notification in background - NON-BLOCKING
   queueDiscordNotification({
@@ -927,4 +1004,112 @@ async function getNestingLevel(supabase: any, parentId: number) {
   }
 
   return level
+}
+
+// On-demand translation — translate a comment's content to the target language
+// If translation already exists in DB, return it instantly. Otherwise, translate live.
+async function handleTranslateComment(supabase: any, params: any) {
+  const { comment_id, target_language } = params
+
+  // Fetch the comment
+  const { data: comment } = await supabase
+    .from('comments')
+    .select('id, content, translated_content, original_language, translated_at, deleted')
+    .eq('id', comment_id)
+    .single()
+
+  if (!comment) {
+    return new Response(
+      JSON.stringify({ error: 'Comment not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (comment.deleted) {
+    return new Response(
+      JSON.stringify({ error: 'Cannot translate deleted comment' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // If already English, no translation needed
+  if (comment.original_language === 'en') {
+    return new Response(
+      JSON.stringify({
+        success: true,
+        comment_id: comment.id,
+        original_language: 'en',
+        translated_content: null,
+        language_name: 'English',
+        is_already_target: true,
+        message: 'Comment is already in the target language'
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // If target is 'en' and we already have a cached translation, return instantly
+  if (target_language === 'en' && comment.translated_content) {
+    return new Response(
+      JSON.stringify({
+        success: true,
+        comment_id: comment.id,
+        content: comment.content,
+        translated_content: comment.translated_content,
+        original_language: comment.original_language,
+        language_name: getLanguageName(comment.original_language),
+        translated_at: comment.translated_at,
+        cached: true
+      }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // No cached translation — translate live now
+  const translation = await translateText(comment.content, target_language)
+
+  if (!translation.translatedContent && !translation.isAlreadyEnglish) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        comment_id: comment.id,
+        content: comment.content,
+        translated_content: null,
+        original_language: translation.originalLanguage || comment.original_language,
+        language_name: translation.languageName || (comment.original_language ? getLanguageName(comment.original_language) : null),
+        error: 'Translation failed — could not translate the comment at this time'
+      }),
+      { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Save the translation to DB for future instant retrieval (only for 'en' target)
+  if (target_language === 'en' && translation.translatedContent) {
+    const updateFields: Record<string, any> = {
+      translated_content: translation.translatedContent,
+      original_language: translation.originalLanguage || comment.original_language,
+      translated_at: new Date().toISOString()
+    }
+    supabase
+      .from('comments')
+      .update(updateFields)
+      .eq('id', comment_id)
+      .then(() => {
+        console.log(`[Translate] On-demand: Saved translation for comment ${comment_id}: ${translation.originalLanguage} → ${target_language}`)
+      })
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      comment_id: comment.id,
+      content: comment.content,
+      translated_content: translation.translatedContent || comment.content,
+      original_language: translation.originalLanguage || comment.original_language,
+      language_name: translation.languageName || (comment.original_language ? getLanguageName(comment.original_language) : null),
+      translated_at: translation.translatedContent ? new Date().toISOString() : null,
+      cached: false
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
 }
