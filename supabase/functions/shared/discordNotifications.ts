@@ -684,6 +684,11 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   const translatedContent = data.comment?.translated_content || null
   const originalLanguage = data.comment?.original_language || null
 
+  // ── helpers ──────────────────────────────────────────────────────────────
+  // Block section with a divider above it (MUST be defined before translationBlock)
+  const section = (label: string, body: string) =>
+    `**${label}**\n${'─'.repeat(32)}\n${body}`
+
   // Build translation block for Discord message
   // Shows original content with language label + English translation when available
   const translationBlock = (translatedContent && originalLanguage && originalLanguage !== 'en')
@@ -699,13 +704,8 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   const mediaType = data.comment?.media_type || data.media?.type || 'anime'
   const mediaTitle = data.comment?.media_title || data.media?.title || 'Unknown'
 
-  // ── helpers ──────────────────────────────────────────────────────────────
   // Clean media line: "Media Title  [media_id · client · type]"
   const mediaLine = `${mediaTitle}  \`[${mediaId} · ${clientType} · ${mediaType}]\``
-
-  // Block section with a divider above it
-  const section = (label: string, body: string) =>
-    `**${label}**\n${'─'.repeat(32)}\n${body}`
 
   const reason = data.reason || ''
   const reportReason = data.reportReason || ''
