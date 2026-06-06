@@ -188,6 +188,7 @@ CREATE OR REPLACE FUNCTION cleanup_expired_moderation()
 RETURNS INTEGER AS $$
 DECLARE
     cleaned_count INTEGER := 0;
+    step_count INTEGER;
 BEGIN
     -- Expired mutes
     UPDATE commentum_users SET
@@ -198,7 +199,8 @@ BEGIN
     AND commentum_user_muted_until IS NOT NULL 
     AND commentum_user_muted_until < NOW();
     
-    GET DIAGNOSTICS cleaned_count = ROW_COUNT;
+    GET DIAGNOSTICS step_count = ROW_COUNT;
+    cleaned_count := cleaned_count + step_count;
     
     -- Expired bans
     UPDATE commentum_users SET
@@ -209,7 +211,8 @@ BEGIN
     AND commentum_user_banned_until IS NOT NULL 
     AND commentum_user_banned_until < NOW();
     
-    GET DIAGNOSTICS cleaned_count = cleaned_count + ROW_COUNT;
+    GET DIAGNOSTICS step_count = ROW_COUNT;
+    cleaned_count := cleaned_count + step_count;
     
     -- Expired shadow bans
     UPDATE commentum_users SET
@@ -220,7 +223,8 @@ BEGIN
     AND commentum_user_shadow_banned_until IS NOT NULL 
     AND commentum_user_shadow_banned_until < NOW();
     
-    GET DIAGNOSTICS cleaned_count = cleaned_count + ROW_COUNT;
+    GET DIAGNOSTICS step_count = ROW_COUNT;
+    cleaned_count := cleaned_count + step_count;
     
     RETURN cleaned_count;
 END;
@@ -275,7 +279,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- STEP 8: Update commentum_user_summary view to handle expiration
 -- ====================================
 
-CREATE OR REPLACE VIEW commentum_user_summary AS
+DROP VIEW IF EXISTS commentum_user_summary;
+CREATE VIEW commentum_user_summary AS
 SELECT 
     commentum_client_type,
     commentum_user_id,
