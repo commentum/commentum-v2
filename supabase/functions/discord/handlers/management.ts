@@ -50,14 +50,13 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
         })
 
       // FCM: Notify banned user
-      const durationText = duration ? `${duration} hours` : 'Permanent'
       queueFcmNotification({
         type: shadow ? 'user_shadow_banned' : 'user_banned',
         targetUserId: targetUserId,
         targetClientType: user.commentum_client_type,
         moderator: { id: moderatorId, username: moderatorName },
         reason: reason,
-        duration: durationText,
+        duration: duration ? `${duration} hours` : 'Permanent',
       })
     }
 
