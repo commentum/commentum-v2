@@ -28,11 +28,13 @@ export type FcmNotificationType =
   | 'report_resolved'      // Report on user's comment was resolved
   | 'report_dismissed'     // Report on user's comment was dismissed
   | 'user_warned'          // User received a warning
+  | 'user_unwarned'        // User had a warning removed
   | 'user_muted'           // User was muted
   | 'user_unmuted'         // User was unmuted
   | 'user_banned'          // User was banned
   | 'user_unbanned'        // User was unbanned
   | 'user_shadow_banned'   // User was shadow banned
+  | 'user_unshadow_banned' // User's shadow ban was removed
   | 'announcement_published' // New announcement
   | 'moderation_action'    // Generic moderation action
 
@@ -218,6 +220,18 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
         body: `${modName} has unbanned you. Welcome back!`
       }
 
+    case 'user_unwarned':
+      return {
+        title: 'Warning Removed',
+        body: `${modName} has removed a warning from your account.${payload.reason ? ` Reason: ${payload.reason}` : ''}`
+      }
+
+    case 'user_unshadow_banned':
+      return {
+        title: 'Restriction Lifted',
+        body: `Your account restriction has been lifted by ${modName}. You can now interact normally.`
+      }
+
     case 'user_shadow_banned':
       return {
         title: 'Restricted',
@@ -271,11 +285,13 @@ const NOTIFICATION_PREF_MAP: Record<FcmNotificationType, string> = {
   'report_dismissed': 'notify_on_mod_action',
   'user_mentioned': 'notify_on_mention',
   'user_warned': 'notify_on_mod_action',
+  'user_unwarned': 'notify_on_mod_action',
   'user_muted': 'notify_on_mod_action',
   'user_unmuted': 'notify_on_mod_action',
   'user_banned': 'notify_on_mod_action',
   'user_unbanned': 'notify_on_mod_action',
   'user_shadow_banned': 'notify_on_mod_action',
+  'user_unshadow_banned': 'notify_on_mod_action',
   'announcement_published': 'notify_on_mod_action',
   'moderation_action': 'notify_on_mod_action',
 }
@@ -283,9 +299,13 @@ const NOTIFICATION_PREF_MAP: Record<FcmNotificationType, string> = {
 // Notification types that should ALWAYS be sent (user can't disable)
 const FORCE_SEND_TYPES: FcmNotificationType[] = [
   'user_warned',
+  'user_unwarned',
   'user_muted',
+  'user_unmuted',
   'user_banned',
+  'user_unbanned',
   'user_shadow_banned',
+  'user_unshadow_banned',
 ]
 
 // ============================================
@@ -676,7 +696,7 @@ function buildClickAction(payload: FcmNotificationPayload): string {
 // Android notification channel ID based on type
 function getAndroidChannelId(type: FcmNotificationType): string {
   if (['vote_cast', 'vote_removed'].includes(type)) return 'votes'
-  if (['user_warned', 'user_muted', 'user_banned', 'user_shadow_banned', 'moderation_action'].includes(type)) return 'moderation'
+  if (['user_warned', 'user_unwarned', 'user_muted', 'user_unmuted', 'user_banned', 'user_unbanned', 'user_shadow_banned', 'user_unshadow_banned', 'moderation_action'].includes(type)) return 'moderation'
   if (['report_filed', 'report_resolved', 'report_dismissed'].includes(type)) return 'reports'
   if (type === 'announcement_published') return 'announcements'
   if (type === 'user_mentioned') return 'mentions'
@@ -696,7 +716,7 @@ export function getNotificationTargetUserId(
   if (targetUserIdOverride) return targetUserIdOverride
 
   // For moderation/user actions, the target is always the user being acted upon
-  const userActionTypes = ['user_warned', 'user_muted', 'user_unmuted', 'user_banned', 'user_unbanned', 'user_shadow_banned', 'moderation_action']
+  const userActionTypes = ['user_warned', 'user_unwarned', 'user_muted', 'user_unmuted', 'user_banned', 'user_unbanned', 'user_shadow_banned', 'user_unshadow_banned', 'moderation_action']
   if (userActionTypes.includes(type) && commentUserId) {
     return commentUserId
   }

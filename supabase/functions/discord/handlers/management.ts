@@ -1,6 +1,7 @@
 import { createDiscordResponse, createErrorResponse, createCommentEmbed, createUserEmbed, createModerationEmbed } from '../utils.ts'
 import { canModerate } from '../../shared/auth.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
+import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
 
 // Handle ban command
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -61,6 +62,22 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
     }
 
     const durationText = duration ? `${duration} hours` : 'Permanent'
+
+    // Discord: Notify mod channel about ban
+    queueDiscordNotification({
+      type: shadow ? 'user_shadow_banned' : 'user_banned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: durationText
+      }
+    })
 
     return createModerationEmbed(
       shadow ? 'shadow ban' : 'ban',
@@ -126,6 +143,19 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
         reason: reason,
       })
     }
+
+    // Discord: Notify mod channel about unban
+    queueDiscordNotification({
+      type: 'user_unbanned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+    })
 
     return createDiscordResponse(
       `🔓 **User Unbanned**\n\n` +
@@ -196,6 +226,22 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
       })
     }
 
+    // Discord: Notify mod channel about shadowban
+    queueDiscordNotification({
+      type: 'user_shadow_banned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: 'Permanent'
+      }
+    })
+
     return createDiscordResponse(
       `👻 **User Shadow Banned**\n\n` +
       `👤 **User:** ${targetUserId}\n` +
@@ -246,20 +292,34 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
         .from('commentum_users')
         .update({
           commentum_user_shadow_banned: false,
+          commentum_user_shadow_banned_until: null,
           updated_at: new Date().toISOString()
         })
         .eq('commentum_client_type', user.commentum_client_type)
         .eq('commentum_user_id', targetUserId)
 
-      // FCM: Notify unshadowbanned user
+      // FCM: Notify unshadowbanned user (use correct type)
       queueFcmNotification({
-        type: 'user_unbanned',
+        type: 'user_unshadow_banned',
         targetUserId: targetUserId,
         targetClientType: user.commentum_client_type,
         moderator: { id: moderatorId, username: moderatorName },
         reason: reason,
       })
     }
+
+    // Discord: Notify mod channel about unshadowban
+    queueDiscordNotification({
+      type: 'user_unshadow_banned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+    })
 
     return createDiscordResponse(
       `👻 **Shadow Ban Removed**\n\n` +

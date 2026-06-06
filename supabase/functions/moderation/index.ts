@@ -275,6 +275,50 @@ async function handleUnpinComment(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Queue Discord notification for unpinned comment in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_unpinned',
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      user_id: updatedComment.user_id,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      type: updatedComment.media_type,
+      year: updatedComment.media_year,
+      poster: updatedComment.media_poster
+    },
+    reason
+  })
+
+  // FCM: Notify the comment author their comment was unpinned
+  queueFcmNotification({
+    type: 'comment_unpinned',
+    targetUserId: updatedComment.user_id,
+    targetClientType: updatedComment.client_type,
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title,
+    },
+    moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
+    media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
+    reason,
+  })
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -431,6 +475,50 @@ async function handleUnlockThread(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // Queue Discord notification for unlocked thread in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_unlocked',
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      user_id: updatedComment.user_id,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      type: updatedComment.media_type,
+      year: updatedComment.media_year,
+      poster: updatedComment.media_poster
+    },
+    reason
+  })
+
+  // FCM: Notify the comment author their thread was unlocked
+  queueFcmNotification({
+    type: 'comment_unlocked',
+    targetUserId: updatedComment.user_id,
+    targetClientType: updatedComment.client_type,
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title,
+    },
+    moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
+    media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
+    reason,
+  })
 
   return new Response(
     JSON.stringify({

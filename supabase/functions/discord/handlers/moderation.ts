@@ -1,6 +1,7 @@
 import { createDiscordResponse, createErrorResponse, createModerationEmbed } from '../utils.ts'
 import { canModerate } from '../../shared/auth.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
+import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
 
 // Handle warn command
 export async function handleWarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -120,6 +121,19 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
       })
     }
 
+    // Discord: Notify mod channel about warning
+    queueDiscordNotification({
+      type: 'user_warned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason: `${reason}${autoAction ? ` (${autoAction})` : ''}`,
+    })
+
     return createModerationEmbed(
       'warn',
       targetUserId,
@@ -190,6 +204,30 @@ export async function handleUnwarnCommand(supabase: any, moderatorId: string, mo
         newWarningCount = count
       }
     }
+
+    // FCM: Notify unwarned user (was missing — bug fix)
+    for (const user of targetUsers) {
+      queueFcmNotification({
+        type: 'user_unwarned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason || 'Warning removed by moderator',
+      })
+    }
+
+    // Discord: Notify mod channel about unwarn
+    queueDiscordNotification({
+      type: 'user_unwarned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason: reason || 'Warning removed by moderator',
+    })
 
     // If user was auto-banned/muted and warnings are now below threshold, suggest lifting
     let liftedAction = ''
@@ -277,6 +315,22 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
       })
     }
 
+    // Discord: Notify mod channel about mute
+    queueDiscordNotification({
+      type: 'user_muted',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: `${duration} hours`
+      }
+    })
+
     return createModerationEmbed(
       'mute',
       targetUserId,
@@ -336,6 +390,19 @@ export async function handleUnmuteCommand(supabase: any, moderatorId: string, mo
         reason: reason,
       })
     }
+
+    // Discord: Notify mod channel about unmute
+    queueDiscordNotification({
+      type: 'user_unmuted',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+    })
 
     return createModerationEmbed(
       'unmute',
@@ -419,6 +486,23 @@ export async function handlePinCommand(supabase: any, moderatorId: string, moder
       reason: reason,
     })
 
+    // Discord: Notify mod channel about pin
+    queueDiscordNotification({
+      type: 'comment_pinned',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
+    })
+
     return createModerationEmbed(
       'pin',
       `Comment ${commentId} by ${comment.username}`,
@@ -495,6 +579,23 @@ export async function handleUnpinCommand(supabase: any, moderatorId: string, mod
       },
       moderator: { id: moderatorId, username: moderatorName },
       reason: reason,
+    })
+
+    // Discord: Notify mod channel about unpin
+    queueDiscordNotification({
+      type: 'comment_unpinned',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
     })
 
     return createModerationEmbed(
@@ -575,6 +676,23 @@ export async function handleLockCommand(supabase: any, moderatorId: string, mode
       reason: reason,
     })
 
+    // Discord: Notify mod channel about lock
+    queueDiscordNotification({
+      type: 'comment_locked',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
+    })
+
     return createDiscordResponse(
       `🔒 **Thread Locked**\n\n` +
       `💬 **Comment ID:** ${commentId}\n` +
@@ -653,6 +771,23 @@ export async function handleUnlockCommand(supabase: any, moderatorId: string, mo
       },
       moderator: { id: moderatorId, username: moderatorName },
       reason: reason,
+    })
+
+    // Discord: Notify mod channel about unlock
+    queueDiscordNotification({
+      type: 'comment_unlocked',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
     })
 
     return createDiscordResponse(
@@ -739,6 +874,23 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
         reason: 'Deleted via Discord bot',
       })
     }
+
+    // Discord: Notify mod channel about deletion
+    queueDiscordNotification({
+      type: 'comment_deleted',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: 'Deleted via Discord bot',
+    })
     
     return createDiscordResponse(
       `🗑️ **Comment Deleted**\n\n` +
@@ -947,6 +1099,22 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
       })
     }
 
+    // Discord: Notify mod channel about ban
+    queueDiscordNotification({
+      type: 'user_banned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: durationText
+      }
+    })
+
     return createModerationEmbed(
       'ban',
       targetUserId,
@@ -1008,6 +1176,19 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
         reason: reason,
       })
     }
+
+    // Discord: Notify mod channel about unban
+    queueDiscordNotification({
+      type: 'user_unbanned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+    })
 
     return createModerationEmbed(
       'unban',
@@ -1082,6 +1263,22 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
       })
     }
 
+    // Discord: Notify mod channel about shadowban
+    queueDiscordNotification({
+      type: 'user_shadow_banned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: durationText
+      }
+    })
+
     return createDiscordResponse(
       `🕶️ **User Shadowbanned**\n\n` +
       `👤 **User:** ${targetUserId}\n` +
@@ -1134,15 +1331,28 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
         .eq('commentum_client_type', user.commentum_client_type)
         .eq('commentum_user_id', targetUserId)
 
-      // FCM: Notify unshadowbanned user
+      // FCM: Notify unshadowbanned user (use correct type now)
       queueFcmNotification({
-        type: 'user_unbanned',
+        type: 'user_unshadow_banned',
         targetUserId: targetUserId,
         targetClientType: user.commentum_client_type,
         moderator: { id: moderatorId, username: moderatorName },
         reason: reason,
       })
     }
+
+    // Discord: Notify mod channel about unshadowban
+    queueDiscordNotification({
+      type: 'user_unshadow_banned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+    })
 
     return createDiscordResponse(
       `🌟 **User Unshadowbanned**\n\n` +
