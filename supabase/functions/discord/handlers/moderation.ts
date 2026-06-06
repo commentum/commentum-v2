@@ -1,6 +1,7 @@
 import { createDiscordResponse, createErrorResponse, createModerationEmbed } from '../utils.ts'
 import { canModerate } from '../../shared/auth.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
+import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
 
 // Handle warn command
 export async function handleWarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
@@ -120,6 +121,19 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
       })
     }
 
+    // Discord: Notify mod channel about warning
+    queueDiscordNotification({
+      type: 'user_warned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason: `${reason}${autoAction ? ` (${autoAction})` : ''}`,
+    })
+
     return createModerationEmbed(
       'warn',
       targetUserId,
@@ -149,49 +163,83 @@ export async function handleUnwarnCommand(supabase: any, moderatorId: string, mo
       return createErrorResponse('user_id is required.')
     }
 
-    // Get target user's current status
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role, user_warnings, user_banned, user_muted_until')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current status from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role, commentum_user_warnings, commentum_user_banned, commentum_user_muted_until')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
     // Check permissions
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot moderate user with equal or higher role.')
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot moderate user with equal or higher role.')
+      }
     }
 
-    if (!targetUserComment.user_warnings || targetUserComment.user_warnings <= 0) {
+    if (!targetUsers[0].commentum_user_warnings || targetUsers[0].commentum_user_warnings <= 0) {
       return createErrorResponse('User has no warnings to remove.')
     }
 
-    // Update all user's comments with reduced warning count
-    const newWarningCount = Math.max(0, targetUserComment.user_warnings - 1)
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_warnings: newWarningCount,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason || 'Warning removed by moderator',
-        moderation_action: 'unwarn'
+    // Remove warning using helper function across all platforms
+    let newWarningCount = 0
+    for (const user of targetUsers) {
+      const { data: count, error: rpcError } = await supabase
+        .rpc('unwarn_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: targetUserId,
+          p_reason: reason || 'Warning removed by moderator',
+          p_unwarned_by: moderatorId
+        })
+      
+      if (rpcError) {
+        console.error('RPC unwarn_commentum_user error:', rpcError)
+        return createErrorResponse(`Failed to remove warning: ${rpcError.message}`)
+      }
+      
+      if (count !== null) {
+        newWarningCount = count
+      }
+    }
+
+    // FCM: Notify unwarned user (was missing — bug fix)
+    for (const user of targetUsers) {
+      queueFcmNotification({
+        type: 'user_unwarned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason || 'Warning removed by moderator',
       })
-      .eq('user_id', targetUserId)
+    }
 
-    if (error) throw error
+    // Discord: Notify mod channel about unwarn
+    queueDiscordNotification({
+      type: 'user_unwarned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason: reason || 'Warning removed by moderator',
+    })
 
-    // If user was auto-banned/muted and warnings are now below threshold, consider lifting the punishment
+    // If user was auto-banned/muted and warnings are now below threshold, suggest lifting
     let liftedAction = ''
-    if (targetUserComment.user_banned && newWarningCount < 5) {
-      // Could add logic here to auto-unban if desired
+    const isBanned = targetUsers.some((u: any) => u.commentum_user_banned)
+    const isMuted = targetUsers.some((u: any) => 
+      u.commentum_user_muted && 
+      (u.commentum_user_muted_until === null || new Date(u.commentum_user_muted_until) > new Date())
+    )
+    
+    if (isBanned && newWarningCount < 5) {
       liftedAction = 'Consider lifting ban as warnings are reduced'
-    } else if (targetUserComment.user_muted_until && new Date(targetUserComment.user_muted_until) > new Date() && newWarningCount < 3) {
-      // Could add logic here to auto-unmute if desired
+    } else if (isMuted && newWarningCount < 3) {
       liftedAction = 'Consider lifting mute as warnings are reduced'
     }
 
@@ -267,6 +315,22 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
       })
     }
 
+    // Discord: Notify mod channel about mute
+    queueDiscordNotification({
+      type: 'user_muted',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: `${duration} hours`
+      }
+    })
+
     return createModerationEmbed(
       'mute',
       targetUserId,
@@ -326,6 +390,19 @@ export async function handleUnmuteCommand(supabase: any, moderatorId: string, mo
         reason: reason,
       })
     }
+
+    // Discord: Notify mod channel about unmute
+    queueDiscordNotification({
+      type: 'user_unmuted',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+    })
 
     return createModerationEmbed(
       'unmute',
@@ -409,6 +486,23 @@ export async function handlePinCommand(supabase: any, moderatorId: string, moder
       reason: reason,
     })
 
+    // Discord: Notify mod channel about pin
+    queueDiscordNotification({
+      type: 'comment_pinned',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
+    })
+
     return createModerationEmbed(
       'pin',
       `Comment ${commentId} by ${comment.username}`,
@@ -485,6 +579,23 @@ export async function handleUnpinCommand(supabase: any, moderatorId: string, mod
       },
       moderator: { id: moderatorId, username: moderatorName },
       reason: reason,
+    })
+
+    // Discord: Notify mod channel about unpin
+    queueDiscordNotification({
+      type: 'comment_unpinned',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
     })
 
     return createModerationEmbed(
@@ -565,6 +676,23 @@ export async function handleLockCommand(supabase: any, moderatorId: string, mode
       reason: reason,
     })
 
+    // Discord: Notify mod channel about lock
+    queueDiscordNotification({
+      type: 'comment_locked',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
+    })
+
     return createDiscordResponse(
       `🔒 **Thread Locked**\n\n` +
       `💬 **Comment ID:** ${commentId}\n` +
@@ -598,6 +726,7 @@ export async function handleUnlockCommand(supabase: any, moderatorId: string, mo
     // Get comment
     const { data: comment, error: fetchError } = await supabase
       .from('comments')
+      .select('*')
       .eq('id', commentId)
       .single()
 
@@ -642,6 +771,23 @@ export async function handleUnlockCommand(supabase: any, moderatorId: string, mo
       },
       moderator: { id: moderatorId, username: moderatorName },
       reason: reason,
+    })
+
+    // Discord: Notify mod channel about unlock
+    queueDiscordNotification({
+      type: 'comment_unlocked',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason,
     })
 
     return createDiscordResponse(
@@ -728,6 +874,23 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
         reason: 'Deleted via Discord bot',
       })
     }
+
+    // Discord: Notify mod channel about deletion
+    queueDiscordNotification({
+      type: 'comment_deleted',
+      comment: {
+        id: comment.id,
+        user_id: comment.user_id,
+        username: comment.username,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        media_title: comment.media_title,
+      },
+      moderator: { id: moderatorId, username: moderatorName },
+      reason: 'Deleted via Discord bot',
+    })
     
     return createDiscordResponse(
       `🗑️ **Comment Deleted**\n\n` +
@@ -842,7 +1005,7 @@ export async function handleQueueCommand(supabase: any, registration: any, userR
       .eq('reported', true)
       .eq('report_status', 'pending')
       .order('created_at', { ascending: false })
-      .limit(10) // Limit to 10 most recent
+      .limit(10)
 
     if (error) throw error
 
@@ -877,19 +1040,7 @@ export async function handleQueueCommand(supabase: any, registration: any, userR
   }
 }
 
-// Helper function to check if a user can moderate another
-function canModerate(moderatorRole: string, targetRole: string): boolean {
-  const roleHierarchy = {
-    'user': 0,
-    'moderator': 1,
-    'admin': 2,
-    'super_admin': 3,
-    'owner': 4
-  }
-  
-  return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
-}
-// Handle ban command
+// Handle ban command — NOW USES commentum_users instead of comments
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
@@ -898,57 +1049,78 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
 
     const targetUserId = options?.find((opt: any) => opt.name === 'user_id')?.value
     const reason = options?.find((opt: any) => opt.name === 'reason')?.value
+    const duration = options?.find((opt: any) => opt.name === 'duration')?.value // hours, optional
 
     if (!targetUserId || !reason) {
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's current status
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current status from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot ban user with equal or higher role.')
+    // Check permissions across all platforms
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot ban user with equal or higher role.')
+      }
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_banned: true,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'ban'
-      })
-      .eq('user_id', targetUserId)
+    // Ban user across all platforms using helper function
+    for (const user of targetUsers) {
+      await supabase
+        .rpc('ban_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: targetUserId,
+          p_ban_reason: reason,
+          p_banned_by: moderatorId,
+          p_shadow_ban: false,
+          p_duration_hours: duration || null
+        })
+    }
 
-    if (error) throw error
+    const durationText = duration ? `${duration} hours` : 'Permanent'
 
     // FCM: Notify banned user
-    queueFcmNotification({
+    for (const user of targetUsers) {
+      queueFcmNotification({
+        type: 'user_banned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+        duration: durationText,
+      })
+    }
+
+    // Discord: Notify mod channel about ban
+    queueDiscordNotification({
       type: 'user_banned',
-      targetUserId: targetUserId,
-      targetClientType: 'anilist',
-      moderator: { id: moderatorId, username: moderatorName },
-      reason: reason,
-      duration: 'Permanent',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: durationText
+      }
     })
 
-    return createDiscordResponse(
-      `🔨 **User Banned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}`
+    return createModerationEmbed(
+      'ban',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason,
+      `Duration: ${durationText}`
     )
 
   } catch (error) {
@@ -957,7 +1129,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
   }
 }
 
-// Handle unban command
+// Handle unban command — NOW USES commentum_users instead of comments
 export async function handleUnbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
@@ -971,36 +1143,59 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
       return createErrorResponse('user_id is required.')
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_banned: false,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'unban'
+    // Get target users from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type')
+      .eq('commentum_user_id', targetUserId)
+
+    if (!targetUsers || targetUsers.length === 0) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    // Unban user across all platforms by updating the user table
+    for (const user of targetUsers) {
+      await supabase
+        .from('commentum_users')
+        .update({
+          commentum_user_banned: false,
+          commentum_user_banned_until: null,
+          commentum_user_shadow_banned: false,
+          commentum_user_shadow_banned_until: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('commentum_client_type', user.commentum_client_type)
+        .eq('commentum_user_id', targetUserId)
+
+      // FCM: Notify unbanned user
+      queueFcmNotification({
+        type: 'user_unbanned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
       })
-      .eq('user_id', targetUserId)
+    }
 
-    if (error) throw error
-
-    // FCM: Notify unbanned user
-    queueFcmNotification({
+    // Discord: Notify mod channel about unban
+    queueDiscordNotification({
       type: 'user_unbanned',
-      targetUserId: targetUserId,
-      targetClientType: 'anilist',
-      moderator: { id: moderatorId, username: moderatorName },
-      reason: reason,
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
     })
 
-    return createDiscordResponse(
-      `🔓 **User Unbanned**\n\n` +
-      `👤 **User:** ${targetUserId}\n` +
-      `🛡️ **Moderator:** <@${moderatorId}>\n` +
-      `📝 **Reason:** ${reason}\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}`
+    return createModerationEmbed(
+      'unban',
+      targetUserId,
+      `<@${moderatorId}>`,
+      reason,
+      'User can now post and interact normally'
     )
 
   } catch (error) {
@@ -1009,7 +1204,7 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
   }
 }
 
-// Handle shadowban command
+// Handle shadowban command — NOW USES commentum_users instead of comments
 export async function handleShadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
@@ -1018,49 +1213,70 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
 
     const targetUserId = options?.find((opt: any) => opt.name === 'user_id')?.value
     const reason = options?.find((opt: any) => opt.name === 'reason')?.value
+    const duration = options?.find((opt: any) => opt.name === 'duration')?.value // hours, optional
 
     if (!targetUserId || !reason) {
       return createErrorResponse('user_id and reason are required.')
     }
 
-    // Get target user's current status
-    const { data: targetUserComment } = await supabase
-      .from('comments')
-      .select('user_role')
-      .eq('user_id', targetUserId)
-      .single()
+    // Get target user's current status from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type, commentum_user_role')
+      .eq('commentum_user_id', targetUserId)
 
-    if (!targetUserComment) {
+    if (!targetUsers || targetUsers.length === 0) {
       return createErrorResponse('User not found in the system.')
     }
 
-    if (!canModerate(userRole, targetUserComment.user_role)) {
-      return createErrorResponse('Cannot shadowban user with equal or higher role.')
+    // Check permissions across all platforms
+    for (const user of targetUsers) {
+      if (!canModerate(userRole, user.commentum_user_role)) {
+        return createErrorResponse('Cannot shadowban user with equal or higher role.')
+      }
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_shadowbanned: true,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'shadowban'
-      })
-      .eq('user_id', targetUserId)
+    // Shadow ban user across all platforms using helper function
+    for (const user of targetUsers) {
+      await supabase
+        .rpc('ban_commentum_user', {
+          p_client_type: user.commentum_client_type,
+          p_user_id: targetUserId,
+          p_ban_reason: reason,
+          p_banned_by: moderatorId,
+          p_shadow_ban: true,
+          p_duration_hours: duration || null
+        })
+    }
 
-    if (error) throw error
+    const durationText = duration ? `${duration} hours` : 'Permanent'
 
     // FCM: Notify shadowbanned user
-    queueFcmNotification({
+    for (const user of targetUsers) {
+      queueFcmNotification({
+        type: 'user_shadow_banned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
+        duration: durationText,
+      })
+    }
+
+    // Discord: Notify mod channel about shadowban
+    queueDiscordNotification({
       type: 'user_shadow_banned',
-      targetUserId: targetUserId,
-      targetClientType: 'anilist',
-      moderator: { id: moderatorId, username: moderatorName },
-      reason: reason,
-      duration: 'Permanent',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
+      metadata: {
+        duration: durationText
+      }
     })
 
     return createDiscordResponse(
@@ -1068,6 +1284,7 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
       `👤 **User:** ${targetUserId}\n` +
       `🛡️ **Moderator:** <@${moderatorId}>\n` +
       `📝 **Reason:** ${reason}\n` +
+      `⏱️ **Duration:** ${durationText}\n` +
       `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
       `⚠️ **User's comments will be hidden from others but visible to themselves.**`
     )
@@ -1078,7 +1295,7 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
   }
 }
 
-// Handle unshadowban command
+// Handle unshadowban command — NOW USES commentum_users instead of comments
 export async function handleUnshadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
@@ -1092,28 +1309,49 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
       return createErrorResponse('user_id is required.')
     }
 
-    // Update all user's comments
-    const { error } = await supabase
-      .from('comments')
-      .update({
-        user_shadowbanned: false,
-        moderated: true,
-        moderated_at: new Date().toISOString(),
-        moderated_by: moderatorId,
-        moderation_reason: reason,
-        moderation_action: 'unshadowban'
+    // Get target users from commentum_users table
+    const { data: targetUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_client_type')
+      .eq('commentum_user_id', targetUserId)
+
+    if (!targetUsers || targetUsers.length === 0) {
+      return createErrorResponse('User not found in the system.')
+    }
+
+    // Remove shadow ban across all platforms
+    for (const user of targetUsers) {
+      await supabase
+        .from('commentum_users')
+        .update({
+          commentum_user_shadow_banned: false,
+          commentum_user_shadow_banned_until: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('commentum_client_type', user.commentum_client_type)
+        .eq('commentum_user_id', targetUserId)
+
+      // FCM: Notify unshadowbanned user (use correct type now)
+      queueFcmNotification({
+        type: 'user_unshadow_banned',
+        targetUserId: targetUserId,
+        targetClientType: user.commentum_client_type,
+        moderator: { id: moderatorId, username: moderatorName },
+        reason: reason,
       })
-      .eq('user_id', targetUserId)
+    }
 
-    if (error) throw error
-
-    // FCM: Notify unshadowbanned user
-    queueFcmNotification({
-      type: 'user_unbanned',
-      targetUserId: targetUserId,
-      targetClientType: 'anilist',
-      moderator: { id: moderatorId, username: moderatorName },
-      reason: reason || 'Shadowban lifted',
+    // Discord: Notify mod channel about unshadowban
+    queueDiscordNotification({
+      type: 'user_unshadow_banned',
+      user: {
+        id: targetUserId,
+      },
+      moderator: {
+        id: moderatorId,
+        username: moderatorName,
+      },
+      reason,
     })
 
     return createDiscordResponse(

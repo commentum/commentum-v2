@@ -92,10 +92,19 @@ serve(async (req) => {
         return await handleWarnUser(supabase, { target_user_id, moderator_id, reason, severity, duration, moderatorRole, verifiedUser })
       
       case 'ban_user':
-        return await handleBanUser(supabase, { target_user_id, moderator_id, reason, shadow_ban, moderatorRole, verifiedUser })
+        return await handleBanUser(supabase, { target_user_id, moderator_id, reason, shadow_ban, duration, moderatorRole, verifiedUser })
       
       case 'unban_user':
         return await handleUnbanUser(supabase, { target_user_id, moderator_id, reason, moderatorRole, verifiedUser })
+      
+      case 'unwarn_user':
+        return await handleUnwarnUser(supabase, { target_user_id, moderator_id, reason, moderatorRole, verifiedUser })
+      
+      case 'mute_user':
+        return await handleMuteUser(supabase, { target_user_id, moderator_id, reason, duration, moderatorRole, verifiedUser })
+      
+      case 'unmute_user':
+        return await handleUnmuteUser(supabase, { target_user_id, moderator_id, reason, moderatorRole, verifiedUser })
       
       case 'get_queue':
         return await handleGetModerationQueue(supabase)
@@ -266,6 +275,50 @@ async function handleUnpinComment(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Queue Discord notification for unpinned comment in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_unpinned',
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      user_id: updatedComment.user_id,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      type: updatedComment.media_type,
+      year: updatedComment.media_year,
+      poster: updatedComment.media_poster
+    },
+    reason
+  })
+
+  // FCM: Notify the comment author their comment was unpinned
+  queueFcmNotification({
+    type: 'comment_unpinned',
+    targetUserId: updatedComment.user_id,
+    targetClientType: updatedComment.client_type,
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title,
+    },
+    moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
+    media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
+    reason,
+  })
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -423,6 +476,50 @@ async function handleUnlockThread(supabase: any, params: any) {
 
   if (error) throw error
 
+  // Queue Discord notification for unlocked thread in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'comment_unlocked',
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      user_id: updatedComment.user_id,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    media: {
+      id: updatedComment.media_id,
+      title: updatedComment.media_title,
+      type: updatedComment.media_type,
+      year: updatedComment.media_year,
+      poster: updatedComment.media_poster
+    },
+    reason
+  })
+
+  // FCM: Notify the comment author their thread was unlocked
+  queueFcmNotification({
+    type: 'comment_unlocked',
+    targetUserId: updatedComment.user_id,
+    targetClientType: updatedComment.client_type,
+    comment: {
+      id: updatedComment.id,
+      username: updatedComment.username,
+      content: updatedComment.content,
+      client_type: updatedComment.client_type,
+      media_id: updatedComment.media_id,
+      media_type: updatedComment.media_type,
+      media_title: updatedComment.media_title,
+    },
+    moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
+    media: { id: updatedComment.media_id, title: updatedComment.media_title, type: updatedComment.media_type },
+    reason,
+  })
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -444,20 +541,8 @@ async function handleWarnUser(supabase: any, params: any) {
   // For now, we'll update all platforms - this could be enhanced to accept client_type parameter
   const { data: targetUsers } = await supabase
     .from('commentum_users')
-    .select('commentum_client_type, commentum_user_role, commentum_user_warnings, commentum_user_notes')
+    .select('commentum_client_type, commentum_user_role, commentum_user_warnings, commentum_user_notes, commentum_username')
     .eq('commentum_user_id', target_user_id)
-
-  // Get target user's username from comments table
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('username')
-    .eq('user_id', target_user_id)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  const targetUsername = targetUserComment?.username || target_user_id
-  const userNotes = targetUsers?.[0]?.commentum_user_notes || ''
 
   if (!targetUsers || targetUsers.length === 0) {
     return new Response(
@@ -465,6 +550,9 @@ async function handleWarnUser(supabase: any, params: any) {
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
+
+  const targetUsername = targetUsers[0]?.commentum_username || target_user_id
+  const userNotes = targetUsers?.[0]?.commentum_user_notes || ''
 
   // Check permissions across all platforms (can't moderate users with equal or higher role)
   for (const user of targetUsers) {
@@ -566,11 +654,6 @@ async function handleWarnUser(supabase: any, params: any) {
       username: targetUsername,
       notes: userNotes
     },
-    comment: {
-      client_type: targetUsers[0]?.commentum_client_type,
-      id: targetUserComment?.id || '',
-      content: targetUserComment?.content || ''
-    },
     moderator: {
       id: moderator_id,
       username: verifiedUser.username
@@ -612,20 +695,8 @@ async function handleBanUser(supabase: any, params: any) {
   // Get target user's current status from commentum_users table, including notes
   const { data: targetUsers } = await supabase
     .from('commentum_users')
-    .select('commentum_client_type, commentum_user_role, commentum_user_notes')
+    .select('commentum_client_type, commentum_user_role, commentum_user_notes, commentum_username')
     .eq('commentum_user_id', target_user_id)
-
-  // Get target user's username from comments table
-  const { data: targetUserComment } = await supabase
-    .from('comments')
-    .select('username')
-    .eq('user_id', target_user_id)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
-
-  const targetUsername = targetUserComment?.username || target_user_id
-  const userNotes = targetUsers?.[0]?.commentum_user_notes || ''
 
   if (!targetUsers || targetUsers.length === 0) {
     return new Response(
@@ -644,6 +715,10 @@ async function handleBanUser(supabase: any, params: any) {
     }
   }
 
+  const targetUsername = targetUsers[0]?.commentum_username || target_user_id
+  const userNotes = targetUsers?.[0]?.commentum_user_notes || ''
+  const durationText = duration ? `${duration} hours` : 'Permanent'
+
   // Ban user across all platforms using helper function
   for (const user of targetUsers) {
     await supabase
@@ -652,7 +727,8 @@ async function handleBanUser(supabase: any, params: any) {
         p_user_id: target_user_id,
         p_ban_reason: reason,
         p_banned_by: moderator_id,
-        p_shadow_ban: shadow_ban || false
+        p_shadow_ban: shadow_ban || false,
+        p_duration_hours: duration || null
       })
 
     // FCM: Notify the banned user
@@ -663,7 +739,7 @@ async function handleBanUser(supabase: any, params: any) {
       user: { id: target_user_id, username: targetUsername, notes: userNotes },
       moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
       reason,
-      duration: 'Permanent',
+      duration: durationText,
     })
   }
 
@@ -675,11 +751,6 @@ async function handleBanUser(supabase: any, params: any) {
       username: targetUsername,
       notes: userNotes
     },
-    comment: {
-      client_type: targetUsers[0]?.commentum_client_type,
-      id: targetUserComment?.id || '',
-      content: targetUserComment?.content || ''
-    },
     moderator: {
       id: moderator_id,
       username: verifiedUser.username
@@ -687,7 +758,7 @@ async function handleBanUser(supabase: any, params: any) {
     reason,
     notes: userNotes,
     metadata: {
-      duration: 'Permanent'
+      duration: durationText
     }
   })
 
@@ -721,7 +792,7 @@ async function handleUnbanUser(supabase: any, params: any) {
   // Get target users from commentum_users table
   const { data: targetUsers } = await supabase
     .from('commentum_users')
-    .select('commentum_client_type')
+    .select('commentum_client_type, commentum_username')
     .eq('commentum_user_id', target_user_id)
 
   if (!targetUsers || targetUsers.length === 0) {
@@ -731,13 +802,17 @@ async function handleUnbanUser(supabase: any, params: any) {
     )
   }
 
+  const targetUsername = targetUsers[0]?.commentum_username || target_user_id
+
   // Unban user across all platforms by updating the user table
   for (const user of targetUsers) {
     await supabase
       .from('commentum_users')
       .update({
         commentum_user_banned: false,
+        commentum_user_banned_until: null,
         commentum_user_shadow_banned: false,
+        commentum_user_shadow_banned_until: null,
         commentum_user_muted: false,
         commentum_user_muted_until: null,
         updated_at: new Date().toISOString()
@@ -756,6 +831,20 @@ async function handleUnbanUser(supabase: any, params: any) {
     })
   }
 
+  // Queue Discord notification for user unban in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'user_unbanned',
+    user: {
+      id: target_user_id,
+      username: targetUsername,
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    reason,
+  })
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -772,12 +861,287 @@ async function handleUnbanUser(supabase: any, params: any) {
   )
 }
 
+async function handleUnwarnUser(supabase: any, params: any) {
+  const { target_user_id, moderator_id, reason, moderatorRole, verifiedUser } = params
+
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(moderatorRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Moderator permissions required to unwarn users' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Get target user from commentum_users
+  const { data: targetUsers } = await supabase
+    .from('commentum_users')
+    .select('commentum_client_type, commentum_user_role, commentum_user_warnings, commentum_username')
+    .eq('commentum_user_id', target_user_id)
+
+  if (!targetUsers || targetUsers.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'User not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUsername = targetUsers[0]?.commentum_username || target_user_id
+
+  // Check permissions
+  for (const user of targetUsers) {
+    if (!canModerate(moderatorRole, user.commentum_user_role)) {
+      return new Response(
+        JSON.stringify({ error: 'Cannot moderate user with equal or higher role' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+  }
+
+  if (!targetUsers[0].commentum_user_warnings || targetUsers[0].commentum_user_warnings <= 0) {
+    return new Response(
+      JSON.stringify({ error: 'User has no warnings to remove' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Remove warning using helper function across all platforms
+  let newWarningCount = 0
+  for (const user of targetUsers) {
+    const { data: count, error: rpcError } = await supabase
+      .rpc('unwarn_commentum_user', {
+        p_client_type: user.commentum_client_type,
+        p_user_id: target_user_id,
+        p_reason: reason || 'Warning removed by moderator',
+        p_unwarned_by: moderator_id
+      })
+    if (rpcError) throw rpcError
+    if (count !== null) newWarningCount = count
+
+    // FCM: Notify the unwarned user
+    queueFcmNotification({
+      type: 'user_unwarned',
+      targetUserId: target_user_id,
+      targetClientType: user.commentum_client_type,
+      user: { id: target_user_id, username: targetUsername },
+      moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
+      reason: reason || 'Warning removed by moderator',
+    })
+  }
+
+  // Queue Discord notification for user unwarn in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'user_unwarned',
+    user: {
+      id: target_user_id,
+      username: targetUsername,
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    reason: reason || 'Warning removed by moderator',
+    metadata: {
+      newWarningCount
+    }
+  })
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      action: 'unwarned',
+      targetUserId: target_user_id,
+      reason,
+      warningCount: newWarningCount,
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: getDisplayRole(moderatorRole)
+      }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleMuteUser(supabase: any, params: any) {
+  const { target_user_id, moderator_id, reason, duration, moderatorRole, verifiedUser } = params
+
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(moderatorRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Moderator permissions required to mute users' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const { data: targetUsers } = await supabase
+    .from('commentum_users')
+    .select('commentum_client_type, commentum_user_role, commentum_user_notes, commentum_username')
+    .eq('commentum_user_id', target_user_id)
+
+  if (!targetUsers || targetUsers.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'User not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUsername = targetUsers[0]?.commentum_username || target_user_id
+  const userNotes = targetUsers?.[0]?.commentum_user_notes || ''
+
+  for (const user of targetUsers) {
+    if (!canModerate(moderatorRole, user.commentum_user_role)) {
+      return new Response(
+        JSON.stringify({ error: 'Cannot mute user with equal or higher role' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+  }
+
+  let muteDuration = duration || 24
+  if (!duration) {
+    const { data: muteConfig } = await supabase
+      .from('config')
+      .select('value')
+      .eq('key', 'user_default_mute_duration_hours')
+      .single()
+    muteDuration = muteConfig ? parseInt(muteConfig.value) : 24
+  }
+
+  for (const user of targetUsers) {
+    await supabase.rpc('mute_commentum_user', {
+      p_client_type: user.commentum_client_type,
+      p_user_id: target_user_id,
+      p_mute_duration_hours: muteDuration,
+      p_mute_reason: reason,
+      p_muted_by: moderator_id
+    })
+
+    queueFcmNotification({
+      type: 'user_muted',
+      targetUserId: target_user_id,
+      targetClientType: user.commentum_client_type,
+      user: { id: target_user_id, username: targetUsername },
+      moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
+      reason,
+      duration: `${muteDuration} hours`,
+    })
+  }
+
+  queueDiscordNotification({
+    type: 'user_muted',
+    user: {
+      id: target_user_id,
+      username: targetUsername,
+      notes: userNotes
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    reason,
+    notes: userNotes,
+    metadata: {
+      duration: `${muteDuration} hours`
+    }
+  })
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      action: 'muted',
+      targetUserId: target_user_id,
+      reason,
+      duration: muteDuration,
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: getDisplayRole(moderatorRole)
+      }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+async function handleUnmuteUser(supabase: any, params: any) {
+  const { target_user_id, moderator_id, reason, moderatorRole, verifiedUser } = params
+
+  if (!['moderator', 'admin', 'super_admin', 'owner'].includes(moderatorRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Moderator permissions required to unmute users' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const { data: targetUsers } = await supabase
+    .from('commentum_users')
+    .select('commentum_client_type, commentum_username')
+    .eq('commentum_user_id', target_user_id)
+
+  if (!targetUsers || targetUsers.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'User not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const targetUsername = targetUsers[0]?.commentum_username || target_user_id
+
+  for (const user of targetUsers) {
+    await supabase
+      .from('commentum_users')
+      .update({
+        commentum_user_muted: false,
+        commentum_user_muted_until: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('commentum_client_type', user.commentum_client_type)
+      .eq('commentum_user_id', target_user_id)
+
+    queueFcmNotification({
+      type: 'user_unmuted',
+      targetUserId: target_user_id,
+      targetClientType: user.commentum_client_type,
+      user: { id: target_user_id, username: targetUsername },
+      moderator: { id: moderator_id, username: verifiedUser.username, avatar: verifiedUser.avatar_url },
+      reason: reason || 'Manual unmute',
+    })
+  }
+
+  // Queue Discord notification for user unmute in background - NON-BLOCKING
+  queueDiscordNotification({
+    type: 'user_unmuted',
+    user: {
+      id: target_user_id,
+      username: targetUsername,
+    },
+    moderator: {
+      id: moderator_id,
+      username: verifiedUser.username
+    },
+    reason: reason || 'Manual unmute',
+  })
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      action: 'unmuted',
+      targetUserId: target_user_id,
+      reason: reason || 'Manual unmute',
+      moderator: {
+        id: moderator_id,
+        username: verifiedUser.username,
+        role: getDisplayRole(moderatorRole)
+      }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
 async function handleGetModerationQueue(supabase: any) {
   // Get comments that need moderation
   const { data: comments, error } = await supabase
     .from('comments')
     .select('*')
-    .or('reported.eq.true,moderated.eq.true')
+    .eq('reported', true)
+    .eq('report_status', 'pending')
     .order('created_at', { ascending: false })
     .limit(100)
 

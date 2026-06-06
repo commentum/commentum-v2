@@ -2,8 +2,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 import { getLanguageName } from './translate.ts'
 
 export interface DiscordNotificationData {
-  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'comment_pinned' | 'comment_unpinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' |
-        'user_muted' | 'user_shadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed' | 'announcement_published';
+  type: 'comment_created' | 'comment_updated' | 'comment_deleted' | 'user_banned' | 'user_warned' | 'user_unwarned' | 'comment_pinned' | 'comment_unpinned' | 'comment_locked' | 'report_filed' | 'report_resolved' | 'report_dismissed' |
+        'user_muted' | 'user_unmuted' | 'user_shadow_banned' | 'user_unshadow_banned' | 'comment_unlocked' | 'moderation_action' | 'config_updated' | 'system_enabled' | 'system_disabled' | 'user_unbanned' | 'bulk_action' | 'vote_cast' | 'vote_removed' | 'announcement_published';
   comment?: {
     id: number | string;
     user_id?: string;
@@ -40,6 +40,12 @@ export interface DiscordNotificationData {
     banned?: boolean;
     banned_by?: string;
     banned_by_username?: string;
+    muted_until?: string;
+    muted_by?: string;
+    muted_by_username?: string;
+    warned_by?: string;
+    warned_by_username?: string;
+    warnings?: number;
     notes?: string;
   };
   media?: {
@@ -574,11 +580,13 @@ function getChannelForNotificationType(notificationType: string): 'user_activity
     'report_resolved',
     'report_dismissed',
     'user_warned',
+    'user_unwarned',
     'user_muted',
     'user_unmuted',
     'user_banned',
     'user_unbanned',
-    'user_shadow_banned'
+    'user_shadow_banned',
+    'user_unshadow_banned'
   ]
   
   if (userActivityChannelTypes.includes(notificationType)) {
@@ -897,12 +905,34 @@ ${muteCommentBlock}${section('Reason', reason)}${notes ? `\n\n${section('User No
       break
     }
 
+    case 'user_unwarned': {
+      accentColor = 0x2ECC71 // Green
+      const unwarnNotes = data.notes || data.user?.notes || ''
+      content = `✅  **Warning Removed**
+
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\`
+
+${section('Reason', reason)}${unwarnNotes ? `\n\n${section('User Notes', unwarnNotes)}` : ''}`
+      break
+    }
+
     case 'user_unmuted':
       accentColor = 0x2ECC71 // Green
       content = `🔊  **User Unmuted**
 
 Actor: ${moderatorName}  \`${moderatorId}\`
 User: ${authorName}  \`${authorId}\``
+      break
+
+    case 'user_unshadow_banned':
+      accentColor = 0x2ECC71 // Green
+      content = `🌟  **Shadow Ban Removed**
+
+Actor: ${moderatorName}  \`${moderatorId}\`
+User: ${authorName}  \`${authorId}\`
+
+${section('Reason', reason)}`
       break
 
     case 'user_banned': {
@@ -1039,13 +1069,15 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
         ]))
         
         // User action buttons - check user status
+        // Note: user_banned/user_muted_until/user_warnings are no longer on comments table,
+        // these should be passed via data.user from commentum_users
         if (data.comment?.user_id) {
-          const isBanned = data.comment?.user_banned === true
-          const isMuted = data.comment?.user_muted_until && new Date(data.comment.user_muted_until) > new Date()
-          const warningCount = data.comment?.user_warnings || 0
-          const bannedBy = data.comment?.banned_by_username || data.comment?.banned_by || null
-          const mutedBy = data.comment?.muted_by_username || data.comment?.muted_by || null
-          const warnedBy = data.comment?.warned_by_username || data.comment?.warned_by || null
+          const isBanned = data.user?.banned === true || data.comment?.user_banned === true
+          const isMuted = (data.user?.muted_until && new Date(data.user.muted_until) > new Date()) || (data.comment?.user_muted_until && new Date(data.comment.user_muted_until) > new Date())
+          const warningCount = data.user?.warnings || data.comment?.user_warnings || 0
+          const bannedBy = data.user?.banned_by_username || data.user?.banned_by || data.comment?.banned_by_username || data.comment?.banned_by || null
+          const mutedBy = data.user?.muted_by_username || data.user?.muted_by || data.comment?.muted_by_username || data.comment?.muted_by || null
+          const warnedBy = data.user?.warned_by_username || data.user?.warned_by || data.comment?.warned_by_username || data.comment?.warned_by || null
           
           rows.push(buildActionRow([
             buildButton(
@@ -1086,11 +1118,11 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
       if (data.comment?.id) {
         const userId = data.comment.user_id || data.user?.id
         const isDeleted = data.comment?.deleted === true
-        const isBanned = data.comment?.user_banned === true
+        const isBanned = data.user?.banned === true || data.comment?.user_banned === true
         const deletedBy = data.comment?.deleted_by_username || data.comment?.deleted_by || null
-        const bannedBy = data.comment?.banned_by_username || data.comment?.banned_by || null
-        const warnedBy = data.comment?.warned_by_username || data.comment?.warned_by || null
-        const warningCount = data.comment?.user_warnings || 0
+        const bannedBy = data.user?.banned_by_username || data.user?.banned_by || data.comment?.banned_by_username || data.comment?.banned_by || null
+        const warnedBy = data.user?.warned_by_username || data.user?.warned_by || data.comment?.warned_by_username || data.comment?.warned_by || null
+        const warningCount = data.user?.warnings || data.comment?.user_warnings || 0
         
         rows.push(buildActionRow([
           buildButton('Approve', BUTTON_STYLES.SUCCESS, `report_approve:${data.comment.id}:${userId}`, undefined, '✅'),
@@ -1136,6 +1168,28 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
           ),
           buildButton('View History', BUTTON_STYLES.SECONDARY, `mod_history:${data.user.id}`, undefined, '📋'),
         ]))
+      }
+      break
+      
+    case 'user_unwarned':
+    case 'user_unmuted':
+    case 'user_unbanned':
+    case 'user_unshadow_banned':
+      // Reverse moderation actions: Show re-apply buttons
+      if (data.user?.id) {
+        const reActionMap: Record<string, { label: string; emoji: string; customId: string }> = {
+          'user_unwarned': { label: 'Re-warn', emoji: '⚠️', customId: `mod_warn:${data.user.id}` },
+          'user_unmuted': { label: 'Re-mute', emoji: '🔇', customId: `mod_mute:${data.user.id}` },
+          'user_unbanned': { label: 'Re-ban', emoji: '🔨', customId: `mod_ban:${data.user.id}` },
+          'user_unshadow_banned': { label: 'Re-shadowban', emoji: '👻', customId: `mod_ban:${data.user.id}` },
+        }
+        const reAction = reActionMap[data.type]
+        if (reAction) {
+          rows.push(buildActionRow([
+            buildButton(reAction.label, BUTTON_STYLES.SECONDARY, reAction.customId, undefined, reAction.emoji),
+            buildButton('View History', BUTTON_STYLES.SECONDARY, `mod_history:${data.user.id}`, undefined, '📋'),
+          ]))
+        }
       }
       break
       

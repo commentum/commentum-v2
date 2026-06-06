@@ -149,33 +149,45 @@ async function handleGetUserInfo(supabase: any, params: any) {
   if (error) throw error
 
   // Enrich user data with readable field names
-  const enrichedUsers = (data || []).map((u: any) => ({
-    id: u.commentum_user_id,
-    username: u.commentum_username,
-    avatar: u.commentum_user_avatar,
-    role: getDisplayRole(u.commentum_user_role),
-    banned: u.commentum_user_banned,
-    muted: u.commentum_user_muted,
-    muted_until: u.commentum_user_muted_until,
-    shadow_banned: u.commentum_user_shadow_banned,
-    warnings: u.commentum_user_warnings,
-    notes: u.commentum_user_notes,
-    client_type: u.commentum_client_type,
-    created_at: u.commentum_created_at || u.created_at,
-    updated_at: u.commentum_updated_at || u.updated_at,
-    // Keep original fields for backwards compatibility
-    commentum_user_id: u.commentum_user_id,
-    commentum_username: u.commentum_username,
-    commentum_user_avatar: u.commentum_user_avatar,
-    commentum_user_role: getDisplayRole(u.commentum_user_role),
-    commentum_user_banned: u.commentum_user_banned,
-    commentum_user_muted: u.commentum_user_muted,
-    commentum_user_muted_until: u.commentum_user_muted_until,
-    commentum_user_shadow_banned: u.commentum_user_shadow_banned,
-    commentum_user_warnings: u.commentum_user_warnings,
-    commentum_user_notes: u.commentum_user_notes,
-    commentum_client_type: u.commentum_client_type,
-  }))
+  // Respect expiration: a user with banned=true but banned_until in the past is effectively NOT banned
+  const now = new Date()
+  const enrichedUsers = (data || []).map((u: any) => {
+    const isBanned = u.commentum_user_banned && (u.commentum_user_banned_until === null || new Date(u.commentum_user_banned_until) > now)
+    const isMuted = u.commentum_user_muted && (u.commentum_user_muted_until === null || new Date(u.commentum_user_muted_until) > now)
+    const isShadowBanned = u.commentum_user_shadow_banned && (u.commentum_user_shadow_banned_until === null || new Date(u.commentum_user_shadow_banned_until) > now)
+
+    return {
+      id: u.commentum_user_id,
+      username: u.commentum_username,
+      avatar: u.commentum_user_avatar,
+      role: getDisplayRole(u.commentum_user_role),
+      banned: isBanned,
+      banned_until: u.commentum_user_banned_until,
+      muted: isMuted,
+      muted_until: u.commentum_user_muted_until,
+      shadow_banned: isShadowBanned,
+      shadow_banned_until: u.commentum_user_shadow_banned_until,
+      warnings: u.commentum_user_warnings,
+      notes: u.commentum_user_notes,
+      client_type: u.commentum_client_type,
+      created_at: u.commentum_created_at || u.created_at,
+      updated_at: u.commentum_updated_at || u.updated_at,
+      // Keep original fields for backwards compatibility
+      commentum_user_id: u.commentum_user_id,
+      commentum_username: u.commentum_username,
+      commentum_user_avatar: u.commentum_user_avatar,
+      commentum_user_role: getDisplayRole(u.commentum_user_role),
+      commentum_user_banned: isBanned,
+      commentum_user_banned_until: u.commentum_user_banned_until,
+      commentum_user_muted: isMuted,
+      commentum_user_muted_until: u.commentum_user_muted_until,
+      commentum_user_shadow_banned: isShadowBanned,
+      commentum_user_shadow_banned_until: u.commentum_user_shadow_banned_until,
+      commentum_user_warnings: u.commentum_user_warnings,
+      commentum_user_notes: u.commentum_user_notes,
+      commentum_client_type: u.commentum_client_type,
+    }
+  })
 
   return new Response(
     JSON.stringify({ 
@@ -331,17 +343,21 @@ async function handleBanUser(supabase: any, params: any) {
     )
   }
 
-  // Ban user using helper function
+  // Ban user using helper function (supports duration)
+  const durationHours = duration || null
   const { data, error } = await supabase
     .rpc('ban_commentum_user', {
       p_client_type: target_client_type,
       p_user_id: target_user_id,
       p_ban_reason: reason,
       p_banned_by: moderator_id,
-      p_shadow_ban: false
+      p_shadow_ban: false,
+      p_duration_hours: durationHours
     })
 
   if (error) throw error
+
+  const durationText = durationHours ? `${durationHours} hours` : 'Permanent'
 
   return new Response(
     JSON.stringify({ 
@@ -350,6 +366,7 @@ async function handleBanUser(supabase: any, params: any) {
       targetUserId: target_user_id,
       clientType: target_client_type,
       reason,
+      duration: durationText,
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
@@ -385,12 +402,14 @@ async function handleUnbanUser(supabase: any, params: any) {
     )
   }
 
-  // Unban user by updating the user table
+  // Unban user by updating the user table (clear both ban and shadow ban + until columns)
   const { error } = await supabase
     .from('commentum_users')
     .update({
       commentum_user_banned: false,
+      commentum_user_banned_until: null,
       commentum_user_shadow_banned: false,
+      commentum_user_shadow_banned_until: null,
       updated_at: new Date().toISOString()
     })
     .eq('commentum_client_type', target_client_type)
@@ -614,22 +633,47 @@ async function handleListUsers(supabase: any, params: any) {
 
   if (target_client_type) query = query.eq('commentum_client_type', target_client_type)
   if (role) query = query.eq('commentum_user_role', role)
-  if (banned !== undefined) query = query.eq('commentum_user_banned', banned)
-  if (muted !== undefined) query = query.eq('commentum_user_muted', muted)
-  if (shadow_banned !== undefined) query = query.eq('commentum_user_shadow_banned', shadow_banned)
+  if (banned !== undefined) {
+    if (banned === true) {
+      // When filtering for banned users, only show those whose ban hasn't expired
+      query = query.eq('commentum_user_banned', true).is('commentum_user_banned_until', null).or('commentum_user_banned_until.gt.' + new Date().toISOString())
+    } else {
+      query = query.eq('commentum_user_banned', banned)
+    }
+  }
+  if (muted !== undefined) {
+    if (muted === true) {
+      // When filtering for muted users, only show those whose mute hasn't expired
+      query = query.eq('commentum_user_muted', true).is('commentum_user_muted_until', null).or('commentum_user_muted_until.gt.' + new Date().toISOString())
+    } else {
+      query = query.eq('commentum_user_muted', muted)
+    }
+  }
+  if (shadow_banned !== undefined) {
+    if (shadow_banned === true) {
+      // When filtering for shadow_banned users, only show those whose shadow ban hasn't expired
+      query = query.eq('commentum_user_shadow_banned', true).is('commentum_user_shadow_banned_until', null).or('commentum_user_shadow_banned_until.gt.' + new Date().toISOString())
+    } else {
+      query = query.eq('commentum_user_shadow_banned', shadow_banned)
+    }
+  }
 
   const { data, error, count } = await query
   if (error) throw error
 
+  // Respect expiration in the response
+  const now = new Date()
   const enrichedUsers = (data || []).map((u: any) => ({
     id: u.commentum_user_id,
     username: u.commentum_username,
     avatar: u.commentum_user_avatar,
     role: getDisplayRole(u.commentum_user_role),
-    banned: u.commentum_user_banned,
-    muted: u.commentum_user_muted,
+    banned: u.commentum_user_banned && (u.commentum_user_banned_until === null || new Date(u.commentum_user_banned_until) > now),
+    banned_until: u.commentum_user_banned_until,
+    muted: u.commentum_user_muted && (u.commentum_user_muted_until === null || new Date(u.commentum_user_muted_until) > now),
     muted_until: u.commentum_user_muted_until,
-    shadow_banned: u.commentum_user_shadow_banned,
+    shadow_banned: u.commentum_user_shadow_banned && (u.commentum_user_shadow_banned_until === null || new Date(u.commentum_user_shadow_banned_until) > now),
+    shadow_banned_until: u.commentum_user_shadow_banned_until,
     warnings: u.commentum_user_warnings,
     client_type: u.commentum_client_type,
     created_at: u.commentum_created_at || u.created_at,
@@ -666,15 +710,19 @@ async function handleSearchUsers(supabase: any, params: any) {
   const { data, error } = await query
   if (error) throw error
 
+  // Respect expiration in the response
+  const now = new Date()
   const enrichedUsers = (data || []).map((u: any) => ({
     id: u.commentum_user_id,
     username: u.commentum_username,
     avatar: u.commentum_user_avatar,
     role: getDisplayRole(u.commentum_user_role),
-    banned: u.commentum_user_banned,
-    muted: u.commentum_user_muted,
+    banned: u.commentum_user_banned && (u.commentum_user_banned_until === null || new Date(u.commentum_user_banned_until) > now),
+    banned_until: u.commentum_user_banned_until,
+    muted: u.commentum_user_muted && (u.commentum_user_muted_until === null || new Date(u.commentum_user_muted_until) > now),
     muted_until: u.commentum_user_muted_until,
-    shadow_banned: u.commentum_user_shadow_banned,
+    shadow_banned: u.commentum_user_shadow_banned && (u.commentum_user_shadow_banned_until === null || new Date(u.commentum_user_shadow_banned_until) > now),
+    shadow_banned_until: u.commentum_user_shadow_banned_until,
     warnings: u.commentum_user_warnings,
     client_type: u.commentum_client_type,
     created_at: u.commentum_created_at || u.created_at,
@@ -806,10 +854,14 @@ async function handleGetUserHistory(supabase: any, params: any) {
   // Include moderation-specific fields only for mod+ users (and only if user data exists)
   if (isMod && data) {
     userInfo.role = getDisplayRole(data.commentum_user_role)
-    userInfo.banned = data.commentum_user_banned
-    userInfo.muted = data.commentum_user_muted
+    // Respect expiration in the user info response
+    const now = new Date()
+    userInfo.banned = data.commentum_user_banned && (data.commentum_user_banned_until === null || new Date(data.commentum_user_banned_until) > now)
+    userInfo.banned_until = data.commentum_user_banned_until
+    userInfo.muted = data.commentum_user_muted && (data.commentum_user_muted_until === null || new Date(data.commentum_user_muted_until) > now)
     userInfo.muted_until = data.commentum_user_muted_until
-    userInfo.shadow_banned = data.commentum_user_shadow_banned
+    userInfo.shadow_banned = data.commentum_user_shadow_banned && (data.commentum_user_shadow_banned_until === null || new Date(data.commentum_user_shadow_banned_until) > now)
+    userInfo.shadow_banned_until = data.commentum_user_shadow_banned_until
     userInfo.warnings = data.commentum_user_warnings
     userInfo.notes = data.commentum_user_notes
     userInfo.updated_at = data.commentum_updated_at || data.updated_at
@@ -854,8 +906,9 @@ async function handleSearchUsersPublic(supabase: any, params: any) {
     .from('commentum_users')
     .select('commentum_user_id, commentum_username, commentum_user_avatar, commentum_client_type')
     .ilike('commentum_username', `%${username.trim()}%`)
-    .eq('commentum_user_banned', false)
     .eq('commentum_user_active', true)
+    // Filter out users who are currently banned (respecting expiration)
+    .or('commentum_user_banned.eq.false,commentum_user_banned_until.lt.' + new Date().toISOString())
     .limit(15)
 
   if (target_client_type) {

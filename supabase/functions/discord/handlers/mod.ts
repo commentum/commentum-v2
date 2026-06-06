@@ -3,6 +3,7 @@ import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmute
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
 import { createModalResponse, createDiscordResponse } from '../utils.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
+import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
 
 // Discord interaction types
 const InteractionType = {
@@ -89,6 +90,16 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             reason: reason,
           })
         }
+        // Discord: Notify mod channel about deletion
+        queueDiscordNotification({
+          type: 'comment_deleted',
+          comment: {
+            id: commentId,
+            user_id: comment?.user_id || id2,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+        })
         return createDiscordResponse(`✅ Comment \`${commentId}\` deleted! Reason: ${reason}`)
       }
 
@@ -123,6 +134,16 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
           })
         }
 
+        // Discord: Notify mod channel about warning
+        queueDiscordNotification({
+          type: 'user_warned',
+          user: {
+            id: targetUserId,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+        })
+
         const newWarningCount = (targetUsers[0]?.commentum_user_warnings || 0) + 1
         return createDiscordResponse(`⚠️ User \`${targetUserId}\` warned! (Total: ${newWarningCount} warnings)\nReason: ${reason}`)
       }
@@ -156,6 +177,20 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             duration: '24 hours',
           })
         }
+
+        // Discord: Notify mod channel about mute
+        queueDiscordNotification({
+          type: 'user_muted',
+          user: {
+            id: targetUserId,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+          metadata: {
+            duration: '24 hours'
+          }
+        })
+
         return createDiscordResponse(`🔇 User \`${targetUserId}\` muted for 24 hours until ${muteUntil.toLocaleString()}!\nReason: ${reason}`)
       }
 
@@ -187,6 +222,20 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             duration: 'Permanent',
           })
         }
+
+        // Discord: Notify mod channel about ban
+        queueDiscordNotification({
+          type: 'user_banned',
+          user: {
+            id: targetUserId,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+          metadata: {
+            duration: 'Permanent'
+          }
+        })
+
         return createDiscordResponse(`🔨 User \`${targetUserId}\` banned!\nReason: ${reason}`)
       }
 
@@ -239,6 +288,26 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             duration: 'Not specified',
           })
         }
+
+        // Discord: Notify mod channel about delete+warn
+        queueDiscordNotification({
+          type: 'comment_deleted',
+          comment: {
+            id: commentId,
+            user_id: comment?.user_id || targetUserId,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+        })
+        queueDiscordNotification({
+          type: 'user_warned',
+          user: {
+            id: targetUserId,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+        })
+
         return createDiscordResponse(`🗑️⚠️ Comment deleted and user \`${targetUserId}\` warned!\nReason: ${reason}`)
       }
 
@@ -292,6 +361,29 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             duration: 'Permanent',
           })
         }
+
+        // Discord: Notify mod channel about delete+ban
+        queueDiscordNotification({
+          type: 'comment_deleted',
+          comment: {
+            id: commentId,
+            user_id: comment?.user_id || targetUserId,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+        })
+        queueDiscordNotification({
+          type: 'user_banned',
+          user: {
+            id: targetUserId,
+          },
+          moderator: { id: userId, username: username },
+          reason,
+          metadata: {
+            duration: 'Permanent'
+          }
+        })
+
         return createDiscordResponse(`🗑️🔨 Comment deleted and user \`${targetUserId}\` banned!\nReason: ${reason}`)
       }
 
@@ -616,6 +708,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           .update({ reported: false, report_status: 'resolved' })
           .eq('id', commentId)
         if (error) throw error
+
+        // Discord: Notify mod channel about report approval
+        queueDiscordNotification({
+          type: 'report_resolved',
+          comment: {
+            id: commentId,
+          },
+          moderator: { id: userId, username: username },
+        })
+
         return createButtonResponse(`✅ Report for comment \`${commentId}\` approved!`)
       }
       
@@ -642,6 +744,16 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           .update({ reported: false, report_status: 'dismissed' })
           .eq('id', commentId)
         if (error) throw error
+
+        // Discord: Notify mod channel about report dismissal
+        queueDiscordNotification({
+          type: 'report_dismissed',
+          comment: {
+            id: commentId,
+          },
+          moderator: { id: userId, username: username },
+        })
+
         return createButtonResponse(`❌ Report for comment \`${commentId}\` dismissed!`)
       }
       
@@ -655,7 +767,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         // Check if pinned
         const { data: comment } = await supabase
           .from('comments')
-          .select('pinned, pinned_by')
+          .select('pinned, pinned_by, user_id, client_type, username, content, media_id, media_type, media_title')
           .eq('id', commentId)
           .single()
         
@@ -668,6 +780,42 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           .update({ pinned: false, pinned_at: null, pinned_by: null })
           .eq('id', commentId)
         if (error) throw error
+
+        // FCM: Notify comment author
+        if (comment.user_id) {
+          queueFcmNotification({
+            type: 'comment_unpinned',
+            targetUserId: comment.user_id,
+            targetClientType: comment.client_type,
+            comment: {
+              id: commentId,
+              username: comment.username,
+              content: comment.content,
+              client_type: comment.client_type,
+              media_id: comment.media_id,
+              media_type: comment.media_type,
+              media_title: comment.media_title,
+            },
+            moderator: { id: userId, username: username },
+          })
+        }
+
+        // Discord: Notify mod channel about unpin
+        queueDiscordNotification({
+          type: 'comment_unpinned',
+          comment: {
+            id: commentId,
+            user_id: comment.user_id,
+            username: comment.username,
+            content: comment.content,
+            client_type: comment.client_type,
+            media_id: comment.media_id,
+            media_type: comment.media_type,
+            media_title: comment.media_title,
+          },
+          moderator: { id: userId, username: username },
+        })
+
         return createButtonResponse(`📍 Comment \`${commentId}\` unpinned!`)
       }
       
@@ -681,7 +829,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         // Check if locked
         const { data: comment } = await supabase
           .from('comments')
-          .select('locked, locked_by')
+          .select('locked, locked_by, user_id, client_type, username, content, media_id, media_type, media_title')
           .eq('id', commentId)
           .single()
         
@@ -694,6 +842,42 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           .update({ locked: false, locked_at: null, locked_by: null })
           .eq('id', commentId)
         if (error) throw error
+
+        // FCM: Notify comment author
+        if (comment.user_id) {
+          queueFcmNotification({
+            type: 'comment_unlocked',
+            targetUserId: comment.user_id,
+            targetClientType: comment.client_type,
+            comment: {
+              id: commentId,
+              username: comment.username,
+              content: comment.content,
+              client_type: comment.client_type,
+              media_id: comment.media_id,
+              media_type: comment.media_type,
+              media_title: comment.media_title,
+            },
+            moderator: { id: userId, username: username },
+          })
+        }
+
+        // Discord: Notify mod channel about unlock
+        queueDiscordNotification({
+          type: 'comment_unlocked',
+          comment: {
+            id: commentId,
+            user_id: comment.user_id,
+            username: comment.username,
+            content: comment.content,
+            client_type: comment.client_type,
+            media_id: comment.media_id,
+            media_type: comment.media_type,
+            media_title: comment.media_title,
+          },
+          moderator: { id: userId, username: username },
+        })
+
         return createButtonResponse(`🔓 Comment \`${commentId}\` unlocked!`)
       }
       
@@ -702,7 +886,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         const targetUserId = id1
         const { data: userComments } = await supabase
           .from('comments')
-          .select('id, content, created_at, deleted, user_banned')
+          .select('id, content, created_at, deleted')
           .eq('user_id', targetUserId)
           .order('created_at', { ascending: false })
           .limit(5)

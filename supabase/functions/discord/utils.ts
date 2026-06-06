@@ -171,7 +171,7 @@ export function createCommentEmbed(comment: any, showFullContent: boolean = fals
   )
 }
 
-export function createUserEmbed(user: any, comments: any[], discordRegistration?: any): Response {
+export function createUserEmbed(user: any, comments: any[], discordRegistration?: any, userStatus?: any): Response {
   const totalComments = comments.length
   const totalUpvotes = comments.reduce((sum, c) => sum + c.upvotes, 0)
   const totalDownvotes = comments.reduce((sum, c) => sum + c.downvotes, 0)
@@ -215,12 +215,12 @@ export function createUserEmbed(user: any, comments: any[], discordRegistration?
     })
   }
 
-  // Add user status
+  // Add user status from commentum_users (passed as userStatus)
   const statusFields = []
-  if (user.user_banned) statusFields.push('Banned')
-  if (user.user_shadow_banned) statusFields.push('Shadow Banned')
-  if (user.user_muted_until) statusFields.push(`Muted until ${new Date(user.user_muted_until).toLocaleDateString()}`)
-  if (user.user_warnings > 0) statusFields.push(`${user.user_warnings} warnings`)
+  if (userStatus?.banned) statusFields.push('Banned')
+  if (userStatus?.shadow_banned) statusFields.push('Shadow Banned')
+  if (userStatus?.muted_until && new Date(userStatus.muted_until) > new Date()) statusFields.push(`Muted until ${new Date(userStatus.muted_until).toLocaleDateString()}`)
+  if (userStatus?.warnings > 0) statusFields.push(`${userStatus.warnings} warnings`)
   
   if (statusFields.length > 0) {
     fields.push({
