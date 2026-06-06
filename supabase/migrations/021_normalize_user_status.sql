@@ -344,29 +344,17 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ====================================
--- STEP 10: Update RLS policies on comments to use commentum_users
+-- STEP 10: Update RLS policies on comments
 -- ====================================
 
 -- Drop old RLS policies that reference removed columns
 DROP POLICY IF EXISTS "Anyone can read comments" ON comments;
 
--- Create new RLS policy that checks user status via commentum_users
--- Note: We use a subquery to check if the user is banned/shadow_banned in commentum_users
+-- Create simple RLS policy — we don't hide banned users' comments
+-- Ban status only prevents NEW comment creation; existing comments remain visible
 CREATE POLICY "Anyone can read comments" ON comments
     FOR SELECT USING (
-        deleted = false AND 
-        NOT EXISTS (
-            SELECT 1 FROM commentum_users 
-            WHERE commentum_client_type = comments.client_type 
-            AND commentum_user_id = comments.user_id 
-            AND (commentum_user_banned = true OR commentum_user_shadow_banned = true)
-            -- Respect expiration: only treat as banned if not expired
-            AND (
-                (commentum_user_banned = true AND (commentum_user_banned_until IS NULL OR commentum_user_banned_until > NOW()))
-                OR
-                (commentum_user_shadow_banned = true AND (commentum_user_shadow_banned_until IS NULL OR commentum_user_shadow_banned_until > NOW()))
-            )
-        )
+        deleted = false
     );
 
 -- ====================================

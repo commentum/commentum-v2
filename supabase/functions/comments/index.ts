@@ -250,13 +250,6 @@ serve(async (req) => {
 
     // Check user restrictions from commentum_users table
     if (action === 'create') {
-      // Auto-cleanup expired moderation states (lazy evaluation)
-      try {
-        await supabase.rpc('cleanup_expired_moderation')
-      } catch (e) {
-        console.error('Failed to cleanup expired moderation:', e)
-      }
-
       const { data: userStatus } = await supabase
         .from('commentum_users')
         .select('commentum_user_banned, commentum_user_banned_until, commentum_user_muted, commentum_user_muted_until, commentum_user_shadow_banned, commentum_user_shadow_banned_until, commentum_user_warnings')

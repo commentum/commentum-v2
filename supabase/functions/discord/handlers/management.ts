@@ -13,6 +13,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
     const targetUserId = options?.find((opt: any) => opt.name === 'user_id')?.value
     const reason = options?.find((opt: any) => opt.name === 'reason')?.value
     const shadow = options?.find((opt: any) => opt.name === 'shadow')?.value || false
+    const duration = options?.find((opt: any) => opt.name === 'duration')?.value || null
 
     if (!targetUserId || !reason) {
       return createErrorResponse('user_id and reason are required.')
@@ -43,26 +44,30 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
           p_user_id: targetUserId,
           p_ban_reason: reason,
           p_banned_by: moderatorId,
-          p_shadow_ban: shadow
+          p_shadow_ban: shadow,
+          p_duration_hours: duration || null
         })
 
       // FCM: Notify banned user
+      const durationText = duration ? `${duration} hours` : 'Permanent'
       queueFcmNotification({
         type: shadow ? 'user_shadow_banned' : 'user_banned',
         targetUserId: targetUserId,
         targetClientType: user.commentum_client_type,
         moderator: { id: moderatorId, username: moderatorName },
         reason: reason,
-        duration: 'Permanent',
+        duration: durationText,
       })
     }
+
+    const durationText = duration ? `${duration} hours` : 'Permanent'
 
     return createModerationEmbed(
       shadow ? 'shadow ban' : 'ban',
       targetUserId,
       `<@${moderatorId}>`,
       reason,
-      shadow ? 'User can still post but others cannot see their content' : 'User cannot post or interact'
+      `${shadow ? 'User can still post but others cannot see their content' : 'User cannot post or interact'} | Duration: ${durationText}`
     )
 
   } catch (error) {
@@ -102,7 +107,9 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
         .from('commentum_users')
         .update({
           commentum_user_banned: false,
+          commentum_user_banned_until: null,
           commentum_user_shadow_banned: false,
+          commentum_user_shadow_banned_until: null,
           commentum_user_muted: false,
           commentum_user_muted_until: null,
           updated_at: new Date().toISOString()
@@ -573,20 +580,22 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
 
     const userComment = userComments[0]
 
-    // Get user status from commentum_users (user_banned etc are no longer on comments table)
+    // Get user status from commentum_users (respects expiration)
     const { data: userStatusData } = await supabase
       .from('commentum_users')
-      .select('commentum_user_banned, commentum_user_shadow_banned, commentum_user_muted_until, commentum_user_warnings, commentum_user_banned_until, commentum_user_shadow_banned_until')
+      .select('commentum_client_type, commentum_user_banned, commentum_user_shadow_banned, commentum_user_muted_until, commentum_user_muted, commentum_user_warnings, commentum_user_banned_until, commentum_user_shadow_banned_until')
       .eq('commentum_user_id', targetUserId)
-      .limit(1)
+      .order('commentum_client_type')
 
-    const userStatus = userStatusData?.[0] ? {
-      banned: userStatusData[0].commentum_user_banned,
-      shadow_banned: userStatusData[0].commentum_user_shadow_banned,
-      muted_until: userStatusData[0].commentum_user_muted_until,
-      warnings: userStatusData[0].commentum_user_warnings,
-      banned_until: userStatusData[0].commentum_user_banned_until,
-      shadow_banned_until: userStatusData[0].commentum_user_shadow_banned_until,
+    // Merge status across all platforms (show worst status)
+    const now = new Date()
+    const userStatus = userStatusData?.length ? {
+      banned: userStatusData.some((u: any) => u.commentum_user_banned && (u.commentum_user_banned_until === null || new Date(u.commentum_user_banned_until) > now)),
+      shadow_banned: userStatusData.some((u: any) => u.commentum_user_shadow_banned && (u.commentum_user_shadow_banned_until === null || new Date(u.commentum_user_shadow_banned_until) > now)),
+      muted_until: userStatusData.find((u: any) => u.commentum_user_muted && (u.commentum_user_muted_until === null || new Date(u.commentum_user_muted_until) > now))?.commentum_user_muted_until || null,
+      warnings: Math.max(...userStatusData.map((u: any) => u.commentum_user_warnings || 0)),
+      banned_until: userStatusData.find((u: any) => u.commentum_user_banned && (u.commentum_user_banned_until === null || new Date(u.commentum_user_banned_until) > now))?.commentum_user_banned_until || null,
+      shadow_banned_until: userStatusData.find((u: any) => u.commentum_user_shadow_banned && (u.commentum_user_shadow_banned_until === null || new Date(u.commentum_user_shadow_banned_until) > now))?.commentum_user_shadow_banned_until || null,
     } : null
 
     // Get user's Discord registration if exists
@@ -752,17 +761,4 @@ async function removeFromAllRoles(supabase: any, userId: string) {
         .eq('key', roleKey)
     }
   }
-}
-
-// Helper function to check if a user can moderate another
-function canModerate(moderatorRole: string, targetRole: string): boolean {
-  const roleHierarchy = {
-    'user': 0,
-    'moderator': 1,
-    'admin': 2,
-    'super_admin': 3,
-    'owner': 4
-  }
-  
-  return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
 }

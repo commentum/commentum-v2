@@ -265,11 +265,12 @@ export async function handleStatsCommand(supabase: any, userRole: string) {
       .from('comments')
       .select('id, upvotes, downvotes, report_count, created_at, user_role, deleted, user_id')
 
-    // Get banned user IDs from commentum_users
+    // Get banned user IDs from commentum_users (respecting expiration)
     const { data: bannedUsers } = await supabase
       .from('commentum_users')
       .select('commentum_user_id')
       .eq('commentum_user_banned', true)
+      .or('commentum_user_banned_until.is.null,commentum_user_banned_until.gt.' + new Date().toISOString())
     const bannedUserIds = new Set((bannedUsers || []).map((u: any) => u.commentum_user_id))
 
     const totalComments = comments?.length || 0

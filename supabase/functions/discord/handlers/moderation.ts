@@ -194,7 +194,10 @@ export async function handleUnwarnCommand(supabase: any, moderatorId: string, mo
     // If user was auto-banned/muted and warnings are now below threshold, suggest lifting
     let liftedAction = ''
     const isBanned = targetUsers.some((u: any) => u.commentum_user_banned)
-    const isMuted = targetUsers.some((u: any) => u.commentum_user_muted_until && new Date(u.commentum_user_muted_until) > new Date())
+    const isMuted = targetUsers.some((u: any) => 
+      u.commentum_user_muted && 
+      (u.commentum_user_muted_until === null || new Date(u.commentum_user_muted_until) > new Date())
+    )
     
     if (isBanned && newWarningCount < 5) {
       liftedAction = 'Consider lifting ban as warnings are reduced'
@@ -883,19 +886,6 @@ export async function handleQueueCommand(supabase: any, registration: any, userR
     console.error('Queue command error:', error)
     return createErrorResponse(`Failed to fetch moderation queue: ${error.message}`)
   }
-}
-
-// Helper function to check if a user can moderate another
-function canModerate(moderatorRole: string, targetRole: string): boolean {
-  const roleHierarchy = {
-    'user': 0,
-    'moderator': 1,
-    'admin': 2,
-    'super_admin': 3,
-    'owner': 4
-  }
-  
-  return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
 }
 
 // Handle ban command — NOW USES commentum_users instead of comments
