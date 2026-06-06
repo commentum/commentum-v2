@@ -250,21 +250,40 @@ serve(async (req) => {
 
     // Check user restrictions from commentum_users table
     if (action === 'create') {
+      // Auto-cleanup expired moderation states (lazy evaluation)
+      try {
+        await supabase.rpc('cleanup_expired_moderation')
+      } catch (e) {
+        console.error('Failed to cleanup expired moderation:', e)
+      }
+
       const { data: userStatus } = await supabase
         .from('commentum_users')
-        .select('commentum_user_banned, commentum_user_muted_until, commentum_user_shadow_banned, commentum_user_warnings')
+        .select('commentum_user_banned, commentum_user_banned_until, commentum_user_muted, commentum_user_muted_until, commentum_user_shadow_banned, commentum_user_shadow_banned_until, commentum_user_warnings')
         .eq('commentum_client_type', client_type)
         .eq('commentum_user_id', user_id)
         .single()
 
-      if (userStatus?.commentum_user_banned) {
+      const now = new Date()
+
+      // Check ban (respecting expiration - a ban with banned_until in the past is not active)
+      if (userStatus?.commentum_user_banned && (userStatus?.commentum_user_banned_until === null || new Date(userStatus.commentum_user_banned_until) > now)) {
         return new Response(
           JSON.stringify({ error: 'User is banned' }),
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
-      if (userStatus?.commentum_user_muted && new Date(userStatus.commentum_user_muted_until) > new Date()) {
+      // Check shadow ban (respecting expiration)
+      if (userStatus?.commentum_user_shadow_banned && (userStatus?.commentum_user_shadow_banned_until === null || new Date(userStatus.commentum_user_shadow_banned_until) > now)) {
+        return new Response(
+          JSON.stringify({ error: 'User is banned' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Check mute (respecting expiration)
+      if (userStatus?.commentum_user_muted && (userStatus?.commentum_user_muted_until === null || new Date(userStatus.commentum_user_muted_until) > now)) {
         return new Response(
           JSON.stringify({ error: 'User is muted' }),
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -420,7 +439,7 @@ async function handleCreateComment(supabase: any, params: any) {
       id, client_type, user_id, media_id, content, username, user_avatar, user_role,
       media_type, media_title, media_year, media_poster, parent_id, created_at, updated_at,
       deleted, pinned, locked, edited, edit_count, upvotes, downvotes, vote_score,
-      user_banned, user_shadow_banned, user_warnings, reported, report_count, tags,
+      reported, report_count, tags,
       translated_content, original_language, translated_at
     `)
     .single()

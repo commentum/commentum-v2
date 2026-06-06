@@ -40,6 +40,12 @@ export interface DiscordNotificationData {
     banned?: boolean;
     banned_by?: string;
     banned_by_username?: string;
+    muted_until?: string;
+    muted_by?: string;
+    muted_by_username?: string;
+    warned_by?: string;
+    warned_by_username?: string;
+    warnings?: number;
     notes?: string;
   };
   media?: {
@@ -1039,13 +1045,15 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
         ]))
         
         // User action buttons - check user status
+        // Note: user_banned/user_muted_until/user_warnings are no longer on comments table,
+        // these should be passed via data.user from commentum_users
         if (data.comment?.user_id) {
-          const isBanned = data.comment?.user_banned === true
-          const isMuted = data.comment?.user_muted_until && new Date(data.comment.user_muted_until) > new Date()
-          const warningCount = data.comment?.user_warnings || 0
-          const bannedBy = data.comment?.banned_by_username || data.comment?.banned_by || null
-          const mutedBy = data.comment?.muted_by_username || data.comment?.muted_by || null
-          const warnedBy = data.comment?.warned_by_username || data.comment?.warned_by || null
+          const isBanned = data.user?.banned === true || data.comment?.user_banned === true
+          const isMuted = (data.user?.muted_until && new Date(data.user.muted_until) > new Date()) || (data.comment?.user_muted_until && new Date(data.comment.user_muted_until) > new Date())
+          const warningCount = data.user?.warnings || data.comment?.user_warnings || 0
+          const bannedBy = data.user?.banned_by_username || data.user?.banned_by || data.comment?.banned_by_username || data.comment?.banned_by || null
+          const mutedBy = data.user?.muted_by_username || data.user?.muted_by || data.comment?.muted_by_username || data.comment?.muted_by || null
+          const warnedBy = data.user?.warned_by_username || data.user?.warned_by || data.comment?.warned_by_username || data.comment?.warned_by || null
           
           rows.push(buildActionRow([
             buildButton(
@@ -1086,11 +1094,11 @@ function buildInteractiveButtons(data: DiscordNotificationData): ActionRowCompon
       if (data.comment?.id) {
         const userId = data.comment.user_id || data.user?.id
         const isDeleted = data.comment?.deleted === true
-        const isBanned = data.comment?.user_banned === true
+        const isBanned = data.user?.banned === true || data.comment?.user_banned === true
         const deletedBy = data.comment?.deleted_by_username || data.comment?.deleted_by || null
-        const bannedBy = data.comment?.banned_by_username || data.comment?.banned_by || null
-        const warnedBy = data.comment?.warned_by_username || data.comment?.warned_by || null
-        const warningCount = data.comment?.user_warnings || 0
+        const bannedBy = data.user?.banned_by_username || data.user?.banned_by || data.comment?.banned_by_username || data.comment?.banned_by || null
+        const warnedBy = data.user?.warned_by_username || data.user?.warned_by || data.comment?.warned_by_username || data.comment?.warned_by || null
+        const warningCount = data.user?.warnings || data.comment?.user_warnings || 0
         
         rows.push(buildActionRow([
           buildButton('Approve', BUTTON_STYLES.SUCCESS, `report_approve:${data.comment.id}:${userId}`, undefined, '✅'),

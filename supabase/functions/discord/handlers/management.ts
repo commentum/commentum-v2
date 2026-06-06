@@ -559,7 +559,7 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
       return createErrorResponse('user_id is required.')
     }
 
-    // Get user information from comments
+    // Get user information from comments (for comment stats)
     const { data: userComments } = await supabase
       .from('comments')
       .select('*')
@@ -572,6 +572,22 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
     }
 
     const userComment = userComments[0]
+
+    // Get user status from commentum_users (user_banned etc are no longer on comments table)
+    const { data: userStatusData } = await supabase
+      .from('commentum_users')
+      .select('commentum_user_banned, commentum_user_shadow_banned, commentum_user_muted_until, commentum_user_warnings, commentum_user_banned_until, commentum_user_shadow_banned_until')
+      .eq('commentum_user_id', targetUserId)
+      .limit(1)
+
+    const userStatus = userStatusData?.[0] ? {
+      banned: userStatusData[0].commentum_user_banned,
+      shadow_banned: userStatusData[0].commentum_user_shadow_banned,
+      muted_until: userStatusData[0].commentum_user_muted_until,
+      warnings: userStatusData[0].commentum_user_warnings,
+      banned_until: userStatusData[0].commentum_user_banned_until,
+      shadow_banned_until: userStatusData[0].commentum_user_shadow_banned_until,
+    } : null
 
     // Get user's Discord registration if exists
     const { data: discordRegistration } = await supabase
@@ -587,7 +603,7 @@ export async function handleUserCommand(supabase: any, options: any, userRole: s
       .select('id, upvotes, downvotes, report_count, deleted, created_at')
       .eq('user_id', targetUserId)
 
-    return createUserEmbed(userComment, allUserComments || [], discordRegistration)
+    return createUserEmbed(userComment, allUserComments || [], discordRegistration, userStatus)
 
   } catch (error) {
     console.error('User command error:', error)

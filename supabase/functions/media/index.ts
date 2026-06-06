@@ -52,22 +52,43 @@ serve(async (req) => {
     // Get comments for this media
     // Include deleted comments (soft-deleted) so replies to deleted parents are preserved
     // Reddit-style: deleted comments show as "[deleted]" with no content
+    // Note: user_banned/user_shadow_banned columns removed from comments table;
+    // we now filter banned/shadow-banned users out after fetching (see below)
     const { data: comments, error } = await supabase
       .from('comments')
       .select('*')
       .eq('media_id', media_id)
       .eq('client_type', client_type)
-      .eq('user_banned', false)
-      .eq('user_shadow_banned', false)
       .order('created_at', { ascending: sort === 'oldest' })
       .range(offset, offset + limit - 1)
 
     if (error) throw error
 
-    // Get user points for all unique user_ids in this page
-    const userIds = [...new Set((comments || [])
+    // Get banned/shadow-banned user IDs from commentum_users for this page
+    const pageUserIds = [...new Set((comments || [])
       .filter((c: any) => !c.deleted && c.user_id)
       .map((c: any) => c.user_id))]
+    
+    let bannedUserIds = new Set<string>()
+    if (pageUserIds.length > 0) {
+      const { data: bannedUsers } = await supabase
+        .from('commentum_users')
+        .select('commentum_user_id')
+        .eq('commentum_client_type', client_type)
+        .in('commentum_user_id', pageUserIds)
+        .or('commentum_user_banned.eq.true,commentum_user_shadow_banned.eq.true')
+      if (bannedUsers) {
+        bannedUserIds = new Set(bannedUsers.map((u: any) => u.commentum_user_id))
+      }
+    }
+    
+    // Filter out comments from banned/shadow-banned users
+    const filteredComments = (comments || []).filter((c: any) => !bannedUserIds.has(c.user_id))
+
+    // Get user points for all unique user_ids in this page
+    const userIds = [...new Set(filteredComments
+      .filter((c: any) => !c.deleted && c.user_id)
+      .map((c: any) => c.user_id))]}
 
     let userPointsMap: Record<string, any> = {}
     if (userIds.length > 0) {
@@ -83,7 +104,7 @@ serve(async (req) => {
 
     const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
 
-    const sanitizedComments = (comments || []).map((comment: any) => {
+    const sanitizedComments = filteredComments.map((comment: any) => {
       const stripped: any = {}
       for (const [key, value] of Object.entries(comment)) {
         if (!FIELDS_TO_STRIP.includes(key)) {
@@ -111,14 +132,14 @@ serve(async (req) => {
     })
 
     // Get total count (exclude deleted for count)
+    // Note: Can't easily filter by commentum_users in count query, so we count from filtered results
+    // This is a trade-off since the columns were removed from comments table
     const { count } = await supabase
       .from('comments')
       .select('*', { count: 'exact', head: true })
       .eq('media_id', media_id)
       .eq('client_type', client_type)
       .eq('deleted', false)
-      .eq('user_banned', false)
-      .eq('user_shadow_banned', false)
 
     // Build nested structure
     const nestedComments = buildNestedStructure(sanitizedComments)

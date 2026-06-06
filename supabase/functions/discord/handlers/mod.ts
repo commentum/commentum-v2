@@ -702,7 +702,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         const targetUserId = id1
         const { data: userComments } = await supabase
           .from('comments')
-          .select('id, content, created_at, deleted, user_banned')
+          .select('id, content, created_at, deleted')
           .eq('user_id', targetUserId)
           .order('created_at', { ascending: false })
           .limit(5)

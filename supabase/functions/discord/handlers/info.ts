@@ -260,12 +260,20 @@ export async function getAvailableServers(supabase: any): Promise<string[]> {
 export async function handleStatsCommand(supabase: any, userRole: string) {
   try {
     // Get comment statistics
+    // Note: user_banned column removed from comments table; we get banned info from commentum_users
     const { data: comments } = await supabase
       .from('comments')
-      .select('id, upvotes, downvotes, report_count, created_at, user_role, deleted, user_banned')
+      .select('id, upvotes, downvotes, report_count, created_at, user_role, deleted, user_id')
+
+    // Get banned user IDs from commentum_users
+    const { data: bannedUsers } = await supabase
+      .from('commentum_users')
+      .select('commentum_user_id')
+      .eq('commentum_user_banned', true)
+    const bannedUserIds = new Set((bannedUsers || []).map((u: any) => u.commentum_user_id))
 
     const totalComments = comments?.length || 0
-    const activeComments = comments?.filter(c => !c.deleted && !c.user_banned).length || 0
+    const activeComments = comments?.filter(c => !c.deleted && !bannedUserIds.has(c.user_id)).length || 0
     const totalUpvotes = comments?.reduce((sum, comment) => sum + comment.upvotes, 0) || 0
     const totalDownvotes = comments?.reduce((sum, comment) => sum + comment.downvotes, 0) || 0
     const totalReports = comments?.reduce((sum, comment) => sum + comment.report_count, 0) || 0
