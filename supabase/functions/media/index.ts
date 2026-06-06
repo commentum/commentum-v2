@@ -66,7 +66,7 @@ serve(async (req) => {
     // Get user points for all unique user_ids in this page
     const userIds = [...new Set((comments || [])
       .filter((c: any) => !c.deleted && c.user_id)
-      .map((c: any) => c.user_id))]}
+      .map((c: any) => c.user_id))]
 
     let userPointsMap: Record<string, any> = {}
     if (userIds.length > 0) {
