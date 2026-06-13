@@ -20,7 +20,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, banned, muted, shadow_banned, page, limit, username } = await req.json()
+    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, banned, muted, shadow_banned, shadow_ban, page, limit, username } = await req.json()
 
     // All user management actions require token authentication
     if (!client_type || !access_token) {
@@ -90,7 +90,7 @@ serve(async (req) => {
         return await handleWarnUser(supabase, { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser })
       
       case 'ban_user':
-        return await handleBanUser(supabase, { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser })
+        return await handleBanUser(supabase, { target_user_id, target_client_type, moderator_id, reason, duration, shadow_ban, moderatorRole, verifiedUser })
       
       case 'unban_user':
         return await handleUnbanUser(supabase, { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser })
@@ -297,7 +297,7 @@ async function handleWarnUser(supabase: any, params: any) {
 }
 
 async function handleBanUser(supabase: any, params: any) {
-  const { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser } = params
+  const { target_user_id, target_client_type, moderator_id, reason, duration, shadow_ban, moderatorRole, verifiedUser } = params
 
   if (!target_user_id || !reason) {
     return new Response(
@@ -351,7 +351,7 @@ async function handleBanUser(supabase: any, params: any) {
       p_user_id: target_user_id,
       p_ban_reason: reason,
       p_banned_by: moderator_id,
-      p_shadow_ban: false,
+      p_shadow_ban: shadow_ban || false,
       p_duration_hours: durationHours
     })
 
@@ -635,24 +635,21 @@ async function handleListUsers(supabase: any, params: any) {
   if (role) query = query.eq('commentum_user_role', role)
   if (banned !== undefined) {
     if (banned === true) {
-      // When filtering for banned users, only show those whose ban hasn't expired
-      query = query.eq('commentum_user_banned', true).is('commentum_user_banned_until', null).or('commentum_user_banned_until.gt.' + new Date().toISOString())
+      query = query.eq('commentum_user_banned', true).or('commentum_user_banned_until.is.null,commentum_user_banned_until.gt.' + new Date().toISOString())
     } else {
       query = query.eq('commentum_user_banned', banned)
     }
   }
   if (muted !== undefined) {
     if (muted === true) {
-      // When filtering for muted users, only show those whose mute hasn't expired
-      query = query.eq('commentum_user_muted', true).is('commentum_user_muted_until', null).or('commentum_user_muted_until.gt.' + new Date().toISOString())
+      query = query.eq('commentum_user_muted', true).or('commentum_user_muted_until.is.null,commentum_user_muted_until.gt.' + new Date().toISOString())
     } else {
       query = query.eq('commentum_user_muted', muted)
     }
   }
   if (shadow_banned !== undefined) {
     if (shadow_banned === true) {
-      // When filtering for shadow_banned users, only show those whose shadow ban hasn't expired
-      query = query.eq('commentum_user_shadow_banned', true).is('commentum_user_shadow_banned_until', null).or('commentum_user_shadow_banned_until.gt.' + new Date().toISOString())
+      query = query.eq('commentum_user_shadow_banned', true).or('commentum_user_shadow_banned_until.is.null,commentum_user_shadow_banned_until.gt.' + new Date().toISOString())
     } else {
       query = query.eq('commentum_user_shadow_banned', shadow_banned)
     }
