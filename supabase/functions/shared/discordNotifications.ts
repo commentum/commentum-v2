@@ -452,6 +452,60 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
       return { success: false, reason: 'Notification type disabled' }
     }
 
+    // ── Enrich notification data: resolve "Unknown" user/media/comment info ──
+    // When callers (e.g. Discord bot handlers, moderation edge functions) only
+    // pass `user.id` without username / comment / media, we fetch the missing
+    // data from the database so Discord messages never show "Unknown".
+    try {
+      const needsUserEnrichment  = data.user?.id && !data.user.username
+      const needsCommentEnrichment = data.user?.id && !data.comment && !data.media
+
+      if (needsUserEnrichment || needsCommentEnrichment) {
+        const { data: enrichedUsers } = await supabase
+          .from('commentum_users')
+          .select('commentum_username, commentum_user_avatar, commentum_user_notes, commentum_user_last_comment_id')
+          .eq('commentum_user_id', data.user.id)
+          .limit(1)
+
+        if (enrichedUsers && enrichedUsers.length > 0) {
+          const eu = enrichedUsers[0]
+
+          // Fill in missing user fields
+          if (needsUserEnrichment) {
+            data.user.username = data.user.username || eu.commentum_username || undefined
+            data.user.avatar  = data.user.avatar  || eu.commentum_user_avatar || undefined
+            data.user.notes   = data.user.notes   || eu.commentum_user_notes || undefined
+          }
+
+          // If no comment/media was provided, try to use the user's last comment for context
+          if (needsCommentEnrichment && eu.commentum_user_last_comment_id) {
+            const { data: lastComment } = await supabase
+              .from('comments')
+              .select('id, content, media_id, media_type, media_title, client_type, username, user_id, user_avatar')
+              .eq('id', eu.commentum_user_last_comment_id)
+              .single()
+
+            if (lastComment) {
+              data.comment = {
+                id: lastComment.id,
+                user_id: lastComment.user_id,
+                username: lastComment.username,
+                user_avatar: lastComment.user_avatar,
+                content: lastComment.content,
+                client_type: lastComment.client_type,
+                media_id: lastComment.media_id,
+                media_type: lastComment.media_type,
+                media_title: lastComment.media_title,
+              }
+            }
+          }
+        }
+      }
+    } catch (enrichError) {
+      // Enrichment is best-effort; never block a notification from sending
+      console.error('Discord notification enrichment error:', enrichError)
+    }
+
     // Build Components V2 message
     const components = createComponentsV2Message(data)
 
