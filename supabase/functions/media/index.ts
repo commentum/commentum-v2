@@ -60,12 +60,9 @@ serve(async (req) => {
       .eq('client_type', client_type)
       .order('created_at', { ascending: sort === 'oldest' })
 
-    // Only paginate if the caller explicitly asked for page/limit —
-    // and ignore the old default combo (page=1, limit=50) too, treating
-    // it the same as "no pagination" so old hardcoded app defaults
-    // (if ever sent) don't limit results either.
-    const noPagination =
-      page === null || limit === null || (page === 1 && limit === 50)
+    // Only paginate if the caller explicitly asked for page/limit.
+    // Omitting both returns everything (capped by Supabase's db-max-rows setting).
+    const noPagination = page === null || limit === null
 
     if (!noPagination) {
       const offset = (page! - 1) * limit!
