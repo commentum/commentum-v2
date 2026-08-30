@@ -27,7 +27,8 @@ async function setMeta(db: any, k: string, v: string) {
 // === TSV PARSER ===
 
 function parseTSV(raw: string): Record<string, string>[] {
-  const rows: string[][] = [], cur: string[] = []
+  const rows: string[][] = []
+  let cur: string[] = []
   let field = '', inQ = false, i = 0
   while (i < raw.length) {
     const c = raw[i]
