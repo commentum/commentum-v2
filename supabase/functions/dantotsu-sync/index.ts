@@ -87,14 +87,20 @@ async function csvImport(db: any) {
   const t0 = Date.now()
   let processed = 0, inserted = 0, skipped = 0, errors = 0
 
-  console.log('[csv] fetching...')
+  console.log('[csv] loading...')
   let csv: string
   try {
-    const res = await fetch(CSV_URL)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    csv = await res.text()
-  } catch (e) {
-    return { success: false, mode: 'csv', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: `Fetch failed: ${e}` }
+    csv = await Deno.readTextFile('/home/deno/functions/dantotsu-sync/data.csv')
+    console.log('[csv] read local file')
+  } catch {
+    console.log('[csv] fetching from URL...')
+    try {
+      const res = await fetch(CSV_URL)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      csv = await res.text()
+    } catch (e) {
+      return { success: false, mode: 'csv', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: `Fetch failed: ${e}` }
+    }
   }
   console.log(`[csv] ${(csv.length / 1024 / 1024).toFixed(1)}MB`)
 
