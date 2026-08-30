@@ -74,7 +74,7 @@ async function fetchAniListBatch(ids: number[]): Promise<Map<number, any>> {
     if (!res.ok) return r
     const data = await res.json()
     for (const m of (data?.data?.Page?.media || [])) r.set(m.id, {
-      media_type: m.type || 'ANIME', media_title: m.title?.english || m.title?.romaji || 'Unknown Media',
+      media_type: (m.type || 'ANIME').toLowerCase(), media_title: m.title?.english || m.title?.romaji || 'Unknown Media',
       media_year: m.startDate?.year || null, media_poster: m.coverImage?.medium || null
     })
   } catch (e) { console.error('[al] err:', e) }
@@ -154,7 +154,7 @@ async function csvImport(db: any) {
         content: c.content.length > 10000 ? c.content.slice(0, 10000) : c.content,
         username: c.username.slice(0, 50), user_avatar: c.avatar_url,
         user_role: roleMap.get(c.user_id) || 'user',
-        media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null,
+        media_type: 'anime', media_title: 'Unknown Media', media_year: null, media_poster: null,
         parent_id: pid, deleted: c.deleted, deleted_at: c.deleted ? c.timestamp || null : null,
         upvotes: c.upvotes, downvotes: c.downvotes, vote_score: c.upvotes - c.downvotes,
         tags: c.tag ? JSON.stringify(['spoiler', `episode:${c.tag}`]) : null,
@@ -209,7 +209,7 @@ async function resolveMedia(db: any) {
 
   const toUpsert: any[] = []
   for (const id of batch) {
-    const m = fresh.get(id) || { media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null }
+    const m = fresh.get(id) || { media_type: 'anime', media_title: 'Unknown Media', media_year: null, media_poster: null }
     toUpsert.push({ media_id: id, ...m })
     resolved++
   }
@@ -282,7 +282,7 @@ async function apiSync(db: any) {
         content: isDel ? '[deleted]' : (d.content || ''),
         username: (d.username || 'unknown').slice(0, 50), user_avatar: d.profile_picture_url || null,
         user_role: roleMap.get(String(d.user_id)) || 'user',
-        media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null,
+        media_type: 'anime', media_title: 'Unknown Media', media_year: null, media_poster: null,
         parent_id: (d.parent_comment_id && d.parent_comment_id !== 0) ? (map.get(d.parent_comment_id) || null) : null,
         deleted: isDel, deleted_at: isDel ? d.timestamp || null : null,
         upvotes: d.upvotes || 0, downvotes: d.downvotes || 0, vote_score: (d.upvotes || 0) - (d.downvotes || 0),
