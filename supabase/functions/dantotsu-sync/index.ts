@@ -232,7 +232,7 @@ async function danAuth(): Promise<string | null> {
   for (let i = 0; i < 3; i++) {
     try {
       const r = await fetch(`${DANTOTSU_API}/authenticate`, {
-        method: 'POST', headers: { 'appauth': APP_AUTH_KEY }, body: JSON.stringify({ token: t })
+        method: 'POST', headers: { 'appauth': APP_AUTH_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t })
       })
       if (r.ok) return (await r.json()).authToken
       await sleep(5000 * (2 ** i))
