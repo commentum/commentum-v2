@@ -152,7 +152,7 @@ async function csvImport(db: any) {
       insertRows.push({
         client_type: 'anilist', user_id: c.user_id, media_id: String(c.media_id),
         content: c.content.length > 10000 ? c.content.slice(0, 10000) : c.content,
-        username: c.username.slice(0, 50), user_avatar: c.avatar_url,
+        username: (c.username || 'unknown').slice(0, 50), user_avatar: c.avatar_url,
         user_role: roleMap.get(c.user_id) || 'user',
         media_type: 'anime', media_title: 'Unknown Media', media_year: null, media_poster: null,
         parent_id: pid, deleted: c.deleted, deleted_at: c.deleted ? c.timestamp || null : null,
