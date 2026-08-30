@@ -21,8 +21,10 @@ serve(async (req) => {
     const url = new URL(req.url)
     const media_id = url.searchParams.get('media_id')
     const client_type = url.searchParams.get('client_type')
-    const page = parseInt(url.searchParams.get('page') || '1')
-    const limit = parseInt(url.searchParams.get('limit') || '50')
+    const pageParam = url.searchParams.get('page')
+    const limitParam = url.searchParams.get('limit')
+    const page = pageParam ? parseInt(pageParam) : null
+    const limit = limitParam ? parseInt(limitParam) : null
     const sort = url.searchParams.get('sort') || 'newest'
 
     // Validate required parameters
@@ -47,19 +49,30 @@ serve(async (req) => {
         break
     }
 
-    const offset = (page - 1) * limit
-
     // Get comments for this media
     // Include deleted comments (soft-deleted) so replies to deleted parents are preserved
     // Reddit-style: deleted comments show as "[deleted]" with no content
     // Note: We do NOT filter out banned users' comments — banned status doesn't hide their existing comments
-    const { data: comments, error } = await supabase
+    let commentsQuery = supabase
       .from('comments')
       .select('*')
       .eq('media_id', media_id)
       .eq('client_type', client_type)
       .order('created_at', { ascending: sort === 'oldest' })
-      .range(offset, offset + limit - 1)
+
+    // Only paginate if the caller explicitly asked for page/limit —
+    // and ignore the old default combo (page=1, limit=50) too, treating
+    // it the same as "no pagination" so old hardcoded app defaults
+    // (if ever sent) don't limit results either.
+    const noPagination =
+      page === null || limit === null || (page === 1 && limit === 50)
+
+    if (!noPagination) {
+      const offset = (page! - 1) * limit!
+      commentsQuery = commentsQuery.range(offset, offset + limit! - 1)
+    }
+
+    const { data: comments, error } = await commentsQuery
 
     if (error) throw error
 
@@ -159,7 +172,7 @@ serve(async (req) => {
           page,
           limit,
           total: count || 0,
-          totalPages: Math.ceil((count || 0) / limit)
+          totalPages: limit ? Math.ceil((count || 0) / limit) : 1
         }
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
