@@ -1,589 +1,362 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 
-// ====================================
-// CONSTANTS
-// ====================================
-
 const DANTOTSU_API = 'https://api.dantotsu.app'
 const APP_AUTH_KEY = '6*45Qp%W2RS@t38jkXoSKY588Ynj%n'
 const CSV_URL = 'https://raw.githubusercontent.com/itsmechinmoy/dantotsu-comment-db/refs/heads/main/dantotsu_global_db.csv'
 const ANILIST_GRAPHQL = 'https://graphql.anilist.co'
-const BATCH_SIZE = 500
-const ANILIST_BATCH_SIZE = 25
-const ANILIST_DELAY_MS = 350
-const TIME_BUDGET_MS = 100_000
+const BUDGET_MS = 45_000
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-sync-secret',
 }
 
-// ====================================
-// TYPES
-// ====================================
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
-interface ParsedComment {
-  dantotsu_id: number
-  user_id: string
-  media_id: number
-  parent_comment_id: number | null
-  content: string
-  timestamp: string
-  deleted: boolean
-  tag: number | null
-  upvotes: number
-  downvotes: number
-  username: string
-  avatar_url: string | null
-}
+// === HELPERS ===
 
-interface AniListMedia {
-  media_type: string
-  media_title: string
-  media_year: number | null
-  media_poster: string | null
-}
-
-interface SyncResult {
-  success: boolean
-  mode: string
-  processed: number
-  inserted: number
-  skipped: number
-  errors: number
-  remaining: number
-  duration_ms: number
-  message: string
-}
-
-// ====================================
-// TSV PARSER (RFC 4180 state machine)
-// ====================================
-
-function parseTSV(raw: string): Record<string, string>[] {
-  const rows: string[][] = []
-  let currentRow: string[] = []
-  let field = ''
-  let inQuotes = false
-  let i = 0
-
-  while (i < raw.length) {
-    const ch = raw[i]
-    if (inQuotes) {
-      if (ch === '"') {
-        if (raw[i + 1] === '"') { field += '"'; i += 2; continue }
-        inQuotes = false; i++; continue
-      }
-      field += ch; i++; continue
-    }
-    if (ch === '"') { inQuotes = true; i++; continue }
-    if (ch === '\t') { currentRow.push(field); field = ''; i++; continue }
-    if (ch === '\r' && raw[i + 1] === '\n') {
-      currentRow.push(field); field = ''; rows.push(currentRow); currentRow = []
-      i += 2; continue
-    }
-    if (ch === '\n') {
-      currentRow.push(field); field = ''; rows.push(currentRow); currentRow = []
-      i++; continue
-    }
-    field += ch; i++
-  }
-  if (field !== '' || currentRow.length > 0) {
-    currentRow.push(field); rows.push(currentRow)
-  }
-
-  if (rows.length < 2) return []
-  const headers = rows[0]
-  return rows.slice(1).map(row => {
-    const obj: Record<string, string> = {}
-    for (let j = 0; j < headers.length; j++) obj[headers[j]] = row[j] || ''
-    return obj
-  })
-}
-
-function parseCommentRow(row: Record<string, string>): ParsedComment | null {
-  const dantotsu_id = parseInt(row['comment_id'])
-  if (!dantotsu_id || isNaN(dantotsu_id)) return null
-
-  const rawParent = (row['parent_comment_id'] || '').trim()
-  const parentCommentId = (rawParent && rawParent !== 'NULL' && rawParent !== '0') ? parseInt(rawParent) : null
-
-  const rawTag = (row['tag'] || '').trim()
-  const tag = (rawTag && rawTag !== 'NULL' && rawTag !== '0') ? parseInt(rawTag) : null
-
-  let avatarUrl: string | null = (row['profile_picture_url'] || '').trim()
-  if (!avatarUrl || avatarUrl === 'NULL') avatarUrl = null
-
-  const content = (row['content'] || '').trim()
-  if (!content) return null
-
-  return {
-    dantotsu_id,
-    user_id: String(row['user_id'] || '').trim(),
-    media_id: parseInt(row['media_id']),
-    parent_comment_id: parentCommentId,
-    content,
-    timestamp: (row['timestamp'] || '').trim(),
-    deleted: row['deleted'] === '1',
-    tag,
-    upvotes: parseInt(row['upvotes']) || 0,
-    downvotes: parseInt(row['downvotes']) || 0,
-    username: (row['username'] || '').trim(),
-    avatar_url: avatarUrl,
-  }
-}
-
-// ====================================
-// ANILIST RESOLVER
-// ====================================
-
-async function fetchAniListBatch(ids: number[]): Promise<Map<number, AniListMedia>> {
-  const result = new Map<number, AniListMedia>()
-  const query = `query($ids: [Int]) { Page(page:1, perPage:25) { media(id_in:$ids) { id type title{english romaji} coverImage{medium} startDate{year} } } }`
-  try {
-    const res = await fetch(ANILIST_GRAPHQL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, variables: { ids } }),
-    })
-    if (!res.ok) return result
-    const data = await res.json()
-    for (const m of (data?.data?.Page?.media || [])) {
-      result.set(m.id, {
-        media_type: m.type || 'ANIME',
-        media_title: m.title?.english || m.title?.romaji || 'Unknown Media',
-        media_year: m.startDate?.year || null,
-        media_poster: m.coverImage?.medium || null,
-      })
-    }
-  } catch (e) { console.error(`[anilist] Batch failed:`, e) }
-  return result
-}
-
-async function resolveAniListMedia(supabase: any, mediaIds: Set<number>): Promise<Map<number, AniListMedia>> {
-  const result = new Map<number, AniListMedia>()
-
-  const { data: cached } = await supabase.from('dantotsu_media_cache').select('*').in('media_id', Array.from(mediaIds))
-  if (cached) for (const row of cached) {
-    result.set(row.media_id, { media_type: row.media_type, media_title: row.media_title, media_year: row.media_year, media_poster: row.media_poster })
-  }
-
-  const uncached = Array.from(mediaIds).filter(id => !result.has(id))
-  if (uncached.length === 0) return result
-
-  console.log(`[anilist] ${result.size} cached, ${uncached.length} to fetch`)
-
-  const toCache: any[] = []
-  for (let i = 0; i < uncached.length; i += ANILIST_BATCH_SIZE) {
-    const batch = uncached.slice(i, i + ANILIST_BATCH_SIZE)
-    const batchResult = await fetchAniListBatch(batch)
-    for (const [id, media] of batchResult) {
-      result.set(id, media)
-      toCache.push({ media_id: id, media_type: media.media_type, media_title: media.media_title, media_year: media.media_year, media_poster: media.media_poster })
-    }
-    if (toCache.length >= ANILIST_BATCH_SIZE) {
-      await supabase.from('dantotsu_media_cache').upsert(toCache, { onConflict: 'media_id' })
-      toCache.length = 0
-    }
-    if (i + ANILIST_BATCH_SIZE < uncached.length) await sleep(ANILIST_DELAY_MS)
-  }
-  if (toCache.length > 0) await supabase.from('dantotsu_media_cache').upsert(toCache, { onConflict: 'media_id' })
-
-  // Fallback for not-found media
-  for (const id of uncached) {
-    if (!result.has(id)) {
-      result.set(id, { media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null })
-      await supabase.from('dantotsu_media_cache').upsert({ media_id: id, media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null }, { onConflict: 'media_id' })
-    }
-  }
-  return result
-}
-
-// ====================================
-// ROLE MAP (from your config table)
-// ====================================
-
-async function buildRoleMap(supabase: any): Promise<Map<string, string>> {
-  const { data: configs } = await supabase.from('config').select('key, value').in('key', ['owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
-  const map = new Map<string, string>()
-  for (const c of (configs || [])) {
-    let users: unknown[] = []
-    try { users = JSON.parse(c.value || '[]') } catch { users = [] }
-    const role = c.key.replace('_users', '')
-    for (const uid of users) {
-      if (uid != null) { map.set(String(uid), role); map.set(String(Number(uid)), role) }
-    }
-  }
-  return map
-}
-
-function getRole(roleMap: Map<string, string>, userId: string): string {
-  return roleMap.get(userId) || 'user'
-}
-
-// ====================================
-// SYNC META HELPERS
-// ====================================
-
-async function getMeta(supabase: any, key: string): Promise<string | null> {
-  const { data } = await supabase.from('dantotsu_sync_meta').select('value').eq('key', key).single()
+async function getMeta(db: any, k: string) {
+  const { data } = await db.from('dantotsu_sync_meta').select('value').eq('key', k).single()
   return data?.value || null
 }
-
-async function setMeta(supabase: any, key: string, value: string): Promise<void> {
-  await supabase.from('dantotsu_sync_meta').upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+async function setMeta(db: any, k: string, v: string) {
+  await db.from('dantotsu_sync_meta').upsert({ key: k, value: v, updated_at: new Date().toISOString() }, { onConflict: 'key' })
 }
 
-// ====================================
-// CSV SYNC
-// ====================================
+// === TSV PARSER ===
 
-async function csvSync(supabase: any): Promise<SyncResult> {
-  const startTime = Date.now()
+function parseTSV(raw: string): Record<string, string>[] {
+  const rows: string[][] = [], cur: string[] = []
+  let field = '', inQ = false, i = 0
+  while (i < raw.length) {
+    const c = raw[i]
+    if (inQ) {
+      if (c === '"') { if (raw[i + 1] === '"') { field += '"'; i += 2; continue } inQ = false; i++; continue }
+      field += c; i++; continue
+    }
+    if (c === '"') { inQ = true; i++; continue }
+    if (c === '\t') { cur.push(field); field = ''; i++; continue }
+    if (c === '\r' && raw[i + 1] === '\n') { cur.push(field); field = ''; rows.push(cur); cur = []; i += 2; continue }
+    if (c === '\n') { cur.push(field); field = ''; rows.push(cur); cur = []; i++; continue }
+    field += c; i++
+  }
+  if (field || cur.length) { cur.push(field); rows.push(cur) }
+  if (rows.length < 2) return []
+  const h = rows[0]
+  return rows.slice(1).map(r => { const o: Record<string, string> = {}; for (let j = 0; j < h.length; j++) o[h[j]] = r[j] || ''; return o })
+}
+
+// === ROLE MAP ===
+
+async function buildRoleMap(db: any): Promise<Map<string, string>> {
+  const { data: cfgs } = await db.from('config').select('key, value').in('key', ['owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
+  const m = new Map<string, string>()
+  for (const c of (cfgs || [])) {
+    let users: any[] = []
+    try { users = JSON.parse(c.value || '[]') } catch { users = [] }
+    const role = c.key.replace('_users', '')
+    for (const u of users) if (u != null) { m.set(String(u), role); m.set(String(Number(u)), role) }
+  }
+  return m
+}
+
+// === ANILIST ===
+
+async function fetchAniListBatch(ids: number[]): Promise<Map<number, any>> {
+  const r = new Map<number, any>()
+  try {
+    const res = await fetch(ANILIST_GRAPHQL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: 'query($ids:[Int]){Page(page:1,perPage:25){media(id_in:$ids){id type title{english romaji}coverImage{medium}startDate{year}}}}', variables: { ids } })
+    })
+    if (!res.ok) return r
+    const data = await res.json()
+    for (const m of (data?.data?.Page?.media || [])) r.set(m.id, {
+      media_type: m.type || 'ANIME', media_title: m.title?.english || m.title?.romaji || 'Unknown Media',
+      media_year: m.startDate?.year || null, media_poster: m.coverImage?.medium || null
+    })
+  } catch (e) { console.error('[al] err:', e) }
+  return r
+}
+
+// === CSV IMPORT (no AniList — fast) ===
+
+async function csvImport(db: any) {
+  const t0 = Date.now()
   let processed = 0, inserted = 0, skipped = 0, errors = 0
 
-  // 1. Fetch CSV
-  console.log('[csv] Fetching CSV...')
-  let csvText: string
+  console.log('[csv] fetching...')
+  let csv: string
   try {
     const res = await fetch(CSV_URL)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    csvText = await res.text()
+    csv = await res.text()
   } catch (e) {
-    return { success: false, mode: 'csv', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: `CSV fetch failed: ${e}` }
+    return { success: false, mode: 'csv', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: `Fetch failed: ${e}` }
   }
-  console.log(`[csv] Fetched ${(csvText.length / 1024 / 1024).toFixed(1)}MB`)
+  console.log(`[csv] ${(csv.length / 1024 / 1024).toFixed(1)}MB`)
 
-  // 2. Hash check
-  const hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(csvText))
-  const csvHash = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('')
-  const lastHash = await getMeta(supabase, 'csv_hash')
-  if (lastHash === csvHash) {
-    const lastSync = await getMeta(supabase, 'last_sync_at')
-    return { success: true, mode: 'csv', processed: 0, inserted: 0, skipped: 0, errors: 0, remaining: 0, duration_ms: Date.now() - startTime, message: `CSV unchanged (last: ${lastSync})` }
+  const rows = parseTSV(csv)
+  const comments: any[] = []
+  for (const row of rows) {
+    const id = parseInt(row['comment_id'])
+    if (!id) continue
+    const rp = (row['parent_comment_id'] || '').trim()
+    const content = (row['content'] || '').trim()
+    if (!content) continue
+    const av = (row['profile_picture_url'] || '').trim()
+    const rt = (row['tag'] || '').trim()
+    comments.push({
+      dantotsu_id: id, user_id: String(row['user_id'] || '').trim(), media_id: parseInt(row['media_id']),
+      parent_comment_id: (rp && rp !== 'NULL' && rp !== '0') ? parseInt(rp) : null,
+      content, timestamp: (row['timestamp'] || '').trim(), deleted: row['deleted'] === '1',
+      tag: (rt && rt !== 'NULL' && rt !== '0') ? parseInt(rt) : null,
+      upvotes: parseInt(row['upvotes']) || 0, downvotes: parseInt(row['downvotes']) || 0,
+      username: (row['username'] || '').trim(), avatar_url: (!av || av === 'NULL') ? null : av,
+    })
   }
+  console.log(`[csv] ${comments.length} valid`)
 
-  // 3. Parse
-  console.log('[csv] Parsing...')
-  const rows = parseTSV(csvText)
-  const comments: ParsedComment[] = []
-  for (const row of rows) { const c = parseCommentRow(row); if (c) comments.push(c) }
-  console.log(`[csv] ${comments.length} valid comments`)
+  const { data: exist } = await db.from('dantotsu_id_mappings').select('dantotsu_comment_id, commentum_id')
+  const map = new Map<number, number>()
+  if (exist) for (const m of exist) map.set(m.dantotsu_comment_id, m.commentum_id)
 
-  // 4. Load existing mappings
-  const { data: existingMappings } = await supabase.from('dantotsu_id_mappings').select('dantotsu_comment_id, commentum_id')
-  const mappingMap = new Map<number, number>()
-  if (existingMappings) for (const m of existingMappings) mappingMap.set(m.dantotsu_comment_id, m.commentum_id)
-
-  // 5. Filter unimported, sort ASC (parents before children)
-  const unimported = comments.filter(c => !mappingMap.has(c.dantotsu_id)).sort((a, b) => a.dantotsu_id - b.dantotsu_id)
+  const unimported = comments.filter(c => !map.has(c.dantotsu_id)).sort((a, b) => a.dantotsu_id - b.dantotsu_id)
   skipped = comments.length - unimported.length
-  console.log(`[csv] ${unimported.length} new, ${skipped} already synced`)
+  console.log(`[csv] ${unimported.length} new, ${skipped} synced`)
 
-  if (unimported.length === 0) {
-    await setMeta(supabase, 'csv_hash', csvHash)
-    await setMeta(supabase, 'last_sync_at', new Date().toISOString())
-    return { success: true, mode: 'csv', processed: comments.length, inserted: 0, skipped, errors: 0, remaining: 0, duration_ms: Date.now() - startTime, message: 'All already synced' }
+  if (!unimported.length) {
+    await setMeta(db, 'csv_done', '1')
+    await setMeta(db, 'last_sync_at', new Date().toISOString())
+    return { success: true, mode: 'csv', processed: comments.length, inserted: 0, skipped, errors: 0, remaining: 0, duration_ms: Date.now() - t0, message: 'All synced' }
   }
 
-  // 6. Resolve AniList media
-  const uniqueMediaIds = new Set(unimported.map(c => c.media_id))
-  console.log(`[csv] Resolving ${uniqueMediaIds.size} media from AniList...`)
-  const mediaMap = await resolveAniListMedia(supabase, uniqueMediaIds)
-
-  // 7. Build role map
-  const roleMap = await buildRoleMap(supabase)
-
-  // 8. Batch insert with time budget
+  const roleMap = await buildRoleMap(db)
   let idx = 0
-  const loopStart = Date.now()
+  const deadline = Date.now() + BUDGET_MS
 
-  while (idx < unimported.length) {
-    if (Date.now() - loopStart > TIME_BUDGET_MS) {
-      console.log(`[csv] Time budget reached at ${idx}/${unimported.length}`)
-      break
-    }
-
-    const batch = unimported.slice(idx, idx + BATCH_SIZE)
-    const insertRows: any[] = []
-    const batchDantotsuIds: number[] = []
-
+  while (idx < unimported.length && Date.now() < deadline) {
+    const batch = unimported.slice(idx, idx + 200)
+    const insertRows: any[] = [], danIds: number[] = []
     for (const c of batch) {
-      let parentId: number | null = null
-      if (c.parent_comment_id) {
-        parentId = mappingMap.get(c.parent_comment_id) || null
-        if (!parentId) console.log(`[csv] Orphan: ${c.dantotsu_id} → parent ${c.parent_comment_id} not found`)
-      }
-
-      const media = mediaMap.get(c.media_id) || { media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null }
-      let tags: string | null = null
-      if (c.tag) tags = JSON.stringify(['spoiler', `episode:${c.tag}`])
-
+      let pid: number | null = null
+      if (c.parent_comment_id) pid = map.get(c.parent_comment_id) || null
       insertRows.push({
-        client_type: 'anilist',
-        user_id: c.user_id,
-        media_id: String(c.media_id),
+        client_type: 'anilist', user_id: c.user_id, media_id: String(c.media_id),
         content: c.content.length > 10000 ? c.content.slice(0, 10000) : c.content,
-        username: c.username.slice(0, 50),
-        user_avatar: c.avatar_url,
-        user_role: getRole(roleMap, c.user_id),
-        media_type: media.media_type,
-        media_title: media.media_title,
-        media_year: media.media_year,
-        media_poster: media.media_poster,
-        parent_id: parentId,
-        deleted: c.deleted,
-        deleted_at: c.deleted ? c.timestamp || null : null,
-        upvotes: c.upvotes,
-        downvotes: c.downvotes,
-        vote_score: c.upvotes - c.downvotes,
-        tags,
-        created_at: c.timestamp || null,
-        updated_at: c.timestamp || null,
+        username: c.username.slice(0, 50), user_avatar: c.avatar_url,
+        user_role: roleMap.get(c.user_id) || 'user',
+        media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null,
+        parent_id: pid, deleted: c.deleted, deleted_at: c.deleted ? c.timestamp || null : null,
+        upvotes: c.upvotes, downvotes: c.downvotes, vote_score: c.upvotes - c.downvotes,
+        tags: c.tag ? JSON.stringify(['spoiler', `episode:${c.tag}`]) : null,
+        created_at: c.timestamp || null, updated_at: c.timestamp || null,
       })
-      batchDantotsuIds.push(c.dantotsu_id)
+      danIds.push(c.dantotsu_id)
     }
 
     try {
-      const { data: insertedRows, error } = await supabase.from('comments').insert(insertRows).select('id')
-      if (error) {
-        console.error(`[csv] Insert error at ${idx}:`, error)
-        errors += batch.length; idx += BATCH_SIZE; continue
-      }
-      if (insertedRows && insertedRows.length > 0) {
-        const mappingEntries = insertedRows.map((row: any, i: number) => ({
-          dantotsu_comment_id: batchDantotsuIds[i], commentum_id: row.id, media_id: batch[i].media_id,
-        }))
-        for (const entry of mappingEntries) mappingMap.set(entry.dantotsu_comment_id, entry.commentum_id)
-        const mapResult = await supabase.from('dantotsu_id_mappings').upsert(mappingEntries, { onConflict: 'dantotsu_comment_id' })
-        if (mapResult.error) { console.error('[csv] Mapping error:', mapResult.error); errors += mappingEntries.length }
-        else inserted += insertedRows.length
+      const { data: ins, error } = await db.from('comments').insert(insertRows).select('id')
+      if (error) { console.error(`[csv] err @${idx}:`, error.message); errors += batch.length; idx += 200; continue }
+      if (ins?.length) {
+        const mappings = ins.map((r: any, i: number) => ({ dantotsu_comment_id: danIds[i], commentum_id: r.id, media_id: batch[i].media_id }))
+        for (const m of mappings) map.set(m.dantotsu_comment_id, m.commentum_id)
+        const mr = await db.from('dantotsu_id_mappings').upsert(mappings, { onConflict: 'dantotsu_comment_id' })
+        if (mr.error) { console.error('[csv] map err:', mr.error.message); errors += mappings.length }
+        else inserted += ins.length
       }
       processed += batch.length
-    } catch (e) {
-      console.error(`[csv] Batch error at ${idx}:`, e)
-      errors += batch.length
-    }
-    idx += BATCH_SIZE
+    } catch (e) { console.error(`[csv] batch err @${idx}:`, e); errors += batch.length }
+    idx += 200
   }
 
-  if (inserted > 0) {
-    await setMeta(supabase, 'csv_hash', csvHash)
-    await setMeta(supabase, 'last_sync_at', new Date().toISOString())
-  }
+  if (inserted > 0) await setMeta(db, 'last_sync_at', new Date().toISOString())
+  if (unimported.length - idx === 0) await setMeta(db, 'csv_done', '1')
 
   const remaining = unimported.length - idx
-  const message = remaining > 0
-    ? `Imported ${inserted}, ${remaining} remaining (call again)`
-    : `Done! ${inserted} new, ${skipped} already synced`
-  console.log(`[csv] ${message}`)
-  return { success: errors === 0, mode: 'csv', processed, inserted, skipped, errors, remaining, duration_ms: Date.now() - startTime, message }
+  const msg = remaining > 0 ? `Imported ${inserted}, ${remaining} left (call again)` : `Done! ${inserted} new, ${skipped} synced`
+  console.log(`[csv] ${msg}`)
+  return { success: errors === 0, mode: 'csv', processed, inserted, skipped, errors, remaining, duration_ms: Date.now() - t0, message: msg }
 }
 
-// ====================================
-// API INCREMENTAL SYNC
-// ====================================
+// === RESOLVE MEDIA (separate step) ===
 
-async function dantotsuAuth(): Promise<string | null> {
-  const alToken = Deno.env.get('DANTOTSU_AL_TOKEN')
-  if (!alToken) { console.error('[api] DANTOTSU_AL_TOKEN not set'); return null }
-  for (let attempt = 0; attempt < 3; attempt++) {
+async function resolveMedia(db: any) {
+  // Find unique media_ids from dantotsu mappings that aren't in cache yet
+  const { data: mapped } = await db.from('dantotsu_id_mappings').select('media_id')
+  if (!mapped?.length) return { success: true, resolved: 0, cached_total: 0, message: 'No mappings yet' }
+
+  const uniqueIds = [...new Set(mapped.map((r: any) => r.media_id))]
+  const { data: cached } = await db.from('dantotsu_media_cache').select('media_id').in('media_id', uniqueIds)
+  const cachedSet = new Set((cached || []).map((r: any) => r.media_id))
+  const uncached = uniqueIds.filter(id => !cachedSet.has(id))
+
+  if (!uncached.length) return { success: true, resolved: 0, cached_total: cachedSet.size, message: 'All media cached' }
+
+  // Process 25 per call
+  const batch = uncached.slice(0, 25)
+  console.log(`[media] resolving ${batch.length}/${uncached.length} uncached media...`)
+  const fresh = await fetchAniListBatch(batch)
+  let resolved = 0
+
+  const toUpsert: any[] = []
+  for (const id of batch) {
+    const m = fresh.get(id) || { media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null }
+    toUpsert.push({ media_id: id, ...m })
+    resolved++
+  }
+  if (toUpsert.length) await db.from('dantotsu_media_cache').upsert(toUpsert, { onConflict: 'media_id' })
+
+  // Update comments that have default media info
+  for (const id of batch) {
+    const m = fresh.get(id)
+    if (m) await db.from('comments').update({ media_type: m.media_type, media_title: m.media_title, media_year: m.media_year, media_poster: m.media_poster }).eq('media_id', String(id)).eq('media_title', 'Unknown Media')
+  }
+
+  return { success: true, resolved, remaining_uncached: uncached.length - batch.length, message: `Resolved ${batch.length} media (${uncached.length - batch.length} left)` }
+}
+
+// === DANTOTSU AUTH ===
+
+async function danAuth(): Promise<string | null> {
+  const t = Deno.env.get('DANTOTSU_AL_TOKEN')
+  if (!t) return null
+  for (let i = 0; i < 3; i++) {
     try {
-      const res = await fetch(`${DANTOTSU_API}/authenticate`, {
-        method: 'POST',
-        headers: { 'appauth': APP_AUTH_KEY },
-        body: JSON.stringify({ token: alToken }),
+      const r = await fetch(`${DANTOTSU_API}/authenticate`, {
+        method: 'POST', headers: { 'appauth': APP_AUTH_KEY }, body: JSON.stringify({ token: t })
       })
-      if (res.ok) { const data = await res.json(); return data.authToken }
-      console.error(`[api] Auth ${res.status}, attempt ${attempt + 1}/3`)
-      await sleep(5000 * (2 ** attempt))
-    } catch (e) { console.error(`[api] Auth error ${attempt + 1}/3:`, e); await sleep(5000 * (2 ** attempt)) }
+      if (r.ok) return (await r.json()).authToken
+      await sleep(5000 * (2 ** i))
+    } catch { await sleep(5000 * (2 ** i)) }
   }
   return null
 }
 
-async function apiSync(supabase: any): Promise<SyncResult> {
-  const startTime = Date.now()
+// === API SYNC ===
+
+async function apiSync(db: any) {
+  const t0 = Date.now()
   let inserted = 0, errors = 0, checked = 0
 
-  const token = await dantotsuAuth()
-  if (!token) return { success: false, mode: 'api', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: 'Dantotsu auth failed' }
-  console.log('[api] Authenticated')
+  const token = await danAuth()
+  if (!token) return { success: false, mode: 'api', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: 'Auth failed' }
 
-  // Get max mapped ID
-  const { data: maxMapping } = await supabase.from('dantotsu_id_mappings').select('dantotsu_comment_id').order('dantotsu_comment_id', { ascending: false }).limit(1).single()
-  let currentId = maxMapping?.dantotsu_comment_id ? maxMapping.dantotsu_comment_id + 1 : 242
-  console.log(`[api] Scanning from ID ${currentId}...`)
+  const { data: maxM } = await db.from('dantotsu_id_mappings').select('dantotsu_comment_id').order('dantotsu_comment_id', { ascending: false }).limit(1).single()
+  let curId = maxM?.dantotsu_comment_id ? maxM.dantotsu_comment_id + 1 : 242
 
-  // Load mappings + role map + media cache
-  const { data: allMappings } = await supabase.from('dantotsu_id_mappings').select('dantotsu_comment_id, commentum_id')
-  const mappingMap = new Map<number, number>()
-  if (allMappings) for (const m of allMappings) mappingMap.set(m.dantotsu_comment_id, m.commentum_id)
+  const { data: allM } = await db.from('dantotsu_id_mappings').select('dantotsu_comment_id, commentum_id')
+  const map = new Map<number, number>()
+  if (allM) for (const m of allM) map.set(m.dantotsu_comment_id, m.commentum_id)
+  const roleMap = await buildRoleMap(db)
 
-  const roleMap = await buildRoleMap(supabase)
-  const { data: cachedMedia } = await supabase.from('dantotsu_media_cache').select('*')
-  const mediaMap = new Map<number, AniListMedia>()
-  if (cachedMedia) for (const m of cachedMedia) {
-    mediaMap.set(m.media_id, { media_type: m.media_type, media_title: m.media_title, media_year: m.media_year, media_poster: m.media_poster })
-  }
+  let c404 = 0
+  const newC: { row: any; danId: number; mid: number }[] = []
+  const deadline = Date.now() + BUDGET_MS
 
-  let consecutive404s = 0
-  const newMediaIds = new Set<number>()
-  const newComments: { comment: any; dantotsuId: number; mediaId: number }[] = []
-
-  while (consecutive404s < 50) {
-    if (Date.now() - startTime > TIME_BUDGET_MS) { console.log('[api] Time budget reached'); break }
-
-    let commentData: any = null
+  while (c404 < 50 && Date.now() < deadline) {
+    let d: any = null
     try {
-      const res = await fetch(`${DANTOTSU_API}/comments/${currentId}`, {
-        headers: { 'appauth': APP_AUTH_KEY, 'Authorization': token },
-      })
-      if (res.status === 429) { console.log('[api] Rate limited, waiting 30s...'); await sleep(30000); continue }
-      if (res.status === 200) commentData = await res.json()
-    } catch (e) { console.error(`[api] Error on ${currentId}:`, e) }
-
+      const r = await fetch(`${DANTOTSU_API}/comments/${curId}`, { headers: { 'appauth': APP_AUTH_KEY, 'Authorization': token } })
+      if (r.status === 429) { await sleep(30000); continue }
+      if (r.status === 200) d = await r.json()
+    } catch { }
     checked++
-    if (!commentData) { consecutive404s++; currentId++; await sleep(100); continue }
-    consecutive404s = 0
+    if (!d) { c404++; curId++; await sleep(100); continue }
+    c404 = 0
+    if (map.has(d.comment_id)) { curId = d.comment_id + 1; await sleep(100); continue }
 
-    const dId = commentData.comment_id
-    if (mappingMap.has(dId)) { currentId = dId + 1; await sleep(100); continue }
-
-    const rawParent = commentData.parent_comment_id
-    const parentId = (rawParent && rawParent !== 0) ? (mappingMap.get(rawParent) || null) : null
-    const mediaId = parseInt(commentData.media_id)
-    const isDeleted = !!commentData.deleted
-    const content = isDeleted ? '[deleted]' : (commentData.content || '')
-
-    newMediaIds.add(mediaId)
-    newComments.push({
-      comment: {
-        client_type: 'anilist',
-        user_id: String(commentData.user_id),
-        media_id: String(mediaId),
-        content,
-        username: (commentData.username || 'unknown').slice(0, 50),
-        user_avatar: commentData.profile_picture_url || null,
-        user_role: getRole(roleMap, String(commentData.user_id)),
+    const mid = parseInt(d.media_id)
+    const isDel = !!d.deleted
+    newC.push({
+      row: {
+        client_type: 'anilist', user_id: String(d.user_id), media_id: String(mid),
+        content: isDel ? '[deleted]' : (d.content || ''),
+        username: (d.username || 'unknown').slice(0, 50), user_avatar: d.profile_picture_url || null,
+        user_role: roleMap.get(String(d.user_id)) || 'user',
         media_type: 'ANIME', media_title: 'Unknown Media', media_year: null, media_poster: null,
-        parent_id: parentId,
-        deleted: isDeleted,
-        deleted_at: isDeleted ? commentData.timestamp || null : null,
-        upvotes: commentData.upvotes || 0,
-        downvotes: commentData.downvotes || 0,
-        vote_score: (commentData.upvotes || 0) - (commentData.downvotes || 0),
-        tags: null,
-        created_at: commentData.timestamp || null,
-        updated_at: commentData.timestamp || null,
-      },
-      dantotsuId: dId, mediaId,
+        parent_id: (d.parent_comment_id && d.parent_comment_id !== 0) ? (map.get(d.parent_comment_id) || null) : null,
+        deleted: isDel, deleted_at: isDel ? d.timestamp || null : null,
+        upvotes: d.upvotes || 0, downvotes: d.downvotes || 0, vote_score: (d.upvotes || 0) - (d.downvotes || 0),
+        tags: null, created_at: d.timestamp || null, updated_at: d.timestamp || null,
+      }, danId: d.comment_id, mid
     })
-    currentId = dId + 1
+    curId = d.comment_id + 1
     await sleep(100)
   }
 
-  // Resolve new media from AniList
-  if (newMediaIds.size > 0) {
-    const fresh = await resolveAniListMedia(supabase, newMediaIds)
-    for (const [id, media] of fresh) mediaMap.set(id, media)
-  }
-  for (const item of newComments) {
-    const media = mediaMap.get(item.mediaId)
-    if (media) { item.comment.media_type = media.media_type; item.comment.media_title = media.media_title; item.comment.media_year = media.media_year; item.comment.media_poster = media.media_poster }
-  }
-
-  // Batch insert
-  for (let i = 0; i < newComments.length; i += BATCH_SIZE) {
-    const batch = newComments.slice(i, i + BATCH_SIZE)
-    try {
-      const { data: insertedRows, error } = await supabase.from('comments').insert(batch.map(b => b.comment)).select('id')
-      if (error) { console.error('[api] Insert error:', error); errors += batch.length; continue }
-      if (insertedRows && insertedRows.length > 0) {
-        const mappingEntries = insertedRows.map((row: any, j: number) => ({
-          dantotsu_comment_id: batch[j].dantotsuId, commentum_id: row.id, media_id: batch[j].mediaId,
-        }))
-        for (const entry of mappingEntries) mappingMap.set(entry.dantotsu_comment_id, entry.commentum_id)
-        const mapResult = await supabase.from('dantotsu_id_mappings').upsert(mappingEntries, { onConflict: 'dantotsu_comment_id' })
-        if (mapResult.error) { console.error('[api] Mapping error:', mapResult.error); errors += mappingEntries.length }
-        else inserted += insertedRows.length
-      }
-    } catch (e) { console.error('[api] Batch error:', e); errors += batch.length }
+  if (newC.length) {
+    for (let i = 0; i < newC.length; i += 200) {
+      const b = newC.slice(i, i + 200)
+      try {
+        const { data: ins, error } = await db.from('comments').insert(b.map(x => x.row)).select('id')
+        if (error) { errors += b.length; continue }
+        if (ins?.length) {
+          const mappings = ins.map((r: any, j: number) => ({ dantotsu_comment_id: b[j].danId, commentum_id: r.id, media_id: b[j].mid }))
+          for (const m of mappings) map.set(m.dantotsu_comment_id, m.commentum_id)
+          await db.from('dantotsu_id_mappings').upsert(mappings, { onConflict: 'dantotsu_comment_id' })
+          inserted += ins.length
+        }
+      } catch { errors += b.length }
+    }
   }
 
   if (inserted > 0) {
-    await setMeta(supabase, 'last_sync_at', new Date().toISOString())
-    await setMeta(supabase, 'last_api_scan_id', String(currentId - 1))
+    await setMeta(db, 'last_sync_at', new Date().toISOString())
+    await setMeta(db, 'last_api_scan_id', String(curId - 1))
   }
 
-  const message = inserted > 0 ? `Found ${newComments.length} new, inserted ${inserted}` : `No new comments (checked ${checked} IDs)`
-  console.log(`[api] ${message}`)
-  return { success: errors === 0, mode: 'api', processed: checked, inserted, skipped: checked - newComments.length, errors, remaining: -1, duration_ms: Date.now() - startTime, message }
+  const msg = inserted > 0 ? `Found ${newC.length} new, inserted ${inserted}` : `No new (checked ${checked})`
+  return { success: errors === 0, mode: 'api', processed: checked, inserted, skipped: checked - newC.length, errors, remaining: -1, duration_ms: Date.now() - t0, message: msg }
 }
 
-// ====================================
-// STATUS
-// ====================================
-
-async function getStatus(supabase: any): Promise<any> {
-  const { count: totalMappings } = await supabase.from('dantotsu_id_mappings').select('*', { count: 'exact', head: true })
-  const { count: totalMedia } = await supabase.from('dantotsu_media_cache').select('*', { count: 'exact', head: true })
-  return {
-    synced_comments: totalMappings || 0,
-    cached_media: totalMedia || 0,
-    last_sync_at: await getMeta(supabase, 'last_sync_at'),
-    last_api_scan_id: await getMeta(supabase, 'last_api_scan_id'),
-    has_al_token: !!Deno.env.get('DANTOTSU_AL_TOKEN'),
-  }
-}
-
-function sleep(ms: number): Promise<void> { return new Promise(resolve => setTimeout(resolve, ms)) }
-
-// ====================================
-// MAIN HANDLER
-// ====================================
+// === MAIN ===
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
-
-  const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   const action = new URL(req.url).searchParams.get('action') || 'auto'
 
   try {
     switch (action) {
       case 'status': {
-        const status = await getStatus(supabase)
-        return new Response(JSON.stringify(status, null, 2), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+        const { count: cm } = await db.from('dantotsu_id_mappings').select('*', { count: 'exact', head: true })
+        const { count: md } = await db.from('dantotsu_media_cache').select('*', { count: 'exact', head: true })
+        return new Response(JSON.stringify({ synced_comments: cm || 0, cached_media: md || 0, last_sync_at: await getMeta(db, 'last_sync_at'), last_api_scan_id: await getMeta(db, 'last_api_scan_id'), has_al_token: !!Deno.env.get('DANTOTSU_AL_TOKEN') }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
       case 'csv': {
-        console.log('=== CSV SYNC ===')
-        const r = await csvSync(supabase)
-        console.log('=== DONE ===', r.message)
+        console.log('=== CSV IMPORT ===')
+        const r = await csvImport(db)
         return new Response(JSON.stringify(r, null, 2), { status: r.success ? 200 : 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+      case 'resolve-media': {
+        console.log('=== RESOLVE MEDIA ===')
+        const r = await resolveMedia(db)
+        return new Response(JSON.stringify(r, null, 2), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
       case 'api': {
         console.log('=== API SYNC ===')
-        const r = await apiSync(supabase)
-        console.log('=== DONE ===', r.message)
+        const r = await apiSync(db)
         return new Response(JSON.stringify(r, null, 2), { status: r.success ? 200 : 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
       case 'auto': {
-        const { count } = await supabase.from('dantotsu_id_mappings').select('*', { count: 'exact', head: true })
-        if (!count || count === 0) {
+        const { count } = await db.from('dantotsu_id_mappings').select('*', { count: 'exact', head: true })
+        const done = await getMeta(db, 'csv_done')
+        if (!count || count === 0 || !done) {
           console.log('=== AUTO → CSV ===')
-          const r = await csvSync(supabase)
+          const r = await csvImport(db)
           return new Response(JSON.stringify(r, null, 2), { status: r.success ? 200 : 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
         }
         console.log(`=== AUTO → API (${count} mapped) ===`)
-        const r = await apiSync(supabase)
+        const r = await apiSync(db)
         return new Response(JSON.stringify(r, null, 2), { status: r.success ? 200 : 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
       default:
-        return new Response(JSON.stringify({ error: 'Use: status, csv, api, or auto' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+        return new Response(JSON.stringify({ error: 'Use: status, csv, resolve-media, api, auto' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
   } catch (e) {
-    console.error('Sync error:', e)
+    console.error('err:', e)
     return new Response(JSON.stringify({ success: false, error: e instanceof Error ? e.message : String(e) }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
   }
 })
