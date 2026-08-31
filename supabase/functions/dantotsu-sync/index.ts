@@ -6,7 +6,8 @@ const APP_AUTH_KEY = '6*45Qp%W2RS@t38jkXoSKY588Ynj%n'
 const CSV_URL = 'https://raw.githubusercontent.com/itsmechinmoy/dantotsu-comment-db/refs/heads/main/dantotsu_global_db.csv'
 const ANILIST_GRAPHQL = 'https://graphql.anilist.co'
 const BUDGET_MS = 45_000
-const RATE_LIMIT_WAIT_MS = 30_000
+const RATE_LIMIT_DEFAULT_WAIT_MS = 2_000
+const RATE_LIMIT_MAX_WAIT_MS = 5_000
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -288,27 +289,40 @@ async function apiSync(db: any) {
   const roleMap = await buildRoleMap(db)
 
   let c404 = 0
+  let rateLimited = false
+  let rateLimitWaitMs = 0
   const newC: { row: any; danId: number; mid: number }[] = []
-  let deadline = Date.now() + BUDGET_MS
+  const deadline = Date.now() + BUDGET_MS
 
   while (c404 < 50 && Date.now() < deadline) {
     let d: any = null
     let fetched = false
 
-    // Match dantotsu_manager.py: on 429, wait 30s and retry the SAME
-    // comment ID instead of treating the rate limit as a missing comment.
+    // On 429, wait briefly and retry the SAME ID. Never extend the
+    // Edge Function budget; if the budget is nearly exhausted, leave the
+    // ID untouched so the next cron invocation resumes here.
     while (!fetched && Date.now() < deadline) {
       try {
         const r = await fetch(`${DANTOTSU_API}/comments/${curId}`, {
           headers: { 'appauth': APP_AUTH_KEY, 'Authorization': token },
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(1_500),
         })
 
         if (r.status === 429) {
-          console.log(`[api] rate limited on ${curId}; waiting ${RATE_LIMIT_WAIT_MS / 1000}s then retrying`)
-          await sleep(RATE_LIMIT_WAIT_MS)
-          // Do not consume the normal scan budget while waiting for the API.
-          deadline += RATE_LIMIT_WAIT_MS
+          const retryAfter = Number(r.headers.get('retry-after') || '')
+          const waitMs = Math.min(
+            Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : RATE_LIMIT_DEFAULT_WAIT_MS,
+            RATE_LIMIT_MAX_WAIT_MS,
+          )
+
+          if (Date.now() + waitMs >= deadline) {
+            rateLimited = true
+            break
+          }
+
+          console.log(`[api] rate limited on ${curId}; waiting ${waitMs}ms then retrying`)
+          await sleep(waitMs)
+          rateLimitWaitMs += waitMs
           continue
         }
 
@@ -318,6 +332,9 @@ async function apiSync(db: any) {
         fetched = true
       }
     }
+
+    // Budget/rate-limit reached: do not advance curId.
+    if (rateLimited && !fetched) break
 
     checked++
     if (!d) { c404++; curId++; await sleep(100); continue }
@@ -359,13 +376,32 @@ async function apiSync(db: any) {
     }
   }
 
-  if (inserted > 0) {
-    await setMeta(db, 'last_sync_at', new Date().toISOString())
-    await setMeta(db, 'last_api_scan_id', String(curId - 1))
-  }
+  if (inserted > 0) await setMeta(db, 'last_sync_at', new Date().toISOString())
 
-  const msg = inserted > 0 ? `Found ${newC.length} new, inserted ${inserted}` : `No new (checked ${checked})`
-  return { success: errors === 0, mode: 'api', processed: checked, inserted, skipped: checked - newC.length, errors, remaining: -1, duration_ms: Date.now() - t0, message: msg }
+  // Persist the last successfully consumed ID even when rate limited.
+  // If we stopped on a 429, curId itself is intentionally not advanced,
+  // so the next invocation retries that exact ID.
+  await setMeta(db, 'last_api_scan_id', String(curId - 1))
+
+  const msg = rateLimited
+    ? `Rate limited; inserted ${inserted}, checked ${checked}. Resume at ${curId}`
+    : inserted > 0
+      ? `Found ${newC.length} new, inserted ${inserted}`
+      : `No new (checked ${checked})`
+  return {
+    success: errors === 0,
+    mode: 'api',
+    processed: checked,
+    inserted,
+    skipped: checked - newC.length,
+    errors,
+    remaining: -1,
+    duration_ms: Date.now() - t0,
+    message: msg,
+    scan_cursor: curId,
+    rate_limited: rateLimited,
+    rate_limit_wait_ms: rateLimitWaitMs,
+  }
 }
 
 // === MAIN ===
