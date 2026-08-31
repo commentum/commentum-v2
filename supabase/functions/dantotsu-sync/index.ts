@@ -276,109 +276,177 @@ async function danAuth(): Promise<string | null> {
 
 // === API SYNC ===
 
+// Dantotsu comment IDs are not guaranteed to be contiguous. A sync pass therefore
+// scans a moving window around the newest known ID instead of stopping after a
+// run of missing IDs. This catches late-arriving comments and ID gaps.
+const API_CONCURRENCY = 8
+const API_LOOKBACK = 100
+const API_LOOKAHEAD = 150
+
 async function apiSync(db: any) {
   const t0 = Date.now()
   let inserted = 0, errors = 0, checked = 0
 
   const token = await danAuth()
-  if (!token) return { success: false, mode: 'api', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: 'Auth failed' }
+  if (!token) {
+    return { success: false, mode: 'api', processed: 0, inserted: 0, skipped: 0, errors: 1, remaining: -1, duration_ms: 0, message: 'Auth failed' }
+  }
 
-  const { data: maxM } = await db.from('dantotsu_id_mappings').select('dantotsu_comment_id').order('dantotsu_comment_id', { ascending: false }).limit(1).single()
-  let curId = maxM?.dantotsu_comment_id ? maxM.dantotsu_comment_id + 1 : 242
+  const { data: maxM } = await db
+    .from('dantotsu_id_mappings')
+    .select('dantotsu_comment_id')
+    .order('dantotsu_comment_id', { ascending: false })
+    .limit(1)
+    .single()
 
-  const { data: allM } = await db.from('dantotsu_id_mappings').select('dantotsu_comment_id, commentum_id')
+  const maxId = maxM?.dantotsu_comment_id ? Number(maxM.dantotsu_comment_id) : 241
+  const startId = Math.max(1, maxId - API_LOOKBACK)
+  const endId = maxId + API_LOOKAHEAD
+
+  const { data: allM } = await db
+    .from('dantotsu_id_mappings')
+    .select('dantotsu_comment_id, commentum_id')
+
   const map = new Map<number, number>()
-  if (allM) for (const m of allM) map.set(m.dantotsu_comment_id, m.commentum_id)
-  const roleMap = await buildRoleMap(db)
+  if (allM) for (const m of allM) map.set(Number(m.dantotsu_comment_id), Number(m.commentum_id))
 
-  let c404 = 0
+  const roleMap = await buildRoleMap(db)
   const newC: { row: any; danId: number; mid: number }[] = []
   const deadline = Date.now() + BUDGET_MS
+  let rateLimited = false
 
-  // Keep every individual API request short enough that the Edge runtime
-  // can return a response before its wall-clock limit.
-  while (c404 < 50 && Date.now() < deadline) {
-    let d: any = null
-    try {
-      const r = await fetch(`${DANTOTSU_API}/comments/${curId}`, {
-        headers: { 'appauth': APP_AUTH_KEY, 'Authorization': token },
-        signal: AbortSignal.timeout(2_000),
-      })
+  console.log(`[api] scanning IDs ${startId}-${endId} around max ${maxId}`)
 
-      if (r.status === 429) {
-        console.warn('[api] Dantotsu rate limited; ending this sync pass')
+  for (let batchStart = startId; batchStart <= endId && Date.now() < deadline; batchStart += API_CONCURRENCY) {
+    const ids: number[] = []
+    for (let id = batchStart; id < batchStart + API_CONCURRENCY && id <= endId; id++) ids.push(id)
+
+    const results = await Promise.all(ids.map(async id => {
+      try {
+        const r = await fetch(`${DANTOTSU_API}/comments/${id}`, {
+          headers: { 'appauth': APP_AUTH_KEY, 'Authorization': token },
+          signal: AbortSignal.timeout(1_500),
+        })
+        if (r.status === 429) return { id, rateLimited: true, d: null }
+        if (r.status !== 200) return { id, rateLimited: false, d: null }
+        return { id, rateLimited: false, d: await r.json() }
+      } catch {
+        return { id, rateLimited: false, d: null }
+      }
+    }))
+
+    for (const result of results) {
+      checked++
+      if (result.rateLimited) {
+        rateLimited = true
         break
       }
 
-      if (r.status === 200) d = await r.json()
-    } catch (e) {
-      console.warn(
-        `[api] comment ${curId} failed:`,
-        e instanceof Error ? `${e.name}: ${e.message}` : String(e)
-      )
+      const d = result.d
+      if (!d || !d.comment_id || map.has(Number(d.comment_id))) continue
+
+      const mid = parseInt(d.media_id)
+      if (!mid) continue
+
+      const isDel = !!d.deleted
+      newC.push({
+        row: {
+          client_type: 'anilist',
+          user_id: String(d.user_id),
+          media_id: String(mid),
+          content: isDel ? '[deleted]' : (d.content || ''),
+          username: (d.username || 'unknown').slice(0, 50),
+          user_avatar: d.profile_picture_url || null,
+          user_role: roleMap.get(String(d.user_id)) || 'user',
+          media_type: 'anime',
+          media_title: 'Unknown Media',
+          media_year: null,
+          media_poster: null,
+          parent_id: (d.parent_comment_id && d.parent_comment_id !== 0)
+            ? (map.get(Number(d.parent_comment_id)) || null)
+            : null,
+          deleted: isDel,
+          deleted_at: isDel ? d.timestamp || null : null,
+          upvotes: d.upvotes || 0,
+          downvotes: d.downvotes || 0,
+          vote_score: (d.upvotes || 0) - (d.downvotes || 0),
+          tags: null,
+          created_at: d.timestamp || null,
+          updated_at: d.timestamp || null,
+        },
+        danId: Number(d.comment_id),
+        mid,
+      })
     }
 
-    checked++
-
-    if (!d) {
-      c404++
-      curId++
-      continue
-    }
-
-    c404 = 0
-
-    if (map.has(d.comment_id)) {
-      curId = d.comment_id + 1
-      continue
-    }
-
-    const mid = parseInt(d.media_id)
-    const isDel = !!d.deleted
-    newC.push({
-      row: {
-        client_type: 'anilist', user_id: String(d.user_id), media_id: String(mid),
-        content: isDel ? '[deleted]' : (d.content || ''),
-        username: (d.username || 'unknown').slice(0, 50), user_avatar: d.profile_picture_url || null,
-        user_role: roleMap.get(String(d.user_id)) || 'user',
-        media_type: 'anime', media_title: 'Unknown Media', media_year: null, media_poster: null,
-        parent_id: (d.parent_comment_id && d.parent_comment_id !== 0) ? (map.get(d.parent_comment_id) || null) : null,
-        deleted: isDel, deleted_at: isDel ? d.timestamp || null : null,
-        upvotes: d.upvotes || 0, downvotes: d.downvotes || 0, vote_score: (d.upvotes || 0) - (d.downvotes || 0),
-        tags: null, created_at: d.timestamp || null, updated_at: d.timestamp || null,
-      }, danId: d.comment_id, mid
-    })
-    curId = d.comment_id + 1
-    await sleep(100)
+    if (rateLimited) break
   }
 
-  if (newC.length) {
-    for (let i = 0; i < newC.length; i += 200) {
-      const b = newC.slice(i, i + 200)
-      try {
-        const { data: ins, error } = await db.from('comments').insert(b.map(x => x.row)).select('id')
-        if (error) { errors += b.length; continue }
-        if (ins?.length) {
-          const mappings = ins.map((r: any, j: number) => ({ dantotsu_comment_id: b[j].danId, commentum_id: r.id, media_id: b[j].mid }))
-          for (const m of mappings) map.set(m.dantotsu_comment_id, m.commentum_id)
-          await db.from('dantotsu_id_mappings').upsert(mappings, { onConflict: 'dantotsu_comment_id' })
-          inserted += ins.length
+  newC.sort((a, b) => a.danId - b.danId)
+
+  for (let i = 0; i < newC.length; i += 200) {
+    const b = newC.slice(i, i + 200)
+    try {
+      const { data: ins, error } = await db
+        .from('comments')
+        .insert(b.map(x => x.row))
+        .select('id')
+
+      if (error) {
+        console.error('[api] insert error:', error.message)
+        errors += b.length
+        continue
+      }
+
+      if (ins?.length) {
+        const mappings = ins.map((r: any, j: number) => ({
+          dantotsu_comment_id: b[j].danId,
+          commentum_id: r.id,
+          media_id: b[j].mid,
+        }))
+
+        const mr = await db
+          .from('dantotsu_id_mappings')
+          .upsert(mappings, { onConflict: 'dantotsu_comment_id' })
+
+        if (mr.error) {
+          console.error('[api] mapping error:', mr.error.message)
+          errors += mappings.length
+          continue
         }
-      } catch { errors += b.length }
+
+        for (const m of mappings) map.set(m.dantotsu_comment_id, m.commentum_id)
+        inserted += ins.length
+      }
+    } catch (e) {
+      console.error('[api] batch error:', e)
+      errors += b.length
     }
   }
 
-  if (inserted > 0) {
-    await setMeta(db, 'last_sync_at', new Date().toISOString())
-  }
-  if (checked > 0) {
-    await setMeta(db, 'last_api_scan_id', String(curId - 1))
-  }
+  if (inserted > 0) await setMeta(db, 'last_sync_at', new Date().toISOString())
+
+  // Persist the scan window end so the status endpoint reflects real progress.
+  await setMeta(db, 'last_api_scan_id', String(endId))
 
   const msg = inserted > 0
     ? `Found ${newC.length} new, inserted ${inserted}`
-    : `No new (checked ${checked})`
-  return { success: errors === 0, mode: 'api', processed: checked, inserted, skipped: checked - newC.length, errors, remaining: -1, duration_ms: Date.now() - t0, message: msg }
+    : `No new (checked ${checked}, scanned ${startId}-${endId})`
+
+  return {
+    success: errors === 0,
+    mode: 'api',
+    processed: checked,
+    inserted,
+    skipped: checked - newC.length,
+    errors,
+    remaining: -1,
+    duration_ms: Date.now() - t0,
+    message: msg,
+    scan_start_id: startId,
+    scan_end_id: endId,
+    rate_limited: rateLimited,
+  }
 }
 
 // === MAIN ===
