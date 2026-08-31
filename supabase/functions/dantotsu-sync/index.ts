@@ -5,7 +5,7 @@ const DANTOTSU_API = 'https://api.dantotsu.app'
 const APP_AUTH_KEY = '6*45Qp%W2RS@t38jkXoSKY588Ynj%n'
 const CSV_URL = 'https://raw.githubusercontent.com/itsmechinmoy/dantotsu-comment-db/refs/heads/main/dantotsu_global_db.csv'
 const ANILIST_GRAPHQL = 'https://graphql.anilist.co'
-const BUDGET_MS = 45_000
+const BUDGET_MS = 7_500
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -68,8 +68,13 @@ async function fetchAniListBatch(ids: number[]): Promise<Map<number, any>> {
   const r = new Map<number, any>()
   try {
     const res = await fetch(ANILIST_GRAPHQL, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: 'query($ids:[Int]){Page(page:1,perPage:25){media(id_in:$ids){id type title{english romaji}coverImage{medium}startDate{year}}}}', variables: { ids } })
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: 'query($ids:[Int]){Page(page:1,perPage:25){media(id_in:$ids){id type title{english romaji}coverImage{medium}startDate{year}}}}',
+        variables: { ids },
+      }),
+      signal: AbortSignal.timeout(4_000),
     })
     if (!res.ok) return r
     const data = await res.json()
@@ -95,7 +100,7 @@ async function csvImport(db: any) {
   } catch {
     console.log('[csv] fetching from URL...')
     try {
-      const res = await fetch(CSV_URL)
+      const res = await fetch(CSV_URL, { signal: AbortSignal.timeout(8_000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       csv = await res.text()
     } catch (e) {
@@ -243,7 +248,7 @@ async function danAuth(): Promise<string | null> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ token: t }),
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(3_000),
     })
 
     console.log(`[danAuth] HTTP ${r.status}`)
@@ -290,17 +295,43 @@ async function apiSync(db: any) {
   const newC: { row: any; danId: number; mid: number }[] = []
   const deadline = Date.now() + BUDGET_MS
 
+  // Keep every individual API request short enough that the Edge runtime
+  // can return a response before its wall-clock limit.
   while (c404 < 50 && Date.now() < deadline) {
     let d: any = null
     try {
-      const r = await fetch(`${DANTOTSU_API}/comments/${curId}`, { headers: { 'appauth': APP_AUTH_KEY, 'Authorization': token } })
-      if (r.status === 429) { await sleep(30000); continue }
+      const r = await fetch(`${DANTOTSU_API}/comments/${curId}`, {
+        headers: { 'appauth': APP_AUTH_KEY, 'Authorization': token },
+        signal: AbortSignal.timeout(2_000),
+      })
+
+      if (r.status === 429) {
+        console.warn('[api] Dantotsu rate limited; ending this sync pass')
+        break
+      }
+
       if (r.status === 200) d = await r.json()
-    } catch { }
+    } catch (e) {
+      console.warn(
+        `[api] comment ${curId} failed:`,
+        e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+      )
+    }
+
     checked++
-    if (!d) { c404++; curId++; await sleep(100); continue }
+
+    if (!d) {
+      c404++
+      curId++
+      continue
+    }
+
     c404 = 0
-    if (map.has(d.comment_id)) { curId = d.comment_id + 1; await sleep(100); continue }
+
+    if (map.has(d.comment_id)) {
+      curId = d.comment_id + 1
+      continue
+    }
 
     const mid = parseInt(d.media_id)
     const isDel = !!d.deleted
@@ -339,10 +370,14 @@ async function apiSync(db: any) {
 
   if (inserted > 0) {
     await setMeta(db, 'last_sync_at', new Date().toISOString())
+  }
+  if (checked > 0) {
     await setMeta(db, 'last_api_scan_id', String(curId - 1))
   }
 
-  const msg = inserted > 0 ? `Found ${newC.length} new, inserted ${inserted}` : `No new (checked ${checked})`
+  const msg = inserted > 0
+    ? `Found ${newC.length} new, inserted ${inserted}`
+    : `No new (checked ${checked})`
   return { success: errors === 0, mode: 'api', processed: checked, inserted, skipped: checked - newC.length, errors, remaining: -1, duration_ms: Date.now() - t0, message: msg }
 }
 
