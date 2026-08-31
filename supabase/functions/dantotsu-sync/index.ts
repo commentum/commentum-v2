@@ -228,17 +228,45 @@ async function resolveMedia(db: any) {
 
 async function danAuth(): Promise<string | null> {
   const t = Deno.env.get('DANTOTSU_AL_TOKEN')
-  if (!t) return null
-  for (let i = 0; i < 3; i++) {
-    try {
-      const r = await fetch(`${DANTOTSU_API}/authenticate`, {
-        method: 'POST', headers: { 'appauth': APP_AUTH_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t })
-      })
-      if (r.ok) return (await r.json()).authToken
-      await sleep(5000 * (2 ** i))
-    } catch { await sleep(5000 * (2 ** i)) }
+  if (!t) {
+    console.error('[danAuth] DANTOTSU_AL_TOKEN missing')
+    return null
   }
-  return null
+
+  console.log('[danAuth] starting authentication')
+
+  try {
+    const r = await fetch(`${DANTOTSU_API}/authenticate`, {
+      method: 'POST',
+      headers: {
+        'appauth': APP_AUTH_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ token: t }),
+      signal: AbortSignal.timeout(8000),
+    })
+
+    console.log(`[danAuth] HTTP ${r.status}`)
+
+    const body = await r.text()
+    console.log(`[danAuth] response: ${body.slice(0, 500)}`)
+
+    if (!r.ok) return null
+
+    try {
+      const data = JSON.parse(body)
+      return data?.authToken || null
+    } catch {
+      console.error('[danAuth] invalid JSON response')
+      return null
+    }
+  } catch (e) {
+    console.error(
+      '[danAuth] request failed:',
+      e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+    )
+    return null
+  }
 }
 
 // === API SYNC ===
