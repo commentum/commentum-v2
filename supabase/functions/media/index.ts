@@ -58,6 +58,12 @@ serve(async (req) => {
       .select('*')
       .eq('media_id', media_id)
       .eq('client_type', client_type)
+      // Pinned comments always come first (newest pin first), then the
+      // requested sort. Every client already floats pinned comments to the
+      // top client-side, so this puts pins on page 1 for everyone without
+      // any frontend change. Response shape/totals are unchanged.
+      .order('pinned', { ascending: false })
+      .order('pinned_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: sort === 'oldest' })
 
     // Only paginate if the caller explicitly asked for page/limit.
