@@ -115,13 +115,11 @@ async function verifyAdmin(supabase: any, req: Request) {
   const adminKeyHeader = req.headers.get('x-admin-key')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const customAdminSecret = Deno.env.get('ADMIN_SECRET')
-  const backupToken = Deno.env.get('BACKUP_TOKEN')
 
   const isValidSecret = (k: string | null | undefined) =>
     !!k && (
       (serviceRoleKey && k === serviceRoleKey) ||
-      (customAdminSecret && k === customAdminSecret) ||
-      (backupToken && k === backupToken)
+      (customAdminSecret && k === customAdminSecret)
     )
 
   if (isValidSecret(adminKeyHeader)) {
