@@ -1108,6 +1108,7 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
           targetClientType: announcement.app_id,
           announcementTitle: announcement.title,
           announcementContent: announcement.short_description || announcement.full_content,
+          announcementId: String(announcement.id),
           metadata: {
             announcement_id: String(announcement.id),
             category: announcement.category,

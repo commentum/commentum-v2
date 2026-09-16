@@ -83,6 +83,7 @@ export interface FcmNotificationPayload {
   metadata?: any
   announcementTitle?: string
   announcementContent?: string
+  announcementId?: string
   duration?: string
 }
 
@@ -511,6 +512,12 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
     // Determine the correct service type (from the comment/media, NOT the target user)
     const serviceClientType = payload.comment?.client_type || payload.media?.client_type || payload.targetClientType || 'anilist'
 
+    // Announcement pushes carry the id so the client can fetch the full
+    // announcement (GET /announcements/{id}) and render it in a bottom sheet.
+    const announcementId = payload.announcementId
+      || (typeof payload.metadata?.announcement_id === 'string' ? payload.metadata.announcement_id : '')
+      || ''
+
     // Build DATA-ONLY FCM message (like WhatsApp/Discord)
     // No 'notification' field — the app handles everything including largeIcon avatar
     // title and body are passed via data so the app can show them in a custom notification
@@ -518,6 +525,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       type: payload.type,
       title,
       body,
+      announcement_id: announcementId,
       comment_id: payload.comment?.id?.toString() || '',
       media_id: payload.comment?.media_id || payload.media?.id || '',
       media_type: payload.comment?.media_type || payload.media?.type || '',
