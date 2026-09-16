@@ -153,13 +153,31 @@ serve(async (req) => {
 
     // Get media info from first non-deleted comment
     const firstNonDeleted = (comments || []).find((c: any) => !c.deleted)
-    const mediaInfo = firstNonDeleted ? {
+    let mediaInfo = firstNonDeleted ? {
       mediaId: firstNonDeleted.media_id,
       mediaType: firstNonDeleted.media_type,
       mediaTitle: firstNonDeleted.media_title,
       mediaYear: firstNonDeleted.media_year,
       mediaPoster: firstNonDeleted.media_poster
     } : null
+
+    // Fallback: If mediaTitle is 'Unknown Media' or missing, check dantotsu_media_cache
+    if (mediaInfo && (!mediaInfo.mediaTitle || mediaInfo.mediaTitle === 'Unknown Media' || mediaInfo.mediaTitle === 'Unknown')) {
+      const midNum = parseInt(media_id)
+      if (!isNaN(midNum)) {
+        const { data: cached } = await supabase
+          .from('dantotsu_media_cache')
+          .select('media_type, media_title, media_year, media_poster')
+          .eq('media_id', midNum)
+          .maybeSingle()
+        if (cached && cached.media_title && cached.media_title !== 'Unknown Media') {
+          mediaInfo.mediaTitle = cached.media_title
+          mediaInfo.mediaType = cached.media_type || mediaInfo.mediaType
+          mediaInfo.mediaYear = cached.media_year || mediaInfo.mediaYear
+          mediaInfo.mediaPoster = cached.media_poster || mediaInfo.mediaPoster
+        }
+      }
+    }
 
     return new Response(
       JSON.stringify({
