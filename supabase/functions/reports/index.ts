@@ -545,7 +545,8 @@ async function handleGetReportsQueue(supabase: any, params: any) {
       author: {
         id: comment.user_id,
         username: comment.username,
-        avatar: comment.user_avatar
+        avatar: comment.user_avatar,
+        client_type: comment.client_type || 'anilist'
       },
       media: {
         id: comment.media_id,
