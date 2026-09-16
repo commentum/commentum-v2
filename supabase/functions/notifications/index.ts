@@ -284,12 +284,15 @@ async function handleGetHistory(supabase: any, body: any) {
   let query = supabase
     .from('notifications')
     .select('*', { count: 'exact' })
-    .eq('client_type', client_type)
     .eq('user_id', user_id)
 
-  if (type) {
-    // Use LIKE with prefix match so 'comment' matches 'comment_reply', 'comment_pinned', etc.
-    query = query.like('type', `${type}%`)
+  if (type === 'announcement' || (type && type.startsWith('announcement'))) {
+    query = query.eq('client_type', 'anymex').like('type', `${type}%`)
+  } else if (type) {
+    query = query.eq('client_type', client_type).like('type', `${type}%`)
+  } else {
+    // 'all' notifications: include both user's client_type and anymex app announcements
+    query = query.or(`client_type.eq.${client_type},client_type.eq.anymex`)
   }
 
   if (unreadOnly === true) {
@@ -311,12 +314,21 @@ async function handleGetHistory(supabase: any, body: any) {
   }
 
   // Get unread count
-  const { count: unreadCount } = await supabase
+  let unreadQuery = supabase
     .from('notifications')
     .select('*', { count: 'exact', head: true })
-    .eq('client_type', client_type)
     .eq('user_id', user_id)
     .eq('is_read', false)
+
+  if (type === 'announcement' || (type && type.startsWith('announcement'))) {
+    unreadQuery = unreadQuery.eq('client_type', 'anymex').like('type', `${type}%`)
+  } else if (type) {
+    unreadQuery = unreadQuery.eq('client_type', client_type).like('type', `${type}%`)
+  } else {
+    unreadQuery = unreadQuery.or(`client_type.eq.${client_type},client_type.eq.anymex`)
+  }
+
+  const { count: unreadCount } = await unreadQuery
 
   return new Response(
     JSON.stringify({
@@ -339,9 +351,9 @@ async function handleGetHistory(supabase: any, body: any) {
 async function handleMarkRead(supabase: any, body: any) {
   const { client_type, user_id, notification_id } = body
 
-  if (!client_type || !user_id || !notification_id) {
+  if (!user_id || !notification_id) {
     return new Response(
-      JSON.stringify({ error: 'client_type, user_id, and notification_id are required' }),
+      JSON.stringify({ error: 'user_id and notification_id are required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -353,7 +365,6 @@ async function handleMarkRead(supabase: any, body: any) {
       read_at: new Date().toISOString()
     })
     .eq('id', notification_id)
-    .eq('client_type', client_type)
     .eq('user_id', user_id)
 
   if (error) {
@@ -387,13 +398,15 @@ async function handleMarkAllRead(supabase: any, body: any) {
       is_read: true,
       read_at: new Date().toISOString()
     })
-    .eq('client_type', client_type)
     .eq('user_id', user_id)
     .eq('is_read', false)
 
-  if (type) {
-    // Use LIKE with prefix match so 'comment' matches 'comment_reply', 'comment_pinned', etc.
-    query = query.like('type', `${type}%`)
+  if (type === 'announcement' || (type && type.startsWith('announcement'))) {
+    query = query.eq('client_type', 'anymex').like('type', `${type}%`)
+  } else if (type) {
+    query = query.eq('client_type', client_type).like('type', `${type}%`)
+  } else {
+    query = query.or(`client_type.eq.${client_type},client_type.eq.anymex`)
   }
 
   const { data: updatedRows, error } = await query
@@ -426,8 +439,8 @@ async function handleGetUnreadCount(supabase: any, body: any) {
   const { count, error } = await supabase
     .from('notifications')
     .select('*', { count: 'exact', head: true })
-    .eq('client_type', client_type)
     .eq('user_id', user_id)
+    .or(`client_type.eq.${client_type},client_type.eq.anymex`)
     .eq('is_read', false)
 
   if (error) {

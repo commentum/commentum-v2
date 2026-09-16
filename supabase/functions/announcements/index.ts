@@ -1100,11 +1100,14 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
       })
     }
 
-    for (const tokenRecord of eligibleTokens) {
+    // Deduplicate by user_id so we don't queue duplicate notifications for multi-device users
+    const uniqueEligibleUsers = Array.from(new Set(eligibleTokens.map(t => t.user_id)))
+
+    for (const userId of uniqueEligibleUsers) {
       try {
         queueFcmNotification({
           type: 'announcement_published',
-          targetUserId: tokenRecord.user_id,
+          targetUserId: userId,
           targetClientType: announcement.app_id,
           announcementTitle: announcement.title,
           announcementContent: announcement.short_description || announcement.full_content,
@@ -1116,10 +1119,10 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
           }
         })
       } catch (err) {
-        console.error(`Failed to queue FCM notification for user ${tokenRecord.user_id}:`, err)
+        console.error(`Failed to queue FCM notification for user ${userId}:`, err)
       }
     }
-    console.log(`[FCM] Queued announcement notifications for ${eligibleTokens.length} users`)
+    console.log(`[FCM] Queued announcement notifications for ${uniqueEligibleUsers.length} users`)
   } catch (error) {
     console.error('Error broadcasting FCM announcement notifications:', error)
   }
