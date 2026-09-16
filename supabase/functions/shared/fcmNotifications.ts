@@ -548,10 +548,18 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       const fcmMessage: any = {
         message: {
           token: tokenRecord.fcm_token,
+          notification: {
+            title,
+            body,
+          },
           data: messageData,
           android: {
             priority: 'HIGH' as const,
-            // Data-only with high priority ensures the background handler runs
+            notification: {
+              channel_id: getAndroidChannelId(payload.type),
+              sound: 'default',
+              default_vibrate_timings: true,
+            },
           },
           apns: {
             payload: {
