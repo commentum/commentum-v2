@@ -465,26 +465,27 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
     }
 
     // 3. Check user preferences (skip for forced types like bans/warnings)
+    // client_type-agnostic: a user may hold anilist/mal/simkl identities, so
+    // match preferences by user_id only; if ANY row explicitly disables this
+    // type, skip the send.
     if (!FORCE_SEND_TYPES.includes(payload.type)) {
       const prefKey = NOTIFICATION_PREF_MAP[payload.type]
-      const { data: prefs } = await supabase
+      const { data: prefsRows } = await supabase
         .from('notification_preferences')
         .select(prefKey)
-        .eq('client_type', payload.targetClientType)
         .eq('user_id', payload.targetUserId)
-        .single()
 
-      // If user has explicitly disabled this type, skip
-      if (prefs && prefs[prefKey] === false) {
+      if (prefsRows && prefsRows.some((row: any) => row[prefKey] === false)) {
         return
       }
     }
 
     // 4. Get all active FCM tokens for this user
+    // client_type-agnostic: tokens can be registered under any client
+    // (anilist/mal/simkl/...), so deliver to every ACTIVE token of the user
     const { data: tokens } = await supabase
       .from('fcm_tokens')
       .select('fcm_token')
-      .eq('client_type', payload.targetClientType)
       .eq('user_id', payload.targetUserId)
       .eq('is_active', true)
 
@@ -607,11 +608,10 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
         .in('fcm_token', invalidTokens)
     }
 
-    // 8. Update last_used_at for active tokens
+    // 8. Update last_used_at for active tokens (client_type-agnostic)
     await supabase
       .from('fcm_tokens')
       .update({ last_used_at: new Date().toISOString() })
-      .eq('client_type', payload.targetClientType)
       .eq('user_id', payload.targetUserId)
       .eq('is_active', true)
 
