@@ -628,7 +628,7 @@ export function renderAnnouncementDashboard(): string {
             <button type="button" class="tool-btn" onclick="insertHeading()">H2</button>
             <button type="button" class="tool-btn" onclick="insertSyntax('||', '||')">|| Spoiler ||</button>
             <button type="button" class="tool-btn" onclick="insertSyntax('> ', '')">❝ Quote</button>
-            <button type="button" class="tool-btn" onclick="insertSyntax('`' + '`' + '`' + '\\n', '\\n' + '`' + '`' + '`')">&lt;/&gt; Code</button>
+            <button type="button" class="tool-btn" onclick="insertCodeBlock()">&lt;/&gt; Code</button>
             <button type="button" class="tool-btn" onclick="openMediaModal('image')">🖼️ Image</button>
             <button type="button" class="tool-btn" onclick="openMediaModal('gif')">🎬 GIF</button>
             <button type="button" class="tool-btn" onclick="openLinkModal()">🔗 Link</button>
@@ -852,6 +852,11 @@ export function renderAnnouncementDashboard(): string {
       insertSyntax('## ', '');
     }
 
+    function insertCodeBlock() {
+      const fence = String.fromCharCode(96, 96, 96);
+      insertSyntax(fence + '\\n', '\\n' + fence);
+    }
+
     // Modal Helpers
     function openAuthModal() {
       document.getElementById('adminKeyInput').value = localStorage.getItem('anymex_admin_key') || '';
@@ -1058,24 +1063,20 @@ export function renderAnnouncementDashboard(): string {
           const dateStr = ann.published_at ? new Date(ann.published_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Draft';
           const cat = (ann.category || 'general').toUpperCase();
 
-          return \`
-            <div class="history-card">
-              <div>
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
-                  <span class="preview-category-tag" style="font-size:9.5px; padding:2px 8px">\${cat}</span>
-                  <span style="font-size:11px; color:var(--text-muted)">\${dateStr}</span>
-                </div>
-                <div style="font-size:14.5px; font-weight:700; color:#fff; margin-bottom:4px">\${ann.title}</div>
-                <div style="font-size:12px; color:var(--text-secondary); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">
-                  \${ann.short_description || ''}
-                </div>
-              </div>
-              <div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid var(--border-subtle)">
-                <span style="font-size:11.5px; color:var(--text-muted)">👁️ \${ann.view_count || 0} views</span>
-                <button class="btn btn-danger" style="font-size:11px; padding:4px 10px" onclick="deleteAnnouncement(\${ann.id})">🗑️ Delete</button>
-              </div>
-            </div>
-          \`;
+          return '<div class="history-card">' +
+            '<div>' +
+              '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">' +
+                '<span class="preview-category-tag" style="font-size:9.5px; padding:2px 8px">' + cat + '</span>' +
+                '<span style="font-size:11px; color:var(--text-muted)">' + dateStr + '</span>' +
+              '</div>' +
+              '<div style="font-size:14.5px; font-weight:700; color:#fff; margin-bottom:4px">' + (ann.title || '') + '</div>' +
+              '<div style="font-size:12px; color:var(--text-secondary); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">' + (ann.short_description || '') + '</div>' +
+            '</div>' +
+            '<div style="display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid var(--border-subtle)">' +
+              '<span style="font-size:11.5px; color:var(--text-muted)">👁️ ' + (ann.view_count || 0) + ' views</span>' +
+              '<button class="btn btn-danger" style="font-size:11px; padding:4px 10px" onclick="deleteAnnouncement(' + ann.id + ')">🗑️ Delete</button>' +
+            '</div>' +
+          '</div>';
         }).join('');
 
       } catch (err) {
