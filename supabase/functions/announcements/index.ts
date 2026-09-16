@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { sendDiscordNotificationBlocking } from '../shared/discordNotifications.ts'
-import { queueFcmNotification, getFcmAccessToken } from '../shared/fcmNotifications.ts'
+import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { renderAnnouncementDashboard } from './dashboard.ts'
 import {
   getDashboardUsers,
@@ -1060,11 +1060,11 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
     const targetPlatforms = announcement.target_platforms
 
     let query = supabase
-      .from('user_fcm_tokens')
-      .select('id, user_id, fcm_token, platform, last_seen_at')
-      .eq('app_id', appId)
-      .eq('notifications_enabled', true)
-      .gt('last_seen_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+      .from('fcm_tokens')
+      .select('id, user_id, fcm_token, platform, last_used_at')
+      .eq('client_type', appId)
+      .eq('is_active', true)
+      .gt('last_used_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
 
     if (targetPlatforms && targetPlatforms.length > 0) {
       query = query.in('platform', targetPlatforms)
@@ -1073,6 +1073,7 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
     const { data: activeTokens, error: tokensError } = await query
 
     if (tokensError || !activeTokens || activeTokens.length === 0) {
+      console.log(`[FCM] No active tokens found for app_id=${appId}, tokensError=${JSON.stringify(tokensError)}`)
       return
     }
 
@@ -1094,53 +1095,27 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
       })
     }
 
-    const fcmServiceAccountKey = Deno.env.get('FCM_SERVICE_ACCOUNT_KEY')
-    if (!fcmServiceAccountKey) {
-      return
-    }
-
-    const fcmAccessToken = await getFcmAccessToken()
-    if (!fcmAccessToken) {
-      return
-    }
-
-    const iconMap: Record<string, string> = {
-      update: '🚀',
-      bugfix: '🔧',
-      feature: '✨',
-      maintenance: '🛠️',
-      warning: '⚠️',
-      general: '📢'
-    }
-    const icon = iconMap[announcement.category] || '📢'
-
-    const title = `${icon} ${announcement.title}`
-    const body = announcement.short_description
-    const data = {
-      type: 'announcement',
-      announcement_id: String(announcement.id),
-      app_id: announcement.app_id,
-      category: announcement.category,
-      pinned: String(announcement.pinned),
-      click_action: 'FLUTTER_NOTIFICATION_CLICK'
-    }
-
     for (const tokenRecord of eligibleTokens) {
       try {
-        await queueFcmNotification(supabase, {
-          user_id: tokenRecord.user_id,
-          fcm_token: tokenRecord.fcm_token,
-          title,
-          body,
-          data,
-          notification_type: 'announcement',
-          related_id: announcement.id
+        queueFcmNotification({
+          type: 'announcement_published',
+          targetUserId: tokenRecord.user_id,
+          targetClientType: announcement.app_id,
+          announcementTitle: announcement.title,
+          announcementContent: announcement.short_description || announcement.full_content,
+          metadata: {
+            announcement_id: String(announcement.id),
+            category: announcement.category,
+            pinned: String(announcement.pinned),
+          }
         })
       } catch (err) {
-        console.error(`Failed to queue notification for token ${tokenRecord.id}:`, err)
+        console.error(`Failed to queue FCM notification for user ${tokenRecord.user_id}:`, err)
       }
     }
+    console.log(`[FCM] Queued announcement notifications for ${eligibleTokens.length} users`)
   } catch (error) {
     console.error('Error broadcasting FCM announcement notifications:', error)
   }
 }
+
