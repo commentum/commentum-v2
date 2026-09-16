@@ -128,19 +128,20 @@ export async function saveDashboardUser(supabase: any, user: Partial<DashboardUs
   
   // Try database table first
   try {
-    const dbPayload = {
-      username: user.username,
-      password_hash: user.password_hash,
-      salt: user.salt,
-      role: user.role || 'moderator',
-      display_name: user.display_name || user.username,
-      avatar_url: user.avatar_url || null,
-      linked_client_type: user.linked_client_type || null,
-      linked_user_id: user.linked_user_id ? String(user.linked_user_id) : null,
-      linked_username: user.linked_username || null,
-      is_active: user.is_active !== undefined ? user.is_active : true,
-      updated_at: now
-    }
+    // Partial updates (e.g. login only passes id + last_login_at) must NOT
+    // overwrite unspecified columns with defaults — otherwise every login
+    // demotes role to 'moderator' and wipes linked_* fields.
+    const dbPayload: Record<string, any> = { updated_at: now }
+    if (user.username !== undefined) dbPayload.username = user.username
+    if (user.password_hash !== undefined) dbPayload.password_hash = user.password_hash
+    if (user.salt !== undefined) dbPayload.salt = user.salt
+    if (user.role !== undefined) dbPayload.role = user.role
+    if (user.display_name !== undefined) dbPayload.display_name = user.display_name
+    if (user.avatar_url !== undefined) dbPayload.avatar_url = user.avatar_url
+    if (user.linked_client_type !== undefined) dbPayload.linked_client_type = user.linked_client_type
+    if (user.linked_user_id !== undefined) dbPayload.linked_user_id = String(user.linked_user_id)
+    if (user.linked_username !== undefined) dbPayload.linked_username = user.linked_username
+    if (user.is_active !== undefined) dbPayload.is_active = user.is_active
 
     if (user.id) {
       const { data, error } = await supabase
@@ -151,9 +152,24 @@ export async function saveDashboardUser(supabase: any, user: Partial<DashboardUs
         .single()
       if (!error && data) return data
     } else {
+      // Creating a new user: apply defaults for any unspecified fields
+      const insertPayload: Record<string, any> = {
+        username: user.username,
+        password_hash: user.password_hash,
+        salt: user.salt,
+        role: user.role || 'moderator',
+        display_name: user.display_name || user.username,
+        avatar_url: user.avatar_url || null,
+        linked_client_type: user.linked_client_type || null,
+        linked_user_id: user.linked_user_id ? String(user.linked_user_id) : null,
+        linked_username: user.linked_username || null,
+        is_active: user.is_active !== undefined ? user.is_active : true,
+        created_at: now,
+        ...dbPayload
+      }
       const { data, error } = await supabase
         .from('dashboard_users')
-        .insert({ ...dbPayload, created_at: now })
+        .insert(insertPayload)
         .select()
         .single()
       if (!error && data) return data
