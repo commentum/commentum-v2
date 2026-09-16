@@ -1055,16 +1055,21 @@ async function handleArchiveAnnouncement(supabase: any, announcementId: number, 
 
 async function sendAnnouncementFcmNotifications(supabase: any, announcement: any, adminCheck: any) {
   try {
-    const appId = announcement.app_id
     const targetRoles = announcement.target_roles
     const targetPlatforms = announcement.target_platforms
 
+    // client_type-agnostic: tokens register under whatever client the user is
+    // on (anilist/mal/simkl/...), never under the announcement's app_id, so
+    // filtering by client_type=app_id matched nothing and every broadcast
+    // silently sent zero pushes ("[FCM] No active tokens found for
+    // app_id=anymex"). Same policy as the per-user send path: deliver to
+    // every ACTIVE token; platform/role targeting still applies; per-user
+    // notification preferences are enforced in the send path; dead tokens
+    // are auto-deactivated by the FCM error handler.
     let query = supabase
       .from('fcm_tokens')
       .select('id, user_id, fcm_token, platform, last_used_at')
-      .eq('client_type', appId)
       .eq('is_active', true)
-      .gt('last_used_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
 
     if (targetPlatforms && targetPlatforms.length > 0) {
       query = query.in('platform', targetPlatforms)
@@ -1073,7 +1078,7 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
     const { data: activeTokens, error: tokensError } = await query
 
     if (tokensError || !activeTokens || activeTokens.length === 0) {
-      console.log(`[FCM] No active tokens found for app_id=${appId}, tokensError=${JSON.stringify(tokensError)}`)
+      console.log(`[FCM] No active tokens found (announcement ${announcement.id}), tokensError=${JSON.stringify(tokensError)}`)
       return
     }
 
