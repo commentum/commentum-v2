@@ -20,7 +20,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, page, limit, username } = await req.json()
+    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, page, limit, username, delete_comment_id, delete_all_comments } = await req.json()
 
     // All user management actions require token authentication
     if (!client_type || !access_token) {
@@ -87,16 +87,16 @@ serve(async (req) => {
         return await handleGetUserStats(supabase, { target_client_type, moderator_id, moderatorRole, verifiedUser })
       
       case 'warn_user':
-        return await handleWarnUser(supabase, { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser })
+        return await handleWarnUser(supabase, { target_user_id, target_client_type, moderator_id, reason, delete_comment_id, moderatorRole, verifiedUser })
       
       case 'ban_user':
-        return await handleBanUser(supabase, { target_user_id, target_client_type, moderator_id, reason, duration, shadow_ban, moderatorRole, verifiedUser })
+        return await handleBanUser(supabase, { target_user_id, target_client_type, moderator_id, reason, duration, shadow_ban, delete_comment_id, delete_all_comments, moderatorRole, verifiedUser })
       
       case 'unban_user':
         return await handleUnbanUser(supabase, { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser })
       
       case 'mute_user':
-        return await handleMuteUser(supabase, { target_user_id, target_client_type, moderator_id, reason, duration, moderatorRole, verifiedUser })
+        return await handleMuteUser(supabase, { target_user_id, target_client_type, moderator_id, reason, duration, delete_comment_id, moderatorRole, verifiedUser })
       
       case 'unmute_user':
         return await handleUnmuteUser(supabase, { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser })
@@ -232,7 +232,7 @@ async function handleGetUserStats(supabase: any, params: any) {
 }
 
 async function handleWarnUser(supabase: any, params: any) {
-  const { target_user_id, target_client_type, moderator_id, reason, moderatorRole, verifiedUser } = params
+  const { target_user_id, target_client_type, moderator_id, reason, delete_comment_id, moderatorRole, verifiedUser } = params
 
   if (!target_user_id || !reason) {
     return new Response(
@@ -281,6 +281,20 @@ async function handleWarnUser(supabase: any, params: any) {
 
   if (error) throw error
 
+  // If delete_comment_id is specified, delete comment and resolve its reports
+  if (delete_comment_id) {
+    await supabase.from('comments').update({
+      deleted: true,
+      deleted_at: new Date().toISOString(),
+      deleted_by: moderator_id,
+      report_status: 'resolved',
+      moderated: true,
+      moderated_at: new Date().toISOString(),
+      moderated_by: moderator_id,
+      moderation_action: 'mod_warn_delete'
+    }).eq('id', delete_comment_id)
+  }
+
   return new Response(
     JSON.stringify({ 
       success: true, 
@@ -289,6 +303,7 @@ async function handleWarnUser(supabase: any, params: any) {
       clientType: target_client_type,
       reason,
       warningCount,
+      deletedCommentId: delete_comment_id || null,
       moderator: {
         id: moderator_id,
         username: verifiedUser.username,
@@ -300,7 +315,7 @@ async function handleWarnUser(supabase: any, params: any) {
 }
 
 async function handleBanUser(supabase: any, params: any) {
-  const { target_user_id, target_client_type, moderator_id, reason, duration, shadow_ban, moderatorRole, verifiedUser } = params
+  const { target_user_id, target_client_type, moderator_id, reason, duration, shadow_ban, delete_comment_id, delete_all_comments, moderatorRole, verifiedUser } = params
 
   if (!target_user_id || !reason) {
     return new Response(
@@ -359,6 +374,34 @@ async function handleBanUser(supabase: any, params: any) {
     })
 
   if (error) throw error
+
+  // If delete_comment_id is specified, delete comment and resolve its reports
+  if (delete_comment_id) {
+    await supabase.from('comments').update({
+      deleted: true,
+      deleted_at: new Date().toISOString(),
+      deleted_by: moderator_id,
+      report_status: 'resolved',
+      moderated: true,
+      moderated_at: new Date().toISOString(),
+      moderated_by: moderator_id,
+      moderation_action: 'mod_ban_delete'
+    }).eq('id', delete_comment_id)
+  }
+
+  // If delete_all_comments is true, delete all comments from this user
+  if (delete_all_comments) {
+    await supabase.from('comments').update({
+      deleted: true,
+      deleted_at: new Date().toISOString(),
+      deleted_by: moderator_id,
+      report_status: 'resolved',
+      moderated: true,
+      moderated_at: new Date().toISOString(),
+      moderated_by: moderator_id,
+      moderation_action: 'mod_ban_delete_all'
+    }).eq('user_id', String(target_user_id))
+  }
 
   const durationText = durationHours ? `${durationHours} hours` : 'Permanent'
 
@@ -454,7 +497,7 @@ async function handleUnbanUser(supabase: any, params: any) {
 }
 
 async function handleMuteUser(supabase: any, params: any) {
-  const { target_user_id, target_client_type, moderator_id, reason, duration, moderatorRole, verifiedUser } = params
+  const { target_user_id, target_client_type, moderator_id, reason, duration, delete_comment_id, moderatorRole, verifiedUser } = params
 
   if (!target_user_id || !reason) {
     return new Response(
@@ -517,6 +560,20 @@ async function handleMuteUser(supabase: any, params: any) {
     })
 
   if (error) throw error
+ 
+  // If delete_comment_id is specified, delete comment and resolve its reports
+  if (delete_comment_id) {
+    await supabase.from('comments').update({
+      deleted: true,
+      deleted_at: new Date().toISOString(),
+      deleted_by: moderator_id,
+      report_status: 'resolved',
+      moderated: true,
+      moderated_at: new Date().toISOString(),
+      moderated_by: moderator_id,
+      moderation_action: 'mod_mute_delete'
+    }).eq('id', delete_comment_id)
+  }
 
   // Queue Discord notification for user mute in background
   queueDiscordNotification({
