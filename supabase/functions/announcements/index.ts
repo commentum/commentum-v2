@@ -742,40 +742,64 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
   try {
     const appId = announcement.app_id
 
+    // Map app_id to the client_types used in fcm_tokens
+    // For anymex: client_types are 'anilist', 'mal', 'simkl' (and 'anymex')
+    const clientTypes = appId === 'anymex'
+      ? ['anilist', 'mal', 'simkl', 'anymex']
+      : [appId]
+
     // Get all active FCM tokens for this app
     const { data: activeTokens } = await supabase
       .from('fcm_tokens')
-      .select('user_id, fcm_token')
-      .eq('client_type', appId)
+      .select('client_type, user_id, fcm_token')
+      .in('client_type', clientTypes)
       .eq('is_active', true)
 
     if (!activeTokens || activeTokens.length === 0) {
       return // No users to notify
     }
 
-    // Get unique user IDs
-    const uniqueUserIds = [...new Set(activeTokens.map((t: any) => t.user_id))]
+    // Filter out users who opted out of announcement notifications
+    const { data: optOutUsers } = await supabase
+      .from('notification_preferences')
+      .select('client_type, user_id')
+      .eq('notify_on_announcement', false)
+
+    const optOutSet = new Set(optOutUsers?.map((u: any) => `${u.client_type}:${u.user_id}`) || [])
+    const filteredTokens = activeTokens.filter((t: any) => !optOutSet.has(`${t.client_type}:${t.user_id}`))
+
+    if (filteredTokens.length === 0) {
+      return
+    }
 
     const announcementTitle = `📢 ${announcement.title}`
     const announcementBody = announcement.short_description || 'Tap to read more.'
 
-    // Store in notifications table for each user (batch insert with chunking)
+    // Store in notifications table for each user (unique per client_type + user_id)
+    const uniqueUserMap = new Map<string, string>()
+    filteredTokens.forEach((t: any) => {
+      uniqueUserMap.set(`${t.client_type}:${t.user_id}`, t.client_type)
+    })
+
     const CHUNK_SIZE = 500
-    const notificationRows = uniqueUserIds.map((userId: string) => ({
-      client_type: appId,
-      user_id: userId,
-      type: 'announcement_published',
-      title: announcementTitle,
-      body: announcementBody,
-      media_id: null,
-      media_type: null,
-      media_title: null,
-      actor_id: adminCheck.userId,
-      actor_username: announcement.author_name,
-      click_action: 'anymex://notifications',
-      is_read: false,
-      fcm_sent: true,
-    }))
+    const notificationRows = Array.from(uniqueUserMap.entries()).map(([key, clientType]) => {
+      const userId = key.split(':')[1]
+      return {
+        client_type: clientType,
+        user_id: userId,
+        type: 'announcement_published',
+        title: announcementTitle,
+        body: announcementBody,
+        media_id: null,
+        media_type: null,
+        media_title: null,
+        actor_id: adminCheck.userId,
+        actor_username: announcement.author_name,
+        click_action: 'anymex://notifications',
+        is_read: false,
+        fcm_sent: true,
+      }
+    })
 
     // Chunk the batch insert for large user bases
     for (let i = 0; i < notificationRows.length; i += CHUNK_SIZE) {
@@ -789,7 +813,7 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
       }
     }
 
-    // Send FCM multicast to all tokens
+    // Send FCM via FCM v1 API
     let accessToken: string
     try {
       accessToken = await getFcmAccessToken()
@@ -798,46 +822,54 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
       return
     }
 
-    // FCM multicast supports up to 500 tokens per request
-    for (let i = 0; i < activeTokens.length; i += CHUNK_SIZE) {
-      const tokenChunk = activeTokens.slice(i, i + CHUNK_SIZE)
-
-      try {
-        const fcmResponse = await fetch('https://fcm.googleapis.com/fcm/send', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
+    const projectId = Deno.env.get('FCM_PROJECT_ID')!
+    for (const tokenRecord of filteredTokens) {
+      const fcmMessage = {
+        message: {
+          token: tokenRecord.fcm_token,
+          notification: {
+            title: announcementTitle,
+            body: announcementBody,
           },
-          body: JSON.stringify({
+          data: {
+            type: 'announcement_published',
+            title: announcementTitle,
+            body: announcementBody,
+            announcement_id: announcement.id.toString(),
+            client_type: tokenRecord.client_type,
+            click_action: 'anymex://notifications',
+            timestamp: new Date().toISOString(),
+            channel_id: 'announcements',
+          },
+          android: {
+            priority: 'HIGH',
             notification: {
-              title: announcementTitle,
-              body: announcementBody,
-              sound: 'default',
+              channel_id: 'announcements',
+              default_sound: true,
+              default_vibrate_timings: true,
             },
-            data: {
-              type: 'announcement_published',
-              announcement_id: announcement.id.toString(),
-              client_type: appId,
-              click_action: 'anymex://notifications',
-              timestamp: new Date().toISOString(),
-            },
-            android: {
-              priority: 'high',
-              notification: {
-                channel_id: 'announcements',
-              },
-            },
-            tokens: tokenChunk.map((t: any) => t.fcm_token),
-          }),
-        })
-
-        if (!fcmResponse.ok) {
-          console.error('FCM announcement error:', await fcmResponse.text())
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: 'default',
+                badge: 1,
+              }
+            }
+          },
         }
-      } catch (fcmErr) {
-        console.error('FCM announcement send failed:', fcmErr)
       }
+
+      fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(fcmMessage),
+      }).catch(fcmErr => {
+        console.error('FCM announcement send error:', fcmErr)
+      })
     }
 
   } catch (err) {

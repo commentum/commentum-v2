@@ -152,6 +152,8 @@ async function handleGetPreferences(supabase: any, body: any) {
     notify_on_reply: true,
     notify_on_vote: true,
     notify_on_mention: true,
+    notify_on_announcement: true,
+    notify_on_recent_comment: true,
     notify_on_comment_delete: false,
     notify_on_mod_action: true,
   }
@@ -170,6 +172,8 @@ async function handleGetPreferences(supabase: any, body: any) {
         notify_on_reply: prefs.notify_on_reply ?? true,
         notify_on_vote: prefs.notify_on_vote ?? true,
         notify_on_mention: prefs.notify_on_mention ?? true,
+        notify_on_announcement: prefs.notify_on_announcement ?? true,
+        notify_on_recent_comment: prefs.notify_on_recent_comment ?? true,
         notify_on_comment_delete: prefs.notify_on_comment_delete ?? false,
         notify_on_mod_action: prefs.notify_on_mod_action ?? true,
       }
@@ -189,7 +193,15 @@ async function handleUpdatePreferences(supabase: any, body: any) {
     )
   }
 
-  const validKeys = ['notify_on_reply', 'notify_on_vote', 'notify_on_mention', 'notify_on_comment_delete', 'notify_on_mod_action']
+  const validKeys = [
+    'notify_on_reply',
+    'notify_on_vote',
+    'notify_on_mention',
+    'notify_on_announcement',
+    'notify_on_recent_comment',
+    'notify_on_comment_delete',
+    'notify_on_mod_action'
+  ]
   const updates: any = { updated_at: new Date().toISOString() }
 
   for (const [key, value] of Object.entries(preferences)) {

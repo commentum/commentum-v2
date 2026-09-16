@@ -270,7 +270,7 @@ function getNotificationContent(payload: FcmNotificationPayload): { title: strin
 // ============================================
 
 const NOTIFICATION_PREF_MAP: Record<FcmNotificationType, string> = {
-  'comment_created': 'notify_on_reply',    // New comments on media you interacted with
+  'comment_created': 'notify_on_recent_comment',  // New comments on media you interacted with
   'comment_reply': 'notify_on_reply',
   'comment_updated': 'notify_on_mod_action',
   'comment_deleted': 'notify_on_comment_delete',
@@ -292,7 +292,7 @@ const NOTIFICATION_PREF_MAP: Record<FcmNotificationType, string> = {
   'user_unbanned': 'notify_on_mod_action',
   'user_shadow_banned': 'notify_on_mod_action',
   'user_unshadow_banned': 'notify_on_mod_action',
-  'announcement_published': 'notify_on_mod_action',
+  'announcement_published': 'notify_on_announcement',
   'moderation_action': 'notify_on_mod_action',
 }
 
