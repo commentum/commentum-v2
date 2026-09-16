@@ -3,10 +3,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { sendDiscordNotificationBlocking } from '../shared/discordNotifications.ts'
 import { queueFcmNotification, getFcmAccessToken } from '../shared/fcmNotifications.ts'
+import { renderAnnouncementDashboard } from './dashboard.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type, authorization',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-admin-key, apikey',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 }
 
 serve(async (req) => {
@@ -24,6 +26,16 @@ serve(async (req) => {
     const pathSegments = url.pathname.split('/').filter(Boolean)
     
     const method = req.method
+
+    // Web Dashboard route (GET /announcements/dashboard or /announcements/admin)
+    if (method === 'GET' && (pathSegments.includes('dashboard') || pathSegments.includes('admin') || url.searchParams.get('view') === 'dashboard')) {
+      return new Response(renderAnnouncementDashboard(), {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache',
+        },
+      })
+    }
 
     // Route handling - check special routes first
     // GET /announcements/unread-count - Get unread count (check before ID parsing)
@@ -100,11 +112,23 @@ serve(async (req) => {
 // ====================================
 
 async function verifyAdmin(supabase: any, req: Request) {
+  const adminKeyHeader = req.headers.get('x-admin-key')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  const customAdminSecret = Deno.env.get('ADMIN_SECRET')
+
+  if (adminKeyHeader && (adminKeyHeader === serviceRoleKey || (customAdminSecret && adminKeyHeader === customAdminSecret))) {
+    return { valid: true, userId: 'admin', role: 'owner', username: 'Administrator' }
+  }
+
   const body = await req.clone().json().catch(() => ({}))
-  const { client_type, access_token } = body
+  const { client_type, access_token, admin_key } = body
+
+  if (admin_key && (admin_key === serviceRoleKey || (customAdminSecret && admin_key === customAdminSecret))) {
+    return { valid: true, userId: 'admin', role: 'owner', username: 'Administrator' }
+  }
 
   if (!client_type || !access_token) {
-    return { valid: false, error: 'client_type and access_token are required for admin actions' }
+    return { valid: false, error: 'client_type and access_token (or admin_key) are required for admin actions' }
   }
 
   // Verify the client token
@@ -145,20 +169,13 @@ async function verifyAdmin(supabase: any, req: Request) {
 // ====================================
 
 async function handleListAnnouncements(supabase: any, url: URL) {
-  const appId = url.searchParams.get('app_id')
+  const appId = url.searchParams.get('app_id') || 'anymex'
   const status = url.searchParams.get('status') || 'published'
   const category = url.searchParams.get('category')
   const page = parseInt(url.searchParams.get('page') || '1')
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50)
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '30'), 50)
   const userId = url.searchParams.get('user_id')
   const includeRead = url.searchParams.get('include_read') === 'true'
-
-  if (!appId) {
-    return new Response(
-      JSON.stringify({ error: 'app_id is required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
 
   const validAppIds = ['anymex', 'shonenx', 'animestream']
   if (!validAppIds.includes(appId)) {
@@ -173,8 +190,12 @@ async function handleListAnnouncements(supabase: any, url: URL) {
     .from('announcements')
     .select('id, title, short_description, category, pinned, featured, priority, published_at, author_name, view_count, expires_at', { count: 'exact' })
     .eq('app_id', appId)
-    .eq('status', status)
-    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+
+  if (status !== 'all') {
+    query = query
+      .eq('status', status)
+      .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`)
+  }
 
   if (category) {
     query = query.eq('category', category)
