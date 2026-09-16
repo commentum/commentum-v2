@@ -510,21 +510,38 @@ async function apiSync(db: any) {
       .select('media_id, media_type, media_title, media_year, media_poster')
       .in('media_id', uniqueMids)
 
+    const mediaMap = new Map<number, any>()
     if (cachedMedia?.length) {
-      const mediaMap = new Map<number, any>()
       for (const m of cachedMedia) {
         if (m.media_title && m.media_title !== 'Unknown Media') {
           mediaMap.set(m.media_id, m)
         }
       }
-      for (const item of newC) {
-        const m = mediaMap.get(item.mid)
-        if (m) {
-          item.row.media_type = m.media_type
-          item.row.media_title = m.media_title
-          item.row.media_year = m.media_year
-          item.row.media_poster = m.media_poster
+    }
+
+    // If any media IDs are not in cache yet, fetch them from AniList on the fly
+    const uncachedMids = uniqueMids.filter(id => !mediaMap.has(id))
+    if (uncachedMids.length) {
+      const fresh = await fetchAniListBatch(uncachedMids.slice(0, 25))
+      const toUpsert: any[] = []
+      for (const [id, m] of fresh.entries()) {
+        if (m.media_title && m.media_title !== 'Unknown Media') {
+          mediaMap.set(id, m)
+          toUpsert.push({ media_id: id, ...m })
         }
+      }
+      if (toUpsert.length) {
+        await db.from('dantotsu_media_cache').upsert(toUpsert, { onConflict: 'media_id' })
+      }
+    }
+
+    for (const item of newC) {
+      const m = mediaMap.get(item.mid)
+      if (m) {
+        item.row.media_type = m.media_type
+        item.row.media_title = m.media_title
+        item.row.media_year = m.media_year
+        item.row.media_poster = m.media_poster
       }
     }
 
