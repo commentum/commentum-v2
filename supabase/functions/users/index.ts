@@ -20,7 +20,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, banned, muted, shadow_banned, shadow_ban, page, limit, username } = await req.json()
+    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, page, limit, username } = await req.json()
 
     // All user management actions require token authentication
     if (!client_type || !access_token) {
@@ -112,6 +112,9 @@ serve(async (req) => {
 
       case 'search_users_public':
         return await handleSearchUsersPublic(supabase, { username, target_client_type, moderator_id, verifiedUser })
+
+      case 'change_role':
+        return await handleRoleChange(supabase, { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser, role: role || new_role, reason })
 
       default:
         return new Response(
@@ -931,3 +934,74 @@ async function handleSearchUsersPublic(supabase: any, params: any) {
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
+
+async function handleRoleChange(supabase: any, params: any) {
+  const { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser, role, reason } = params
+  const requestedRole = (role || '').toLowerCase().trim()
+
+  const ALLOWED_ROLES = ['user', 'moderator', 'admin', 'super_admin']
+  if (!ALLOWED_ROLES.includes(requestedRole)) {
+    return new Response(
+      JSON.stringify({ error: `Invalid role. Allowed roles: ${ALLOWED_ROLES.join(', ')}` }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Only owner, super_admin, or admin can change roles
+  if (!['owner', 'super_admin', 'admin'].includes(moderatorRole)) {
+    return new Response(
+      JSON.stringify({ error: 'Only administrators can change user roles' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Hierarchy check
+  if (moderatorRole === 'admin' && (requestedRole === 'admin' || requestedRole === 'super_admin' || requestedRole === 'owner')) {
+    return new Response(
+      JSON.stringify({ error: 'Admins cannot assign admin or super admin roles' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  // Keys in config table
+  const ROLE_KEYS: Record<string, string> = {
+    'moderator': 'moderator_users',
+    'admin': 'admin_users',
+    'super_admin': 'super_admin_users'
+  }
+
+  // Update config lists: remove target_user_id from all role lists
+  const { data: configs } = await supabase.from('config').select('key, value').in('key', ['moderator_users', 'admin_users', 'super_admin_users'])
+  
+  for (const c of (configs || [])) {
+    let users: any[] = []
+    try { users = JSON.parse(c.value || '[]') } catch { users = [] }
+    const filtered = users.filter((u: any) => String(u) !== String(target_user_id))
+    if (c.key === ROLE_KEYS[requestedRole]) {
+      filtered.push(isNaN(Number(target_user_id)) ? String(target_user_id) : Number(target_user_id))
+    }
+    await supabase.from('config').update({ value: JSON.stringify(filtered), updated_at: new Date().toISOString() }).eq('key', c.key)
+  }
+
+  // Update commentum_users table
+  await supabase.from('commentum_users').update({
+    commentum_user_role: requestedRole,
+    commentum_updated_at: new Date().toISOString()
+  }).eq('commentum_user_id', String(target_user_id))
+
+  // Update all existing comments for this user so their badge reflects the role immediately
+  await supabase.from('comments').update({
+    user_role: requestedRole
+  }).eq('user_id', String(target_user_id))
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      message: `User role updated to ${requestedRole}`,
+      target_user_id,
+      role: requestedRole
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+

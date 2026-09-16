@@ -21,7 +21,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes } = await req.json()
+    const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes, delete_comment } = await req.json()
 
     switch (action) {
       case 'create':
@@ -63,7 +63,7 @@ serve(async (req) => {
           )
         }
 
-        return await handleResolveReport(supabase, { comment_id, reporter_info, moderator_id, resolution, review_notes, verifiedUser, moderatorRole: adminVerification.role })
+        return await handleResolveReport(supabase, { comment_id, reporter_info, moderator_id, resolution, review_notes, delete_comment, verifiedUser, moderatorRole: adminVerification.role })
       
       case 'get_queue':
         // Get queue requires admin authentication via client token
@@ -306,24 +306,18 @@ async function handleCreateReport(supabase: any, params: any) {
 }
 
 async function handleResolveReport(supabase: any, params: any) {
-  const { comment_id, reporter_info, moderator_id, resolution, review_notes, verifiedUser, moderatorRole } = params
+  const { comment_id, reporter_info, moderator_id, resolution, review_notes, delete_comment, verifiedUser, moderatorRole } = params
 
   // Validate required fields
-  if (!comment_id || !reporter_info || !moderator_id || !resolution) {
+  if (!comment_id || !moderator_id || !resolution) {
     return new Response(
-      JSON.stringify({ error: 'comment_id, reporter_info, moderator_id, and resolution are required' }),
+      JSON.stringify({ error: 'comment_id, moderator_id, and resolution are required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  // Extract reporter_id from reporter_info
-  const reporter_id = reporter_info?.user_id
-  if (!reporter_id) {
-    return new Response(
-      JSON.stringify({ error: 'reporter_info.user_id is required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
+  // Extract reporter_id from reporter_info if provided
+  const reporter_id = reporter_info?.user_id ? String(reporter_info.user_id) : null
 
   // Validate resolution
   if (!['resolved', 'dismissed'].includes(resolution)) {
@@ -348,22 +342,53 @@ async function handleResolveReport(supabase: any, params: any) {
   }
 
   const reports = JSON.parse(fullComment.reports || '[]')
-  const reportIndex = reports.findIndex((r: any) => r.reporter_id === reporter_id)
+  let reportIndex = -1
 
-  if (reportIndex === -1) {
-    return new Response(
-      JSON.stringify({ error: 'Report not found' }),
-      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  if (reporter_id) {
+    reportIndex = reports.findIndex((r: any) => String(r.reporter_id) === reporter_id)
   }
 
-  // Update report
-  reports[reportIndex] = {
-    ...reports[reportIndex],
-    status: resolution,
-    reviewed_by: moderator_id,
-    reviewed_at: new Date().toISOString(),
-    review_notes: review_notes || ''
+  if (reportIndex === -1) {
+    // Fall back to first pending report
+    reportIndex = reports.findIndex((r: any) => r.status === 'pending')
+  }
+
+  if (reportIndex === -1 && reports.length > 0) {
+    reportIndex = 0
+  }
+
+  if (reportIndex !== -1) {
+    // Update matched report
+    reports[reportIndex] = {
+      ...reports[reportIndex],
+      status: resolution,
+      reviewed_by: moderator_id,
+      reviewed_at: new Date().toISOString(),
+      review_notes: review_notes || ''
+    }
+  } else {
+    // If no report found in array, add a report entry so status is recorded
+    reports.push({
+      reporter_id: reporter_id || 'manual',
+      reason: 'moderation_action',
+      status: resolution,
+      reviewed_by: moderator_id,
+      reviewed_at: new Date().toISOString(),
+      review_notes: review_notes || ''
+    })
+    reportIndex = reports.length - 1
+  }
+
+  // If deleting comment or resolving, resolve all pending reports on this comment
+  if (delete_comment) {
+    for (let i = 0; i < reports.length; i++) {
+      if (reports[i].status === 'pending') {
+        reports[i].status = resolution
+        reports[i].reviewed_by = moderator_id
+        reports[i].reviewed_at = new Date().toISOString()
+        reports[i].review_notes = review_notes || 'Resolved upon comment deletion'
+      }
+    }
   }
 
   // Check if all reports are resolved
@@ -371,17 +396,25 @@ async function handleResolveReport(supabase: any, params: any) {
   const newReportStatus = allResolved ? resolution : 'pending'
 
   // Update comment
+  const updatePayload: any = {
+    reports: JSON.stringify(reports),
+    report_status: newReportStatus,
+    moderated: true,
+    moderated_at: new Date().toISOString(),
+    moderated_by: moderator_id,
+    moderation_reason: `Report ${resolution}: ${review_notes || 'No notes provided'}`,
+    moderation_action: delete_comment ? 'mod_delete' : `resolve_report_${resolution}`
+  }
+
+  if (delete_comment) {
+    updatePayload.deleted = true
+    updatePayload.deleted_at = new Date().toISOString()
+    updatePayload.deleted_by = moderator_id
+  }
+
   const { data: updatedComment, error } = await supabase
     .from('comments')
-    .update({
-      reports: JSON.stringify(reports),
-      report_status: newReportStatus,
-      moderated: true,
-      moderated_at: new Date().toISOString(),
-      moderated_by: moderator_id,
-      moderation_reason: `Report ${resolution}: ${review_notes || 'No notes provided'}`,
-      moderation_action: `resolve_report_${resolution}`
-    })
+    .update(updatePayload)
     .eq('id', comment_id)
     .select()
     .single()
