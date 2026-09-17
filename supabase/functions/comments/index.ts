@@ -420,6 +420,8 @@ async function handleCreateComment(supabase: any, params: any) {
       tags: tag !== undefined ? JSON.stringify([tag]) : null,
       username: userInfo.username,
       user_avatar: userInfo.avatar,
+      avatar_decoration: userInfo.avatar_decoration || null,
+      banner_url: userInfo.banner_url || null,
       user_role: getDisplayRole(userRole), // Store as super_admin to hide owner role
       media_type: mediaInfo.type,
       media_title: mediaInfo.title,
@@ -429,7 +431,7 @@ async function handleCreateComment(supabase: any, params: any) {
       user_agent: req.headers.get('user-agent')
     })
     .select(`
-      id, client_type, user_id, media_id, content, username, user_avatar, user_role,
+      id, client_type, user_id, media_id, content, username, user_avatar, avatar_decoration, banner_url, user_role,
       media_type, media_title, media_year, media_poster, parent_id, created_at, updated_at,
       deleted, pinned, locked, edited, edit_count, upvotes, downvotes, vote_score,
       reported, report_count, tags,

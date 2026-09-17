@@ -20,7 +20,13 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, access_token, target_user_id, target_client_type, reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, page, limit, username, delete_comment_id, delete_all_comments } = await req.json()
+    const { 
+      action, client_type, access_token, target_user_id, target_client_type, 
+      reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, 
+      page, limit, username, delete_comment_id, delete_all_comments,
+      avatar_decoration, banner_url, banner_theme, nameplate_theme,
+      target_access_token, service_to_unlink 
+    } = await req.json()
 
     // All user management actions require token authentication
     if (!client_type || !access_token) {
@@ -44,7 +50,11 @@ serve(async (req) => {
     // These actions are available to all authenticated users
     // get_user_history: anyone can view other users' public comments
     // get_role: anyone can check their own role
-    const publicActions = ['get_user_history', 'get_role', 'search_users_public']
+    // update_customizations / link_account / unlink_account: personal profile customization
+    const publicActions = [
+      'get_user_history', 'get_role', 'search_users_public', 'get_user_info',
+      'update_customizations', 'link_account', 'unlink_account', 'get_profile'
+    ]
 
     let moderatorRole: string
     if (publicActions.includes(action)) {
@@ -115,6 +125,28 @@ serve(async (req) => {
 
       case 'change_role':
         return await handleRoleChange(supabase, { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser, role: role || new_role, reason })
+
+      case 'update_customizations':
+        return await handleUpdateCustomizations(supabase, {
+          client_type, moderator_id, verifiedUser,
+          avatar_decoration, banner_url, banner_theme, nameplate_theme
+        })
+
+      case 'link_account':
+        return await handleLinkAccount(supabase, {
+          client_type, moderator_id, verifiedUser,
+          target_client_type, target_access_token
+        })
+
+      case 'unlink_account':
+        return await handleUnlinkAccount(supabase, {
+          client_type, moderator_id, service_to_unlink
+        })
+
+      case 'get_profile':
+        return await handleGetProfile(supabase, {
+          client_type, moderator_id, verifiedUser
+        })
 
       default:
         return new Response(
@@ -189,6 +221,15 @@ async function handleGetUserInfo(supabase: any, params: any) {
       commentum_user_warnings: u.commentum_user_warnings,
       commentum_user_notes: u.commentum_user_notes,
       commentum_client_type: u.commentum_client_type,
+      avatar_decoration: u.avatar_decoration || null,
+      banner_url: u.banner_url || null,
+      banner_theme: u.banner_theme || null,
+      nameplate_theme: u.nameplate_theme || null,
+      linked_accounts: {
+        anilist: u.linked_anilist_id ? { id: u.linked_anilist_id, username: u.linked_anilist_username } : (u.commentum_client_type === 'anilist' ? { id: u.commentum_user_id, username: u.commentum_username } : null),
+        mal: u.linked_mal_id ? { id: u.linked_mal_id, username: u.linked_mal_username } : (['mal', 'myanimelist'].includes(u.commentum_client_type) ? { id: u.commentum_user_id, username: u.commentum_username } : null),
+        simkl: u.linked_simkl_id ? { id: u.linked_simkl_id, username: u.linked_simkl_username } : (u.commentum_client_type === 'simkl' ? { id: u.commentum_user_id, username: u.commentum_username } : null),
+      }
     }
   })
 
@@ -1061,4 +1102,271 @@ async function handleRoleChange(supabase: any, params: any) {
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
+
+/**
+ * Unified user lookup: checks primary credentials first, then linked accounts
+ */
+async function findUnifiedUser(supabase: any, clientType: string, userId: string) {
+  const normClient = clientType.toLowerCase() === 'myanimelist' ? 'mal' : clientType.toLowerCase();
+
+  // 1. Direct match on primary credentials
+  const { data: primary } = await supabase
+    .from('commentum_users')
+    .select('*')
+    .or(`and(commentum_client_type.eq.${clientType},commentum_user_id.eq.${userId}),and(commentum_client_type.eq.${normClient},commentum_user_id.eq.${userId})`)
+    .maybeSingle();
+
+  if (primary) return primary;
+
+  // 2. Check if this account is linked to another primary record
+  let linkedQuery = supabase.from('commentum_users').select('*');
+  if (normClient === 'anilist') {
+    linkedQuery = linkedQuery.eq('linked_anilist_id', userId);
+  } else if (normClient === 'mal') {
+    linkedQuery = linkedQuery.eq('linked_mal_id', userId);
+  } else if (normClient === 'simkl') {
+    linkedQuery = linkedQuery.eq('linked_simkl_id', userId);
+  } else {
+    return null;
+  }
+
+  const { data: linked } = await linkedQuery.maybeSingle();
+  return linked;
+}
+
+function formatLinkedAccounts(user: any) {
+  return {
+    anilist: user.linked_anilist_id ? { id: user.linked_anilist_id, username: user.linked_anilist_username } : (user.commentum_client_type === 'anilist' ? { id: user.commentum_user_id, username: user.commentum_username } : null),
+    mal: user.linked_mal_id ? { id: user.linked_mal_id, username: user.linked_mal_username } : (['mal', 'myanimelist'].includes(user.commentum_client_type) ? { id: user.commentum_user_id, username: user.commentum_username } : null),
+    simkl: user.linked_simkl_id ? { id: user.linked_simkl_id, username: user.linked_simkl_username } : (user.commentum_client_type === 'simkl' ? { id: user.commentum_user_id, username: user.commentum_username } : null),
+  };
+}
+
+async function handleGetProfile(supabase: any, params: any) {
+  const { client_type, moderator_id, verifiedUser } = params;
+  const normClient = client_type.toLowerCase() === 'myanimelist' ? 'mal' : client_type.toLowerCase();
+
+  let user = await findUnifiedUser(supabase, normClient, moderator_id);
+  if (!user) {
+    const { data: created } = await supabase
+      .from('commentum_users')
+      .insert({
+        commentum_client_type: normClient,
+        commentum_user_id: moderator_id,
+        commentum_username: verifiedUser.username,
+        commentum_user_avatar: verifiedUser.avatar_url,
+      })
+      .select()
+      .single();
+    user = created;
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      user: {
+        id: user.commentum_user_id,
+        username: user.commentum_username,
+        avatar: user.commentum_user_avatar,
+        role: getDisplayRole(user.commentum_user_role),
+        client_type: user.commentum_client_type,
+        avatar_decoration: user.avatar_decoration || null,
+        banner_url: user.banner_url || null,
+        banner_theme: user.banner_theme || null,
+        nameplate_theme: user.nameplate_theme || null,
+        linked_accounts: formatLinkedAccounts(user),
+      }
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
+async function handleUpdateCustomizations(supabase: any, params: any) {
+  const { client_type, moderator_id, verifiedUser, avatar_decoration, banner_url, banner_theme, nameplate_theme } = params;
+  const normClient = client_type.toLowerCase() === 'myanimelist' ? 'mal' : client_type.toLowerCase();
+
+  let user = await findUnifiedUser(supabase, normClient, moderator_id);
+  if (!user) {
+    const { data: created, error } = await supabase
+      .from('commentum_users')
+      .insert({
+        commentum_client_type: normClient,
+        commentum_user_id: moderator_id,
+        commentum_username: verifiedUser.username,
+        commentum_user_avatar: verifiedUser.avatar_url,
+        avatar_decoration: avatar_decoration ?? null,
+        banner_url: banner_url ?? null,
+        banner_theme: banner_theme ?? null,
+        nameplate_theme: nameplate_theme ?? null,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    user = created;
+  } else {
+    const updatePayload: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (avatar_decoration !== undefined) updatePayload.avatar_decoration = avatar_decoration;
+    if (banner_url !== undefined) updatePayload.banner_url = banner_url;
+    if (banner_theme !== undefined) updatePayload.banner_theme = banner_theme;
+    if (nameplate_theme !== undefined) updatePayload.nameplate_theme = nameplate_theme;
+
+    const { data: updated, error } = await supabase
+      .from('commentum_users')
+      .update(updatePayload)
+      .eq('id', user.id)
+      .select()
+      .single();
+    if (error) throw error;
+    user = updated;
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      customizations: {
+        avatar_decoration: user.avatar_decoration,
+        banner_url: user.banner_url,
+        banner_theme: user.banner_theme,
+        nameplate_theme: user.nameplate_theme,
+      },
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
+async function handleLinkAccount(supabase: any, params: any) {
+  const { client_type, moderator_id, verifiedUser, target_client_type, target_access_token } = params;
+  if (!target_client_type || !target_access_token) {
+    return new Response(
+      JSON.stringify({ error: 'target_client_type and target_access_token are required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const normTarget = target_client_type.toLowerCase() === 'myanimelist' ? 'mal' : target_client_type.toLowerCase();
+  const normClient = client_type.toLowerCase() === 'myanimelist' ? 'mal' : client_type.toLowerCase();
+
+  if (normTarget === normClient) {
+    return new Response(
+      JSON.stringify({ error: 'Cannot link the same service type to itself' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Verify the target token with provider
+  const targetVerified = await verifyClientToken(normTarget, target_access_token);
+  if (!targetVerified) {
+    return new Response(
+      JSON.stringify({ error: `Invalid or expired ${target_client_type} access token` }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Find or create primary user
+  let user = await findUnifiedUser(supabase, normClient, moderator_id);
+  if (!user) {
+    const { data: created, error } = await supabase
+      .from('commentum_users')
+      .insert({
+        commentum_client_type: normClient,
+        commentum_user_id: moderator_id,
+        commentum_username: verifiedUser.username,
+        commentum_user_avatar: verifiedUser.avatar_url,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    user = created;
+  }
+
+  // Set the linked fields
+  const updateFields: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (normTarget === 'anilist') {
+    updateFields.linked_anilist_id = targetVerified.provider_user_id;
+    updateFields.linked_anilist_username = targetVerified.username;
+  } else if (normTarget === 'mal') {
+    updateFields.linked_mal_id = targetVerified.provider_user_id;
+    updateFields.linked_mal_username = targetVerified.username;
+  } else if (normTarget === 'simkl') {
+    updateFields.linked_simkl_id = targetVerified.provider_user_id;
+    updateFields.linked_simkl_username = targetVerified.username;
+  }
+
+  const { data: updated, error } = await supabase
+    .from('commentum_users')
+    .update(updateFields)
+    .eq('id', user.id)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      message: `Successfully linked ${target_client_type} account (${targetVerified.username})`,
+      linked_accounts: formatLinkedAccounts(updated),
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
+async function handleUnlinkAccount(supabase: any, params: any) {
+  const { client_type, moderator_id, service_to_unlink } = params;
+  if (!service_to_unlink) {
+    return new Response(
+      JSON.stringify({ error: 'service_to_unlink is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const normUnlink = service_to_unlink.toLowerCase() === 'myanimelist' ? 'mal' : service_to_unlink.toLowerCase();
+  const normClient = client_type.toLowerCase() === 'myanimelist' ? 'mal' : client_type.toLowerCase();
+
+  const user = await findUnifiedUser(supabase, normClient, moderator_id);
+  if (!user) {
+    return new Response(
+      JSON.stringify({ error: 'User not found' }),
+      { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  if (user.commentum_client_type === normUnlink) {
+    return new Response(
+      JSON.stringify({ error: 'Cannot unlink your primary account' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const updateFields: Record<string, any> = { updated_at: new Date().toISOString() };
+  if (normUnlink === 'anilist') {
+    updateFields.linked_anilist_id = null;
+    updateFields.linked_anilist_username = null;
+  } else if (normUnlink === 'mal') {
+    updateFields.linked_mal_id = null;
+    updateFields.linked_mal_username = null;
+  } else if (normUnlink === 'simkl') {
+    updateFields.linked_simkl_id = null;
+    updateFields.linked_simkl_username = null;
+  }
+
+  const { data: updated, error } = await supabase
+    .from('commentum_users')
+    .update(updateFields)
+    .eq('id', user.id)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      message: `Successfully unlinked ${service_to_unlink}`,
+      linked_accounts: formatLinkedAccounts(updated),
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
 

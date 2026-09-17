@@ -6,6 +6,8 @@ export interface UserInfo {
   user_id: string;
   username: string;
   avatar?: string;
+  avatar_decoration?: string;
+  banner_url?: string;
 }
 
 export interface MediaInfo {

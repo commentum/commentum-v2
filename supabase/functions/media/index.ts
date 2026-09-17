@@ -85,14 +85,23 @@ serve(async (req) => {
       .map((c: any) => c.user_id))]
 
     let userPointsMap: Record<string, any> = {}
+    let userCustomizationsMap: Record<string, any> = {}
     if (userIds.length > 0) {
-      const { data: pointsData } = await supabase
-        .rpc('get_batch_user_points_cached', {
+      const [{ data: pointsData }, { data: customData }] = await Promise.all([
+        supabase.rpc('get_batch_user_points_cached', {
           p_client_type: client_type,
           p_user_ids: userIds
-        })
+        }),
+        supabase.rpc('get_batch_user_customizations', {
+          p_client_type: client_type,
+          p_user_ids: userIds
+        }).then((res: any) => res, () => ({ data: null }))
+      ])
       if (pointsData) {
         userPointsMap = pointsData
+      }
+      if (customData) {
+        userCustomizationsMap = customData
       }
     }
 
@@ -114,12 +123,23 @@ serve(async (req) => {
         stripped.translated_content = null
         stripped.original_language = null
         stripped.translated_at = null
+        stripped.avatar_decoration = null
+        stripped.banner_url = null
+        stripped.linked_accounts = null
       } else {
         const points = userPointsMap[comment.user_id]
         stripped.user_tier = points?.tier || null
         stripped.user_points = points?.total_points || null
         // Add human-readable language name for convenience
         stripped.language_name = stripped.original_language ? getLanguageName(stripped.original_language) : null
+
+        // Customizations & linked accounts
+        const custom = userCustomizationsMap[comment.user_id]
+        stripped.avatar_decoration = custom?.avatar_decoration || comment.avatar_decoration || null
+        stripped.banner_url = custom?.banner_url || comment.banner_url || null
+        stripped.banner_theme = custom?.banner_theme || null
+        stripped.nameplate_theme = custom?.nameplate_theme || null
+        stripped.linked_accounts = custom?.linked_accounts || null
       }
 
       return stripped
