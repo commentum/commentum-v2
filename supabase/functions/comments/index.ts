@@ -424,6 +424,7 @@ async function handleCreateComment(supabase: any, params: any) {
       banner_url: userInfo.banner_url || null,
       user_role: userRole,
       media_type: mediaInfo.type,
+      media_title: mediaInfo.title,
       media_year: mediaInfo.year,
       media_poster: mediaInfo.poster,
       ip_address: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip'),
