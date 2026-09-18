@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { getLanguageName } from '../shared/translate.ts'
+import { resolveUserBadges } from '../shared/badges.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -126,10 +127,16 @@ serve(async (req) => {
         stripped.avatar_decoration = null
         stripped.banner_url = null
         stripped.linked_accounts = null
+        stripped.badges = []
       } else {
         const points = userPointsMap[comment.user_id]
         stripped.user_tier = points?.tier || null
         stripped.user_points = points?.total_points || null
+        stripped.badges = resolveUserBadges({
+          role: comment.user_role,
+          tier: stripped.user_tier,
+          points: stripped.user_points
+        })
         // Add human-readable language name for convenience
         stripped.language_name = stripped.original_language ? getLanguageName(stripped.original_language) : null
 

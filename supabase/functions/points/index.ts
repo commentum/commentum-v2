@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { getUserRole } from '../shared/auth.ts'
+import { resolveUserBadges } from '../shared/badges.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -69,6 +70,45 @@ serve(async (req) => {
     )
   }
 })
+
+interface BonusTag {
+  text: string
+  color: string
+  label: string
+}
+
+function resolveBonusTag(role?: string, roleBonus?: number, isInfinite?: boolean): BonusTag | null {
+  if (isInfinite || role === 'owner' || role === 'app_owner') {
+    return {
+      text: '∞',
+      color: '#FFD700',
+      label: role === 'app_owner' ? 'App Creator' : 'Commentum Owner'
+    }
+  }
+
+  if (roleBonus && roleBonus > 0) {
+    let color = '#5865F2'
+    let label = 'Bonus'
+    if (role === 'super_admin') {
+      color = '#ED4245'
+      label = 'SuperAdmin'
+    } else if (role === 'admin') {
+      color = '#E67E22'
+      label = 'Admin'
+    } else if (role === 'moderator') {
+      color = '#5865F2'
+      label = 'Mod'
+    }
+
+    return {
+      text: `+${roleBonus}`,
+      color,
+      label
+    }
+  }
+
+  return null
+}
 
 /**
  * get_user_points
@@ -142,12 +182,28 @@ async function handleGetUserPoints(supabase: any, params: any) {
     responseData.breakdown = breakdown
   }
 
+  const isOwnerType = responseData.role === 'owner' || responseData.role === 'app_owner' || responseData.is_infinite === true
+  if (isOwnerType) {
+    responseData.is_infinite = true
+    responseData.display_points = '∞'
+  }
+
+  const bonusTag = resolveBonusTag(responseData.role, responseData.role_bonus, isOwnerType)
+
+  const badges = resolveUserBadges({
+    role: responseData.role,
+    tier: responseData.tier,
+    points: responseData.total_points ?? responseData.points
+  })
+
   return new Response(
     JSON.stringify({
       success: true,
       data: {
         user_id: query_user_id,
         client_type: query_client_type,
+        badges,
+        bonus_tag: bonusTag,
         ...responseData
       }
     }),
@@ -159,7 +215,7 @@ async function handleGetUserPoints(supabase: any, params: any) {
  * get_leaderboard
  * 
  * Public endpoint — no auth needed.
- * Returns top users ranked by points.
+ * Returns top users ranked by real points.
  */
 async function handleGetLeaderboard(supabase: any, params: any) {
   const { client_type, page = 1, limit = 50 } = params
@@ -179,10 +235,26 @@ async function handleGetLeaderboard(supabase: any, params: any) {
     )
   }
 
+  const enrichedLeaderboard = (data?.leaderboard || []).map((entry: any) => {
+    const isInf = entry.is_infinite === true || entry.role === 'owner' || entry.role === 'app_owner'
+    return {
+      ...entry,
+      is_infinite: isInf,
+      display_points: isInf ? '∞' : String(entry.real_points ?? entry.points),
+      bonus_tag: resolveBonusTag(entry.role, entry.role_bonus, isInf),
+      badges: resolveUserBadges({
+        role: entry.role,
+        tier: entry.tier,
+        points: entry.total_points ?? entry.points ?? entry.real_points
+      })
+    }
+  })
+
   return new Response(
     JSON.stringify({
       success: true,
-      ...data
+      ...data,
+      leaderboard: enrichedLeaderboard
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )

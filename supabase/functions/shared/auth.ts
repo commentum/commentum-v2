@@ -54,7 +54,7 @@ export async function verifyTokenAndAdminAccess(
 export async function getUserRole(supabase: any, userId: string) {
   try {
     // Get all role configs in ONE query (cached)
-    const roles = await getConfigs(supabase, ['owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
+    const roles = await getConfigs(supabase, ['owner_users', 'app_owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
     
     const userIdStr = String(userId)
     const userIdNum = parseInt(userId)
@@ -62,6 +62,9 @@ export async function getUserRole(supabase: any, userId: string) {
     // Check roles in order of hierarchy
     if (roles.owner_users?.includes(userIdStr) || roles.owner_users?.includes(userIdNum)) {
       return 'owner'
+    }
+    if (roles.app_owner_users?.includes(userIdStr) || roles.app_owner_users?.includes(userIdNum)) {
+      return 'app_owner'
     }
     if (roles.super_admin_users?.includes(userIdStr) || roles.super_admin_users?.includes(userIdNum)) {
       return 'super_admin'
@@ -87,13 +90,14 @@ export function canModerate(moderatorRole: string, targetRole: string) {
     'moderator': 1,
     'admin': 2,
     'super_admin': 3,
-    'owner': 4
+    'app_owner': 4,
+    'owner': 5
   }
   
   return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
 }
 
-// Hide owner role by displaying it as super_admin in API responses
+// Unmasked roles: return actual role in API responses
 export function getDisplayRole(role: string): string {
-  return role === 'owner' ? 'super_admin' : role
+  return role || 'user'
 }

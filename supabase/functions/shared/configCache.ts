@@ -36,6 +36,7 @@ const DEFAULT_CONFIGS: Record<string, any> = {
   auto_mute_threshold: 5,
   auto_ban_threshold: 10,
   owner_users: [],
+  app_owner_users: [],
   super_admin_users: [],
   admin_users: [],
   moderator_users: [],
@@ -144,13 +145,16 @@ export async function isUserInRole(supabase: any, userId: string, roleKey: strin
 
 // Get user's highest role
 export async function getUserRoleFromConfig(supabase: any, userId: string): Promise<string> {
-  const roles = await getConfigs(supabase, ['owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
+  const roles = await getConfigs(supabase, ['owner_users', 'app_owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
   
   const userIdStr = String(userId)
   const userIdNum = parseInt(userId)
   
   if (roles.owner_users?.includes(userIdStr) || roles.owner_users?.includes(userIdNum)) {
     return 'owner'
+  }
+  if (roles.app_owner_users?.includes(userIdStr) || roles.app_owner_users?.includes(userIdNum)) {
+    return 'app_owner'
   }
   if (roles.super_admin_users?.includes(userIdStr) || roles.super_admin_users?.includes(userIdNum)) {
     return 'super_admin'
