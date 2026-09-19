@@ -409,6 +409,12 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
         .eq('commentum_user_id', targetUserId)
     }
 
+    // Backfill all existing comments so badges reflect the role immediately
+    await supabase
+      .from('comments')
+      .update({ user_role: newRole })
+      .eq('user_id', String(targetUserId))
+
     // Update Discord user registration if exists
     await supabase
       .from('discord_users')
@@ -502,6 +508,12 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
         .eq('commentum_client_type', user.commentum_client_type)
         .eq('commentum_user_id', targetUserId)
     }
+
+    // Backfill all existing comments so badges reflect the role immediately
+    await supabase
+      .from('comments')
+      .update({ user_role: newRole })
+      .eq('user_id', String(targetUserId))
 
     // Update Discord user registration if exists
     await supabase

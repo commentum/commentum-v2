@@ -50,9 +50,40 @@ export async function verifyTokenAndAdminAccess(
   }
 }
 
-// Get user role from configuration (uses cached configs)
+// Get user role: commentum_users table first (source of truth,
+// backfilled from config in migration 032), config lists as fallback
+// so any row missed by the backfill still resolves correctly.
+const ROLE_ORDER = ['user', 'moderator', 'admin', 'super_admin', 'app_owner', 'owner']
+
+function highestRole(a: string, b: string): string {
+  return ROLE_ORDER.indexOf(a) >= ROLE_ORDER.indexOf(b) ? a : b
+}
+
 export async function getUserRole(supabase: any, userId: string) {
   try {
+    const userIdStr = String(userId)
+
+    // 1. Table first: highest role across all client rows for this user.
+    try {
+      const { data: rows } = await supabase
+        .from('commentum_users')
+        .select('commentum_user_role')
+        .eq('commentum_user_id', userIdStr)
+
+      let tableRole = 'user'
+      for (const r of (rows || [])) {
+        const v = (r?.commentum_user_role || 'user').toString().toLowerCase()
+        if (ROLE_ORDER.includes(v)) {
+          tableRole = highestRole(tableRole, v)
+        }
+      }
+      if (tableRole !== 'user') {
+        return tableRole
+      }
+    } catch {
+      // Fall through to config on table errors.
+    }
+    // 2. Config fallback (kept dual-maintained by all role writers).
     // Get all role configs in ONE query (cached)
     const roles = await getConfigs(supabase, ['owner_users', 'app_owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
     
