@@ -1,0 +1,58 @@
+name: Sync Media ID Mappings
+on:
+  schedule:
+    # Mondays 03:00 UTC — refresh anime (Fribb weekly) + manga (AniList crawl)
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      crawl_manga:
+        description: "Include manga crawl (AniList GraphQL, ~20 min)"
+        required: false
+        default: "true"
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build mapping seed SQL
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.crawl_manga }}" != "true" ]; then
+            python3 scripts/sync_media_mappings.py --out media_mappings_seed.sql
+          else
+            python3 scripts/sync_media_mappings.py --manga --out media_mappings_seed.sql
+          fi
+          gzip -f media_mappings_seed.sql
+
+      - name: Upload seed to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "media_mappings_seed.sql.gz"
+          target: "/tmp/"
+
+      - name: Apply mapping seed
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            gunzip -f /tmp/media_mappings_seed.sql.gz
+            cd /root/supabase/docker
+            docker compose exec -T db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 < /tmp/media_mappings_seed.sql
+            if [ $? -eq 0 ]; then
+              echo "✅ media_id_map refreshed"
+            else
+              echo "❌ seed failed"; exit 1
+            fi
+            rm -f /tmp/media_mappings_seed.sql

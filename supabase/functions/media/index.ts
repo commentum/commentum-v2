@@ -36,6 +36,55 @@ serve(async (req) => {
       )
     }
 
+    // ====================================
+    // Cross-client merge (media_id_map)
+    // The same show lives under different ids per client (anilist 21 =
+    // mal 21 = simkl 38636 for One Piece). If a mapping exists, match
+    // comments from ALL equivalent (client_type, media_id) pairs so
+    // everyone sees one shared thread. Read-time merge only — comments
+    // are still stored per-client and unmapped media behaves exactly
+    // as before. ?merge=false restores the old single-client read.
+    // ====================================
+    const SAFE_OR_ID = /^[A-Za-z0-9_.-]+$/ // PostgREST .or() value safety
+    let mediaFilter: { client_type: string; media_id: string }[] = [
+      { client_type, media_id },
+    ]
+    let merged = false
+    if (url.searchParams.get('merge') !== 'false') {
+      try {
+        const { data: selfMap } = await supabase
+          .from('media_id_map')
+          .select('map_key')
+          .eq('client_type', client_type)
+          .eq('media_id', media_id)
+          .maybeSingle()
+        if (selfMap?.map_key) {
+          const { data: equivs } = await supabase
+            .from('media_id_map')
+            .select('client_type, media_id')
+            .eq('map_key', selfMap.map_key)
+          const resolved = (equivs || [])
+            .map((e: any) => ({ client_type: String(e.client_type), media_id: String(e.media_id) }))
+            .filter((e: any) => SAFE_OR_ID.test(e.client_type) && SAFE_OR_ID.test(e.media_id))
+          if (resolved.length > 1) {
+            mediaFilter = resolved
+            merged = true
+          }
+        }
+      } catch (_) {
+        // Mapping lookup failed — fall back to single-client behavior
+      }
+    }
+
+    const applyMediaFilter = (q: any) =>
+      merged
+        ? q.or(
+            mediaFilter
+              .map((p) => `and(client_type.eq.${p.client_type},media_id.eq.${p.media_id})`)
+              .join(',')
+          )
+        : q.eq('media_id', media_id).eq('client_type', client_type)
+
     // Build order by
     let orderBy = { created_at: 'desc' }
     switch (sort) {
@@ -54,11 +103,11 @@ serve(async (req) => {
     // Include deleted comments (soft-deleted) so replies to deleted parents are preserved
     // Reddit-style: deleted comments show as "[deleted]" with no content
     // Note: We do NOT filter out banned users' comments — banned status doesn't hide their existing comments
-    let commentsQuery = supabase
-      .from('comments')
-      .select('*')
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
+    let commentsQuery = applyMediaFilter(
+      supabase
+        .from('comments')
+        .select('*')
+    )
       // Pinned comments always come first (newest pin first), then the
       // requested sort. Every client already floats pinned comments to the
       // top client-side, so this puts pins on page 1 for everyone without
@@ -80,30 +129,44 @@ serve(async (req) => {
 
     if (error) throw error
 
-    // Get user points for all unique user_ids in this page
-    const userIds = [...new Set((comments || [])
-      .filter((c: any) => !c.deleted && c.user_id)
-      .map((c: any) => c.user_id))]
+    // Get user points + customizations for all unique users in this page.
+    // With cross-client merge a page can contain users from DIFFERENT
+    // clients, and the batch RPCs are per-client — so group the ids by
+    // each comment's own client_type and key results as "client:user_id"
+    // (user_id alone can collide across clients: anilist 123 ≠ mal 123).
+    const byClient = new Map<string, string[]>()
+    for (const c of comments || []) {
+      if (c.deleted || !c.user_id || !c.client_type) continue
+      const list = byClient.get(c.client_type) || []
+      if (!list.includes(c.user_id)) list.push(c.user_id)
+      byClient.set(c.client_type, list)
+    }
 
-    let userPointsMap: Record<string, any> = {}
-    let userCustomizationsMap: Record<string, any> = {}
-    if (userIds.length > 0) {
-      const [{ data: pointsData }, { data: customData }] = await Promise.all([
-        supabase.rpc('get_batch_user_points_cached', {
-          p_client_type: client_type,
-          p_user_ids: userIds
-        }),
-        supabase.rpc('get_batch_user_customizations', {
-          p_client_type: client_type,
-          p_user_ids: userIds
-        }).then((res: any) => res, () => ({ data: null }))
-      ])
-      if (pointsData) {
-        userPointsMap = pointsData
-      }
-      if (customData) {
-        userCustomizationsMap = customData
-      }
+    const userPointsMap: Record<string, any> = {}
+    const userCustomizationsMap: Record<string, any> = {}
+    if (byClient.size > 0) {
+      await Promise.all([...byClient.entries()].map(async ([ct, ids]) => {
+        const [pointsRes, customRes] = await Promise.all([
+          supabase.rpc('get_batch_user_points_cached', {
+            p_client_type: ct,
+            p_user_ids: ids
+          }),
+          supabase.rpc('get_batch_user_customizations', {
+            p_client_type: ct,
+            p_user_ids: ids
+          }).then((res: any) => res, () => ({ data: null }))
+        ])
+        if (pointsRes.data) {
+          for (const [uid, val] of Object.entries(pointsRes.data)) {
+            userPointsMap[`${ct}:${uid}`] = val
+          }
+        }
+        if (customRes.data) {
+          for (const [uid, val] of Object.entries(customRes.data)) {
+            userCustomizationsMap[`${ct}:${uid}`] = val
+          }
+        }
+      }))
     }
 
     const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
@@ -129,7 +192,7 @@ serve(async (req) => {
         stripped.linked_accounts = null
         stripped.badges = []
       } else {
-        const points = userPointsMap[comment.user_id]
+        const points = userPointsMap[`${comment.client_type}:${comment.user_id}`]
         stripped.user_tier = points?.tier || null
         stripped.user_points = points?.total_points || null
         stripped.badges = resolveUserBadges({
@@ -141,7 +204,7 @@ serve(async (req) => {
         stripped.language_name = stripped.original_language ? getLanguageName(stripped.original_language) : null
 
         // Customizations & linked accounts
-        const custom = userCustomizationsMap[comment.user_id]
+        const custom = userCustomizationsMap[`${comment.client_type}:${comment.user_id}`]
         stripped.avatar_decoration = custom?.avatar_decoration || comment.avatar_decoration || null
         stripped.banner_url = custom?.banner_url || comment.banner_url || null
         stripped.banner_theme = custom?.banner_theme || null
@@ -152,13 +215,13 @@ serve(async (req) => {
       return stripped
     })
 
-    // Get total count (exclude deleted for count)
-    const { count } = await supabase
-      .from('comments')
-      .select('*', { count: 'exact', head: true })
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
-      .eq('deleted', false)
+    // Get total count (exclude deleted for count) — honors the merge filter
+    const { count } = await applyMediaFilter(
+      supabase
+        .from('comments')
+        .select('*', { count: 'exact', head: true })
+        .eq('deleted', false)
+    )
 
     // Build nested structure
     const nestedComments = buildNestedStructure(sanitizedComments)
@@ -168,18 +231,22 @@ serve(async (req) => {
     const prunedComments = pruneDeletedComments(nestedComments)
 
     // Get media statistics (exclude deleted)
-    const { data: stats } = await supabase
-      .from('comments')
-      .select('upvotes, downvotes')
-      .eq('media_id', media_id)
-      .eq('client_type', client_type)
-      .eq('deleted', false)
+    const { data: stats } = await applyMediaFilter(
+      supabase
+        .from('comments')
+        .select('upvotes, downvotes')
+        .eq('deleted', false)
+    )
 
     const totalUpvotes = stats?.reduce((sum: number, comment: any) => sum + comment.upvotes, 0) || 0
     const totalDownvotes = stats?.reduce((sum: number, comment: any) => sum + comment.downvotes, 0) || 0
 
-    // Get media info from first non-deleted comment
-    const firstNonDeleted = (comments || []).find((c: any) => !c.deleted)
+    // Get media info — prefer a row from the REQUESTING client so the
+    // header shows the title/poster the user knows, fall back to any row
+    // (merged pages may come entirely from other clients).
+    const firstNonDeleted = (comments || []).find(
+      (c: any) => !c.deleted && c.client_type === client_type && c.media_id === media_id
+    ) || (comments || []).find((c: any) => !c.deleted)
     let mediaInfo = firstNonDeleted ? {
       mediaId: firstNonDeleted.media_id,
       mediaType: firstNonDeleted.media_type,
@@ -210,6 +277,7 @@ serve(async (req) => {
       JSON.stringify({
         media: mediaInfo,
         comments: prunedComments,
+        merged,
         stats: {
           commentCount: count || 0,
           totalUpvotes,
