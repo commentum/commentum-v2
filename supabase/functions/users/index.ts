@@ -25,7 +25,7 @@ serve(async (req) => {
       reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, 
       page, limit, username, delete_comment_id, delete_all_comments,
       avatar_decoration, banner_url, banner_theme, nameplate_theme,
-      target_access_token, service_to_unlink 
+      target_access_token, service_to_unlink, user_ids
     } = await req.json()
 
     // All user management actions require token authentication
@@ -53,7 +53,8 @@ serve(async (req) => {
     // update_customizations / link_account / unlink_account: personal profile customization
     const publicActions = [
       'get_user_history', 'get_role', 'search_users_public', 'get_user_info',
-      'update_customizations', 'link_account', 'unlink_account', 'get_profile'
+      'update_customizations', 'link_account', 'unlink_account', 'get_profile',
+      'get_batch_customizations'
     ]
 
     let moderatorRole: string
@@ -148,6 +149,11 @@ serve(async (req) => {
           client_type, moderator_id, verifiedUser
         })
 
+      case 'get_batch_customizations':
+        return await handleGetBatchCustomizations(supabase, {
+          client_type, target_client_type, user_ids
+        })
+
       default:
         return new Response(
           JSON.stringify({ error: 'Invalid action' }),
@@ -163,6 +169,39 @@ serve(async (req) => {
     )
   }
 })
+
+/**
+ * get_batch_customizations
+ * Bulk-fetch avatar decorations / banners / linked accounts for up to 100
+ * users at once. Lets clients render frames in list screens (social,
+ * activity, compatibility) with a single request instead of N lookups.
+ */
+async function handleGetBatchCustomizations(supabase: any, params: any) {
+  const { client_type, target_client_type, user_ids } = params
+
+  const ids = ((Array.isArray(user_ids) ? user_ids : []) as any[])
+    .map((v: any) => String(v ?? '').trim())
+    .filter((v: string) => v.length > 0)
+    .slice(0, 100)
+
+  if (ids.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'user_ids must be a non-empty array (max 100)' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const { data, error } = await supabase.rpc('get_batch_user_customizations', {
+    p_client_type: target_client_type || client_type,
+    p_user_ids: ids
+  })
+  if (error) throw error
+
+  return new Response(
+    JSON.stringify({ success: true, customizations: data ?? {} }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
 
 async function handleGetUserInfo(supabase: any, params: any) {
   const { target_user_id, target_client_type, moderator_id, moderatorRole, verifiedUser } = params

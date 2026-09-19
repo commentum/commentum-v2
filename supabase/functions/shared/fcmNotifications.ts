@@ -531,6 +531,7 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       media_type: payload.comment?.media_type || payload.media?.type || '',
       media_title: payload.comment?.media_title || payload.media?.title || '',
       client_type: serviceClientType,
+      actor_id: effectiveActor?.id || '',
       actor_username: actorUsername,
       actor_avatar: actorAvatar || '',
       click_action: clickAction,
