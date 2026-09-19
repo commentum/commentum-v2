@@ -1,46 +1,52 @@
 -- ====================================
 -- UPDATE SERVER CONFIGURATIONS TO SINGLE ROLE
+--
+-- NOTE: idempotent rewrite. The original version started with
+--   DROP TABLE IF EXISTS server_configs;
+-- and because the deploy workflow used to re-run EVERY migration on
+-- EVERY push, this wiped all Discord server configs (webhook urls,
+-- guild ids, role ids) on every deploy. It now only creates what is
+-- missing and never touches existing rows. (The workflow also tracks
+-- applied migrations via schema_migrations, so this normally runs once.)
 -- ====================================
-
--- Drop existing table if it exists and recreate with single role
-DROP TABLE IF EXISTS server_configs;
 
 -- Create separate sequence for server configurations
 CREATE SEQUENCE IF NOT EXISTS server_configs_seq START 1;
 
 -- Create server configurations table with role_id as direct field
-CREATE TABLE server_configs (
+CREATE TABLE IF NOT EXISTS server_configs (
     id INTEGER PRIMARY KEY DEFAULT nextval('server_configs_seq'),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     -- Server identification
     server_name TEXT UNIQUE NOT NULL,
     guild_id TEXT UNIQUE NOT NULL,
     webhook_url TEXT,
     role_id TEXT,
-    
+
     -- Channel-specific webhooks for 2-channel system
     moderation_webhook_url TEXT,
-    
+
     -- Server status
     is_active BOOLEAN DEFAULT TRUE,
-    
+
     -- Additional settings
     settings TEXT, -- JSON for additional server-specific settings
-    
+
     -- Check constraints
     CONSTRAINT server_name_length CHECK (length(server_name) >= 2 AND length(server_name) <= 50),
     CONSTRAINT guild_id_length CHECK (length(guild_id) >= 15 AND length(guild_id) <= 25)
 );
 
 -- Indexes for server configurations
-CREATE INDEX idx_server_configs_name ON server_configs(server_name);
-CREATE INDEX idx_server_configs_guild ON server_configs(guild_id);
-CREATE INDEX idx_server_configs_active ON server_configs(is_active);
+CREATE INDEX IF NOT EXISTS idx_server_configs_name ON server_configs(server_name);
+CREATE INDEX IF NOT EXISTS idx_server_configs_guild ON server_configs(guild_id);
+CREATE INDEX IF NOT EXISTS idx_server_configs_active ON server_configs(is_active);
 
 -- Trigger for updated_at
-CREATE TRIGGER update_server_configs_updated_at 
+DROP TRIGGER IF EXISTS update_server_configs_updated_at ON server_configs;
+CREATE TRIGGER update_server_configs_updated_at
     BEFORE UPDATE ON server_configs
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
@@ -50,10 +56,12 @@ ALTER TABLE server_configs ENABLE ROW LEVEL SECURITY;
 
 -- Server configs RLS policies
 -- Anyone can read active server configs (for bot operations)
+DROP POLICY IF EXISTS "Anyone can read active server configs" ON server_configs;
 CREATE POLICY "Anyone can read active server configs" ON server_configs
     FOR SELECT USING (is_active = true);
 
 -- Only super admins can manage server configurations
+DROP POLICY IF EXISTS "Super admins can manage server configs" ON server_configs;
 CREATE POLICY "Super admins can manage server configs" ON server_configs
     FOR ALL USING (
         is_user_in_role(auth.uid()::text, 'super_admin_users')
@@ -62,7 +70,9 @@ CREATE POLICY "Super admins can manage server configs" ON server_configs
     );
 
 -- Insert default server configurations with your format
-INSERT INTO server_configs (server_name, guild_id, webhook_url, role_id, moderation_webhook_url) VALUES 
+-- (only on a fresh table — never overwrite real webhook configs)
+INSERT INTO server_configs (server_name, guild_id, webhook_url, role_id, moderation_webhook_url) VALUES
     ('AnymeX', 'YOUR_ANYMEX_GUILD_ID', 'YOUR_ANYMEX_WEBHOOK_URL', 'YOUR_ANYMEX_ROLE_ID', 'YOUR_ANYMEX_MODERATION_WEBHOOK_URL'),
     ('ShonenX', 'YOUR_SHONENX_GUILD_ID', 'YOUR_SHONENX_WEBHOOK_URL', 'YOUR_SHONENX_ROLE_ID', 'YOUR_SHONENX_MODERATION_WEBHOOK_URL'),
-    ('animestream', 'YOUR_ANIMESTREAM_GUILD_ID', 'YOUR_ANIMESTREAM_WEBHOOK_URL', 'YOUR_ANIMESTREAM_ROLE_ID', 'YOUR_ANIMESTREAM_MODERATION_WEBHOOK_URL');
+    ('animestream', 'YOUR_ANIMESTREAM_GUILD_ID', 'YOUR_ANIMESTREAM_WEBHOOK_URL', 'YOUR_ANIMESTREAM_ROLE_ID', 'YOUR_ANIMESTREAM_MODERATION_WEBHOOK_URL')
+ON CONFLICT (server_name) DO NOTHING;

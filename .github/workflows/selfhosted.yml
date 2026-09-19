@@ -65,6 +65,11 @@ jobs:
           strip_components: 1
 
       # Run DB migrations
+      # NOTE: every migration runs EXACTLY ONCE via the schema_migrations
+      # tracking table. Re-running everything on every deploy was actively
+      # destructive: 004 dropped the server_configs table (wiping Discord
+      # webhooks/guild/role ids) and 028 reset app_owner_users, plus it
+      # flooded logs with "already exists" errors.
       - name: Apply Database Migrations
         if: ${{ github.event_name == 'push' || inputs.run_migrations == 'true' }}
         uses: appleboy/ssh-action@v1.0.3
@@ -74,13 +79,41 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             cd /root/supabase/docker
-            for f in /root/supabase/docker/volumes/db/migrations/*.sql; do
+            MDIR=/root/supabase/docker/volumes/db/migrations
+            # Run as supabase_admin (superuser + function owner).
+            # -U postgres fails every CREATE OR REPLACE FUNCTION with
+            # "must be owner" while still printing success.
+            PSQL="docker compose exec -T db psql -U supabase_admin -d postgres -t -A"
+            TRACKING_EXISTS=$($PSQL -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations';")
+            if [ "$TRACKING_EXISTS" = "0" ]; then
+              echo "🆕 Creating schema_migrations tracking table"
+              $PSQL -c "CREATE TABLE public.schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW());"
+              # If the DB is already established (comments exists), every
+              # migration currently in the folder has already been applied
+              # by the old re-run-everything workflow — mark them as done
+              # WITHOUT executing, so nothing destructive re-runs.
+              # On a genuinely fresh DB (no comments table) we mark nothing
+              # and the loop below performs the full first run.
+              CORE_EXISTS=$($PSQL -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='comments';")
+              if [ "$CORE_EXISTS" = "1" ]; then
+                echo "📦 Established DB detected — marking all existing migration files as applied"
+                for f in $MDIR/*.sql; do
+                  [ -f "$f" ] || continue
+                  $PSQL -c "INSERT INTO public.schema_migrations (filename) VALUES ('$(basename $f)') ON CONFLICT (filename) DO NOTHING;"
+                done
+              fi
+            fi
+            for f in $MDIR/*.sql; do
               [ -f "$f" ] || continue
-              echo "▶️ Running: $(basename $f)"
-              # NOTE: run as supabase_admin (superuser + function owner).
-              # -U postgres fails every CREATE OR REPLACE FUNCTION with
-              # "must be owner" while still printing success.
-              cat "$f" | docker compose exec -T db psql -U supabase_admin -d postgres
+              BASE=$(basename "$f")
+              APPLIED=$($PSQL -c "SELECT count(*) FROM public.schema_migrations WHERE filename='$BASE';")
+              if [ "$APPLIED" = "0" ]; then
+                echo "▶️ Running: $BASE"
+                cat "$f" | docker compose exec -T db psql -U supabase_admin -d postgres
+                $PSQL -c "INSERT INTO public.schema_migrations (filename) VALUES ('$BASE') ON CONFLICT (filename) DO NOTHING;"
+              else
+                echo "⏭️ Skipped (already applied): $BASE"
+              fi
             done
             echo "✅ Migrations applied"
 
