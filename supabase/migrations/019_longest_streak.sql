@@ -5,6 +5,58 @@
 -- ====================================
 
 -- ====================================
+-- FUNCTION: calculate_comment_streak
+-- Returns the CURRENT (still-alive) streak: the run of consecutive days
+-- with at least one comment, ending today or yesterday. 0 if none.
+--
+-- NOTE: 029/031_user_points re-define get_user_points to CALL this
+-- function, but nothing ever defined it -> "function
+-- calculate_comment_streak(text, text) does not exist" at runtime inside
+-- trg_user_points_update, aborting every UPDATE on commentum_users that
+-- changed role/ban/warnings/vote_count (and 032's backfill).
+-- Same gaps-and-islands technique as the longest_streak calc below.
+-- ====================================
+
+CREATE OR REPLACE FUNCTION calculate_comment_streak(
+    p_client_type TEXT,
+    p_user_id TEXT
+)
+RETURNS INTEGER AS $$
+DECLARE
+    v_streak INTEGER;
+BEGIN
+    WITH distinct_dates AS (
+        SELECT DISTINCT DATE(created_at) AS d
+        FROM comments
+        WHERE user_id = p_user_id
+        AND client_type = p_client_type
+        AND deleted = false
+    ),
+    grouped AS (
+        SELECT
+            d,
+            d - (ROW_NUMBER() OVER (ORDER BY d))::INTEGER AS grp
+        FROM distinct_dates
+    ),
+    streaks AS (
+        SELECT
+            grp,
+            COUNT(*) AS streak_len,
+            MAX(d) AS last_day
+        FROM grouped
+        GROUP BY grp
+    )
+    SELECT COALESCE(streak_len, 0) INTO v_streak
+    FROM streaks
+    WHERE last_day >= CURRENT_DATE - INTERVAL '1 day'
+    ORDER BY last_day DESC
+    LIMIT 1;
+
+    RETURN COALESCE(v_streak, 0);
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- ====================================
 -- Replace get_user_points with longest_streak support
 -- ====================================
 
