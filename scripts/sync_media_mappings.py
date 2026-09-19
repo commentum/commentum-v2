@@ -126,6 +126,7 @@ def seed_manga(mapper: Mapper, max_pages: int = 0):
             headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
         )
         payload = None
+        hard_stop = False
         for _attempt in range(5):
             try:
                 with urllib.request.urlopen(req, timeout=30) as r:
@@ -137,10 +138,18 @@ def seed_manga(mapper: Mapper, max_pages: int = 0):
                     print(f"   429 on page {page}, waiting {wait}s", flush=True)
                     time.sleep(wait)
                     continue
-                raise
+                # Non-429 (e.g. 400 beyond AniList's page cap) — keep the
+                # data collected so far instead of throwing the whole run away.
+                print(f"   HTTP {e.code} on page {page} — stopping crawl, keeping {len(mapper.rows)} rows", flush=True)
+                hard_stop = True
+                break
+            except (urllib.error.URLError, TimeoutError, OSError) as e:
+                print(f"   network error on page {page} (attempt {_attempt + 1}/5): {e}", flush=True)
+                time.sleep(5)
         if payload is None:
-            print(f"   giving up on page {page}", flush=True)
-            return
+            if not hard_stop:
+                print(f"   giving up on page {page} — keeping {len(mapper.rows)} rows", flush=True)
+            break
         pg = payload.get("data", {}).get("Page", {})
         media = pg.get("media", [])
         info = pg.get("pageInfo", {})
@@ -149,7 +158,7 @@ def seed_manga(mapper: Mapper, max_pages: int = 0):
             if m.get("idMal"):
                 mapper.add("manga", mal=m["idMal"], anilist=m["id"])
         print(f"   manga page {page}/{last_page or '?'} (+{len(media)})", flush=True)
-        if info.get("hasNextPage") is False or not media:
+        if hard_stop or info.get("hasNextPage") is False or not media:
             break
         if max_pages and page >= max_pages:
             print(f"   --manga-pages cap reached ({max_pages})", flush=True)
