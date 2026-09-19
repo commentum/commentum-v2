@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { getLanguageName } from '../shared/translate.ts'
 import { resolveUserBadges } from '../shared/badges.ts'
+import { getConfig } from '../shared/configCache.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -196,6 +197,11 @@ serve(async (req) => {
 
     const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
 
+    // Global decorations kill-switch (Discord /config decorations_enabled).
+    // When off, no avatar_decoration leaves this endpoint for anyone.
+    const _decoFlag = await getConfig(supabase, 'decorations_enabled')
+    const decorationsEnabled = _decoFlag !== false && _decoFlag !== 'false'
+
     const sanitizedComments = (comments || []).map((comment: any) => {
       const stripped: any = {}
       for (const [key, value] of Object.entries(comment)) {
@@ -230,7 +236,9 @@ serve(async (req) => {
 
         // Customizations & linked accounts
         const custom = userCustomizationsMap[`${comment.client_type}:${comment.user_id}`]
-        stripped.avatar_decoration = custom?.avatar_decoration || comment.avatar_decoration || null
+        stripped.avatar_decoration = decorationsEnabled
+          ? (custom?.avatar_decoration || comment.avatar_decoration || null)
+          : null
         stripped.banner_url = custom?.banner_url || comment.banner_url || null
         stripped.banner_theme = custom?.banner_theme || null
         stripped.nameplate_theme = custom?.nameplate_theme || null
@@ -303,6 +311,7 @@ serve(async (req) => {
         media: mediaInfo,
         comments: prunedComments,
         merged,
+        decorations_enabled: decorationsEnabled,
         stats: {
           commentCount: count || 0,
           totalUpvotes,

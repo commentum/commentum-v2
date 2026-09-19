@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { getUserRole } from '../shared/auth.ts'
 import { resolveUserBadges } from '../shared/badges.ts'
+import { getConfig } from '../shared/configCache.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -235,10 +236,16 @@ async function handleGetLeaderboard(supabase: any, params: any) {
     )
   }
 
+  // Global decorations kill-switch (Discord /config decorations_enabled).
+  const _decoFlag = await getConfig(supabase, 'decorations_enabled')
+  const decorationsEnabled = _decoFlag !== false && _decoFlag !== 'false'
+
   const enrichedLeaderboard = (data?.leaderboard || []).map((entry: any) => {
     const isInf = entry.is_infinite === true || entry.role === 'owner' || entry.role === 'app_owner'
     return {
       ...entry,
+      // Global decorations kill-switch: strip frames for everyone when off.
+      avatar_decoration: decorationsEnabled ? (entry.avatar_decoration ?? null) : null,
       is_infinite: isInf,
       display_points: isInf ? '∞' : String(entry.real_points ?? entry.points),
       bonus_tag: resolveBonusTag(entry.role, entry.role_bonus, isInf),
@@ -254,7 +261,8 @@ async function handleGetLeaderboard(supabase: any, params: any) {
     JSON.stringify({
       success: true,
       ...data,
-      leaderboard: enrichedLeaderboard
+      leaderboard: enrichedLeaderboard,
+      decorations_enabled: decorationsEnabled
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )

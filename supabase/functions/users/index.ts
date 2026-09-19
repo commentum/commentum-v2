@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyAdminAccess, getUserRole, canModerate, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
+import { getConfig } from '../shared/configCache.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
 const corsHeaders = {
@@ -197,6 +198,19 @@ async function handleGetBatchCustomizations(supabase: any, params: any) {
   })
   if (error) throw error
 
+  // Global decorations kill-switch: strip frames for everyone when off.
+  const _decoFlag = await getConfig(supabase, 'decorations_enabled')
+  if (_decoFlag === false || _decoFlag === 'false') {
+    const stripped: Record<string, any> = {}
+    for (const [uid, val] of Object.entries((data ?? {}) as Record<string, any>)) {
+      stripped[uid] = { ...(val as object), avatar_decoration: null }
+    }
+    return new Response(
+      JSON.stringify({ success: true, customizations: stripped }),
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
   return new Response(
     JSON.stringify({ success: true, customizations: data ?? {} }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -225,6 +239,9 @@ async function handleGetUserInfo(supabase: any, params: any) {
   // Enrich user data with readable field names
   // Respect expiration: a user with banned=true but banned_until in the past is effectively NOT banned
   const now = new Date()
+  // Global decorations kill-switch (Discord /config decorations_enabled).
+  const _decoFlag = await getConfig(supabase, 'decorations_enabled')
+  const decorationsEnabled = _decoFlag !== false && _decoFlag !== 'false'
   const enrichedUsers = (data || []).map((u: any) => {
     const isBanned = u.commentum_user_banned && (u.commentum_user_banned_until === null || new Date(u.commentum_user_banned_until) > now)
     const isMuted = u.commentum_user_muted && (u.commentum_user_muted_until === null || new Date(u.commentum_user_muted_until) > now)
@@ -260,7 +277,7 @@ async function handleGetUserInfo(supabase: any, params: any) {
       commentum_user_warnings: u.commentum_user_warnings,
       commentum_user_notes: u.commentum_user_notes,
       commentum_client_type: u.commentum_client_type,
-      avatar_decoration: u.avatar_decoration || null,
+      avatar_decoration: decorationsEnabled ? (u.avatar_decoration || null) : null,
       banner_url: u.banner_url || null,
       banner_theme: u.banner_theme || null,
       nameplate_theme: u.nameplate_theme || null,
@@ -1224,6 +1241,17 @@ async function handleGetProfile(supabase: any, params: any) {
 async function handleUpdateCustomizations(supabase: any, params: any) {
   const { client_type, moderator_id, verifiedUser, avatar_decoration, banner_url, banner_theme, nameplate_theme } = params;
   const normClient = client_type.toLowerCase() === 'myanimelist' ? 'mal' : client_type.toLowerCase();
+
+  // Global decorations kill-switch: refuse new frames while disabled.
+  if (avatar_decoration !== undefined) {
+    const _decoFlag = await getConfig(supabase, 'decorations_enabled')
+    if (_decoFlag === false || _decoFlag === 'false') {
+      return new Response(
+        JSON.stringify({ error: 'Avatar decorations are currently disabled' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+  }
 
   let user = await findUnifiedUser(supabase, normClient, moderator_id);
   if (!user) {

@@ -41,7 +41,8 @@ const DEFAULT_CONFIGS: Record<string, any> = {
   admin_users: [],
   moderator_users: [],
   discord_notifications_enabled: true,
-  discord_notification_types: ['comment_created', 'comment_deleted', 'user_banned', 'user_warned']
+  discord_notification_types: ['comment_created', 'comment_deleted', 'user_banned', 'user_warned'],
+  decorations_enabled: true,
 }
 
 // Get a single config value (uses stale-while-revalidate)
