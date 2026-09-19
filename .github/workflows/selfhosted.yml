@@ -73,7 +73,10 @@ jobs:
             for f in /root/supabase/docker/volumes/db/migrations/*.sql; do
               [ -f "$f" ] || continue
               echo "▶️ Running: $(basename $f)"
-              cat "$f" | docker compose exec -T db psql -U postgres -d postgres
+              # NOTE: run as supabase_admin (superuser + function owner).
+              # -U postgres fails every CREATE OR REPLACE FUNCTION with
+              # "must be owner" while still printing success.
+              cat "$f" | docker compose exec -T db psql -U supabase_admin -d postgres
             done
             echo "✅ Migrations applied"
 
