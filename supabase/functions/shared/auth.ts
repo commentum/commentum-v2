@@ -86,8 +86,11 @@ export async function getUserRole(supabase: any, userId: string) {
     // 2. Config fallback (kept dual-maintained by all role writers).
     // Get all role configs in ONE query (cached)
     const roles = await getConfigs(supabase, ['owner_users', 'app_owner_users', 'super_admin_users', 'admin_users', 'moderator_users'])
-    
-    const userIdStr = String(userId)
+
+    // NOTE: userIdStr is already declared above (line ~64) for the
+    // table-first lookup — a second declaration here was a duplicate
+    // identifier that made every edge worker fail to boot with
+    // "Identifier 'userIdStr' has already been declared" (all 500s).
     const userIdNum = parseInt(userId)
 
     // Check roles in order of hierarchy
