@@ -32,6 +32,9 @@ ANILIST_API = "https://graphql.anilist.co"
 
 VALID_ID = re.compile(r"^[A-Za-z0-9_.\-:]+$")  # SQL + PostgREST safe
 BATCH = 1000
+# Cloudflare (AniList) blocks the default "Python-urllib/x" user-agent with 403.
+USER_AGENT = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 
 def sql_str(v: str) -> str:
@@ -93,7 +96,8 @@ class Mapper:
 
 def load_fribb():
     print(f"⬇️  Downloading {FRIBB_URL} ...", flush=True)
-    with urllib.request.urlopen(FRIBB_URL, timeout=120) as r:
+    req = urllib.request.Request(FRIBB_URL, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=120) as r:
         data = json.loads(r.read().decode("utf-8"))
     print(f"   {len(data)} anime entries", flush=True)
     return data
@@ -116,7 +120,11 @@ def seed_manga(mapper: Mapper, max_pages: int = 0):
     last_page = None
     while True:
         body = json.dumps({"query": query, "variables": {"page": page}}).encode()
-        req = urllib.request.Request(ANILIST_API, data=body, headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            ANILIST_API,
+            data=body,
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
+        )
         payload = None
         for _attempt in range(5):
             try:
