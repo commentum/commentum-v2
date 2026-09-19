@@ -4,12 +4,12 @@
 -- Unmasks owner in API responses and updates role constraints
 -- =======================================================
 
--- 1. Insert 'app_owner_users' configuration key if not present
+-- 1. Insert 'app_owner_users' configuration key if not present.
+-- NOTE: DO NOTHING (never reset) — ON CONFLICT DO UPDATE used to wipe
+-- subsequently added app owners on every deploy replay.
 INSERT INTO config (key, value)
 VALUES ('app_owner_users', '["5965508"]')
-ON CONFLICT (key) DO UPDATE
-SET value = '["5965508"]'
-WHERE config.key = 'app_owner_users';
+ON CONFLICT (key) DO NOTHING;
 
 -- 2. Update comments table constraint for user_role
 ALTER TABLE comments DROP CONSTRAINT IF EXISTS comments_user_role_check;
