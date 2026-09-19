@@ -32,7 +32,7 @@ $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 -- role disagrees (or is null) so existing correct rows are untouched.
 UPDATE commentum_users cu
 SET commentum_user_role = ranked.role,
-    commentum_updated_at = NOW()
+    updated_at = NOW()
 FROM (
     SELECT
         commentum_user_id,

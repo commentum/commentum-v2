@@ -1081,10 +1081,11 @@ async function handleRoleChange(supabase: any, params: any) {
     await supabase.from('config').update({ value: JSON.stringify(filtered), updated_at: new Date().toISOString() }).eq('key', c.key)
   }
 
-  // Update commentum_users table
+  // Update commentum_users table (updated_at is the real column;
+  // commentum_updated_at does not exist and would fail the update)
   await supabase.from('commentum_users').update({
     commentum_user_role: requestedRole,
-    commentum_updated_at: new Date().toISOString()
+    updated_at: new Date().toISOString()
   }).eq('commentum_user_id', String(target_user_id))
 
   // Update all existing comments for this user so their badge reflects the role immediately
