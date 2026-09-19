@@ -99,7 +99,13 @@ serve(async (req) => {
         break
     }
 
-    // Get comments for this media
+    // Pagination is over TOP-LEVEL comments only. Replies are never
+    // paginated: every parent in the window ships with its FULL reply
+    // subtree, so billboards like pinned threads always arrive complete
+    // and clients never have to stitch pages together to show counts.
+    // (Previously a flat range() window mixed parents and replies, so a
+    // thread's replies routinely landed on later pages.)
+    // Get comments for this media (merged across equivalent ids when mapped)
     // Include deleted comments (soft-deleted) so replies to deleted parents are preserved
     // Reddit-style: deleted comments show as "[deleted]" with no content
     // Note: We do NOT filter out banned users' comments — banned status doesn't hide their existing comments
@@ -107,7 +113,7 @@ serve(async (req) => {
       supabase
         .from('comments')
         .select('*')
-    )
+    ).or('parent_id.is.null,parent_id.eq.0')
       // Pinned comments always come first (newest pin first), then the
       // requested sort. Every client already floats pinned comments to the
       // top client-side, so this puts pins on page 1 for everyone without
@@ -125,9 +131,28 @@ serve(async (req) => {
       commentsQuery = commentsQuery.range(offset, offset + limit! - 1)
     }
 
-    const { data: comments, error } = await commentsQuery
+    const { data: parentRows, error: parentsError } = await commentsQuery
+    if (parentsError) throw parentsError
 
-    if (error) throw error
+    // Widen to full reply subtrees for every windowed parent (any depth).
+    // Deleted rows stay in so pruneDeletedComments() can keep placeholders.
+    // Uses the same merged media filter so cross-client threads stay whole.
+    let comments: any[] = parentRows || []
+    if (!noPagination && comments.length > 0) {
+      const seen = new Set((comments as any[]).map((c: any) => c.id))
+      let frontier: number[] = [...seen]
+      while (frontier.length > 0) {
+        const { data: kids, error: kidsError } = await applyMediaFilter(
+          supabase.from('comments').select('*')
+        ).in('parent_id', frontier)
+        if (kidsError) throw kidsError
+        const fresh = (kids || []).filter((k: any) => !seen.has(k.id))
+        if (fresh.length === 0) break
+        for (const k of fresh) seen.add(k.id)
+        comments = [...comments, ...fresh]
+        frontier = fresh.map((k: any) => k.id)
+      }
+    }
 
     // Get user points + customizations for all unique users in this page.
     // With cross-client merge a page can contain users from DIFFERENT
