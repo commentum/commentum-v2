@@ -218,6 +218,7 @@ CREATE OR REPLACE FUNCTION sync_user_status_to_all_comments()
 RETURNS INTEGER AS $$
 DECLARE
     updated_count INTEGER := 0;
+    v_rowcount BIGINT;
     user_record RECORD;
 BEGIN
     -- Update all comments with current user status from commentum_users
@@ -237,7 +238,11 @@ BEGIN
             user_warnings != user_record.commentum_user_warnings
         );
         
-        GET DIAGNOSTICS updated_count = updated_count + ROW_COUNT;
+        -- GET DIAGNOSTICS cannot do arithmetic on the target variable
+        -- ("unrecognized GET DIAGNOSTICS item" error); read ROW_COUNT into a
+        -- separate variable, then add it manually.
+        GET DIAGNOSTICS v_rowcount = ROW_COUNT;
+        updated_count := updated_count + v_rowcount;
     END LOOP;
     
     RETURN updated_count;

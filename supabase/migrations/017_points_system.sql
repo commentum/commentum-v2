@@ -85,6 +85,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- HELPER FUNCTION: get_role_bonus
 -- Returns the bonus points for a given role
 -- ====================================
+-- NOTE: migrations re-run on every deploy. If an older get_role_bonus with a
+-- different return type already exists, CREATE OR REPLACE fails with
+-- "cannot change return type of existing function" — drop it first.
+DROP FUNCTION IF EXISTS get_role_bonus(TEXT);
 
 CREATE OR REPLACE FUNCTION get_role_bonus(p_role TEXT)
 RETURNS INTEGER AS $$

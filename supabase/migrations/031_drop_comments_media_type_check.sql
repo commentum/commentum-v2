@@ -14,7 +14,8 @@
 -- comments table has no media_type filter on reads (lookups are
 -- media_id + client_type), so free-form type is safe.
 --
--- Idempotent-friendly: running on a DB where the constraint is already
--- gone will error on the DROP — that just means it's already applied.
+-- Migrations re-run on every deploy (the workflow loops over all files),
+-- so this MUST be idempotent: on a DB where the constraint is already
+-- gone, a bare DROP CONSTRAINT would error every deploy.
 
-ALTER TABLE public.comments DROP CONSTRAINT comments_media_type_check;
+ALTER TABLE public.comments DROP CONSTRAINT IF EXISTS comments_media_type_check;

@@ -147,7 +147,11 @@ BEGIN
     FROM comments
     WHERE user_id = p_user_id
     AND client_type = p_client_type
-    AND is_pinned = true
+    -- NOTE: the column is comments.pinned (NOT is_pinned). Using is_pinned
+    -- made get_user_points fail with "column is_pinned does not exist",
+    -- which aborted any UPDATE on commentum_users that changed
+    -- role/ban/warnings/vote_count (points refresh trigger).
+    AND pinned = true
     AND deleted = false;
 
     -- Subtotal points from each source
