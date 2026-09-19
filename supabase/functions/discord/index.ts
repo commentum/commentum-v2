@@ -68,10 +68,29 @@ serve(async (req) => {
           flags: 64
         }
       }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
     )
   }
 })
+
+// Auto-sync slash commands on cold start so every deploy publishes the
+// latest schema (new commands, new choices). Without this, schema edits
+// sit in the repo while Discord keeps serving the stale registration —
+// there is no other automatic trigger. Fire-and-forget: sync failures
+// must never break boot. Set DISCORD_COMMAND_SYNC_ON_BOOT=false to skip.
+try {
+  if (Deno.env.get('DISCORD_COMMAND_SYNC_ON_BOOT') !== 'false') {
+    handleGlobalCommandSync()
+      .then(async (res) => {
+        if (!res.ok) {
+          console.error('Boot command sync failed:', await res.text())
+        }
+      })
+      .catch((e) => console.error('Boot command sync failed:', e))
+  }
+} catch (e) {
+  console.error('Boot command sync setup failed:', e)
+}
 
 // Global Command Sync Function
 async function handleGlobalCommandSync(): Promise<Response> {
