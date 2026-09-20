@@ -159,36 +159,6 @@ def main():
             })
         print(f"Loaded {len(effects)} profile effects")
 
-    # 4. Profile Frames (4100 points)
-    frame_path = os.path.join(assets_dir, 'profile_frames.json')
-    if os.path.exists(frame_path):
-        with open(frame_path, 'r', encoding='utf-8') as f:
-            frames = json.load(f)
-        for i, fr in enumerate(frames):
-            item_id = f"frame_{fr.get('sku_id')}"
-            sku = fr.get('sku_id')
-            points = sku_points_map.get(sku) or 4100
-
-            rows.append({
-                'id': item_id,
-                'type': 'frame',
-                'title': fr.get('title', 'Profile Frame'),
-                'category': fr.get('category', 'General'),
-                'url': '',
-                'asset_id': sku or '',
-                'description': fr.get('label', ''),
-                'points_required': points,
-                'metadata': {
-                    'sku_id': sku,
-                    'layers': fr.get('layers', []),
-                    'inner_width': fr.get('inner_width'),
-                    'overflow_top': fr.get('overflow_top'),
-                    'overflow_bottom': fr.get('overflow_bottom'),
-                    'overflow_horizontal': fr.get('overflow_horizontal')
-                },
-                'display_order': i
-            })
-        print(f"Loaded {len(frames)} profile frames")
 
     # 5. Category Banners (0 points = Free background artwork)
     banner_path = os.path.join(assets_dir, 'category_banners.json')
@@ -225,8 +195,8 @@ def main():
         f.write("-- MIGRATION 035 (SEED): POPULATE CUSTOMIZATIONS CATALOG\n")
         f.write("-- Items priced in Points (4,100+ points)\n")
         f.write("-- Staff roles (owner, app_owner, super_admin, admin, mod) get 100% free access\n")
-        f.write(f"-- Total items seeded: {len(rows)}\n")
-        f.write("-- =======================================================\n\n")
+        f.write("-- Clean up any legacy experimental frames\n")
+        f.write("DELETE FROM public.customizations_catalog WHERE type = 'frame';\n\n")
 
         for i in range(0, len(rows), batch_size):
             batch = rows[i:i + batch_size]

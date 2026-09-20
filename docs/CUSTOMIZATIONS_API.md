@@ -18,8 +18,8 @@ https://anymex.duckdns.org/functions/v1
    - [Avatar Decorations](#a-avatar-decorations-typedecoration)
    - [Nameplates](#b-nameplates-typenameplate)
    - [Profile Effects](#c-profile-effects-typeeffect)
-   - [Profile Frames & Layers](#d-profile-frames-typeframe)
-   - [Category Banners](#e-category-banners-typebanner)
+   - [Category Banners](#d-category-banners-typebanner)
+   - [Theme Bundles (Apply All at Once)](#e-theme-bundles-apply-all-at-once)
 4. [Unlocking Items (`POST /users` -> `unlock_customization`)](#3-unlocking-items-post-users)
 5. [Equipping Customizations (`POST /users` -> `update_customizations`)](#4-equipping-customizations-post-users)
 6. [Leaderboard & Comment Batch RPCs](#5-leaderboard--comment-batch-rpcs)
@@ -34,8 +34,9 @@ The customization catalog is completely decoupled from client codebases and stor
 ```
                           ┌────────────────────────┐
                           │ customizations_catalog │
-                          │ (1,703 Discord Assets) │
+                          │ (1,672 Clean Assets)   │
                           └───────────┬────────────┘
+
                                       │
               ┌───────────────────────┼───────────────────────┐
               ▼                       ▼                       ▼
@@ -170,73 +171,9 @@ Returns items from `public.customizations_catalog`. This endpoint is **public**,
 
 ---
 
-### D. Profile Frames & Layers (`type=frame`)
-
-#### Why is `url` empty for Profile Frames?
-Unlike avatar decorations (which are single circular PNG images), Discord **Profile Frames** wrap around the **entire user profile card**. Because profile cards have dynamic dimensions, Discord splits frames into **modular responsive anchors**:
-
-```json
-{
-  "id": "frame_1545538607811534988",
-  "type": "frame",
-  "title": "Leafy Loaf",
-  "category": "Fall Foragers",
-  "url": "",
-  "points_required": 4100,
-  "metadata": {
-    "sku_id": "1545538607811534988",
-    "inner_width": 1200,
-    "overflow_top": 304,
-    "overflow_bottom": 212,
-    "overflow_horizontal": 56,
-    "layers": [
-      {
-        "id": "1549900374805184522",
-        "type": "staple",
-        "order": "front",
-        "anchor": "top",
-        "responsive": false
-      },
-      {
-        "id": "1549900379196624936",
-        "type": "staple",
-        "order": "front",
-        "anchor": "bottom",
-        "responsive": false
-      },
-      {
-        "id": "1549900383076220939",
-        "type": "staple",
-        "order": "back",
-        "anchor": "top",
-        "responsive": false
-      },
-      {
-        "id": "1549900387216269445",
-        "type": "staple",
-        "order": "back",
-        "anchor": "bottom",
-        "responsive": false
-      }
-    ]
-  }
-}
-```
-
-#### How to Render Profile Frames:
-1. **Bundle/Shop Preview Artwork**:
-   In the shop or preview modal, Discord uses the bundle preview asset:
-   ```http
-   https://cdn.discordapp.com/media/v1/collectibles-shop/bundle-fg-static/{bundle_sku_id}
-   ```
-2. **Layer Layout in Profile Cards**:
-   - `layers`: Anchored slices placed at `top` and `bottom` of the card.
-   - `order`: `front` (overlays the banner/avatar) and `back` (renders behind).
-   - `inner_width`: Reference width (1200px) used to scale padding and border offsets.
-
 ---
 
-### E. Category Banners (`type=banner`)
+### D. Category Banners (`type=banner`)
 - **Total Count**: 699 items
 - **Points Required**: **0 points** (100% Free background art for all users)
 - **URL Pattern**:
@@ -265,6 +202,38 @@ Unlike avatar decorations (which are single circular PNG images), Discord **Prof
   ```
 
 ---
+
+### E. Theme Bundles ("Apply All at Once")
+
+Theme Bundles group a matching **Avatar Decoration**, **Nameplate**, **Banner**, and **Profile Effect** from the same collection so users can equip an entire matching aesthetic with a single tap!
+
+#### Why Bundles are Great for UX:
+Instead of requiring users to manually search and equip 4 separate cosmetics across different screens, tapping **"Apply Theme"** sends all 4 URLs in one single `update_customizations` call:
+
+```json
+{
+  "action": "update_customizations",
+  "client_type": "anilist",
+  "access_token": "user_oauth_token",
+  "moderator_id": "123456",
+  "avatar_decoration": "https://cdn.discordapp.com/avatar-decoration-presets/a_47202ff223e839a2ecf14a8b0f3ce7a1.png",
+  "nameplate_theme": "https://cdn.discordapp.com/assets/collectibles/nameplates/harvest_mouse/1545534249216638986/asset.webm",
+  "profile_effect_url": "https://cdn.discordapp.com/media/v1/collectibles-shop/42b9a68dea261dcde438a0efd924bc131d788d7cd2900ee6f362bbbd3a0416ea",
+  "banner_url": "https://cdn.discordapp.com/media/v1/collectibles-shop/f9bca9ab15cb116106fd293fac4fb4d206c467f8ac866e3b209341ef712b9e28"
+}
+```
+
+#### Native AnymeX Preview (Zero Discord Logos):
+In the AnymeX client UI, render a **live native preview**:
+* Put the **user's actual profile avatar** inside the decoration.
+* Put the **user's actual username** on the nameplate.
+* Put the **banner** behind it.
+* Trigger the **animated profile effect** particle overlay.
+
+This creates a stunning 100% custom theme experience tailored specifically to the user's account!
+
+---
+
 
 ## 3. Unlocking Items (`POST /users`)
 
