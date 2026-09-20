@@ -25,8 +25,8 @@ serve(async (req) => {
       action, client_type, access_token, target_user_id, target_client_type, 
       reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, 
       page, limit, username, delete_comment_id, delete_all_comments,
-      avatar_decoration, banner_url, banner_theme, nameplate_theme,
-      target_access_token, service_to_unlink, user_ids
+      avatar_decoration, banner_url, banner_theme, nameplate_theme, profile_effect_url,
+      target_access_token, service_to_unlink, user_ids, customization_id
     } = await req.json()
 
     // All user management actions require token authentication
@@ -51,10 +51,10 @@ serve(async (req) => {
     // These actions are available to all authenticated users
     // get_user_history: anyone can view other users' public comments
     // get_role: anyone can check their own role
-    // update_customizations / link_account / unlink_account: personal profile customization
+    // update_customizations / unlock_customization / link_account / unlink_account: personal profile customization
     const publicActions = [
       'get_user_history', 'get_role', 'search_users_public', 'get_user_info',
-      'update_customizations', 'link_account', 'unlink_account', 'get_profile',
+      'update_customizations', 'unlock_customization', 'link_account', 'unlink_account', 'get_profile',
       'get_batch_customizations'
     ]
 
@@ -130,8 +130,14 @@ serve(async (req) => {
 
       case 'update_customizations':
         return await handleUpdateCustomizations(supabase, {
-          client_type, moderator_id, verifiedUser,
-          avatar_decoration, banner_url, banner_theme, nameplate_theme
+          client_type, moderator_id, verifiedUser, moderatorRole,
+          avatar_decoration, banner_url, banner_theme, nameplate_theme, profile_effect_url
+        })
+
+      case 'unlock_customization':
+        return await handleUnlockCustomization(supabase, {
+          client_type, moderator_id, verifiedUser, moderatorRole,
+          customization_id
         })
 
       case 'link_account':
@@ -1239,7 +1245,7 @@ async function handleGetProfile(supabase: any, params: any) {
 }
 
 async function handleUpdateCustomizations(supabase: any, params: any) {
-  const { client_type, moderator_id, verifiedUser, avatar_decoration, banner_url, banner_theme, nameplate_theme } = params;
+  const { client_type, moderator_id, verifiedUser, avatar_decoration, banner_url, banner_theme, nameplate_theme, profile_effect_url } = params;
   const normClient = client_type.toLowerCase() === 'myanimelist' ? 'mal' : client_type.toLowerCase();
 
   // Global decorations kill-switch: refuse new frames while disabled.
@@ -1266,6 +1272,7 @@ async function handleUpdateCustomizations(supabase: any, params: any) {
         banner_url: banner_url ?? null,
         banner_theme: banner_theme ?? null,
         nameplate_theme: nameplate_theme ?? null,
+        profile_effect_url: profile_effect_url ?? null,
       })
       .select()
       .single();
@@ -1277,6 +1284,7 @@ async function handleUpdateCustomizations(supabase: any, params: any) {
     if (banner_url !== undefined) updatePayload.banner_url = banner_url;
     if (banner_theme !== undefined) updatePayload.banner_theme = banner_theme;
     if (nameplate_theme !== undefined) updatePayload.nameplate_theme = nameplate_theme;
+    if (profile_effect_url !== undefined) updatePayload.profile_effect_url = profile_effect_url;
 
     const { data: updated, error } = await supabase
       .from('commentum_users')
@@ -1296,10 +1304,130 @@ async function handleUpdateCustomizations(supabase: any, params: any) {
         banner_url: user.banner_url,
         banner_theme: user.banner_theme,
         nameplate_theme: user.nameplate_theme,
+        profile_effect_url: user.profile_effect_url,
       },
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   );
+}
+
+async function handleUnlockCustomization(supabase: any, params: any) {
+  const { client_type, moderator_id, verifiedUser, moderatorRole, customization_id } = params;
+  if (!customization_id) {
+    return new Response(JSON.stringify({ error: 'customization_id is required' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Staff (owner, app_owner, super_admin, admin, moderator) bypass points requirement completely
+  const isStaff = ['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(moderatorRole);
+  const normClient = client_type.toLowerCase() === 'myanimelist' ? 'mal' : client_type.toLowerCase();
+
+  let user = await findUnifiedUser(supabase, normClient, moderator_id);
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'User not found' }), {
+      status: 404,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  const unlocked: string[] = user.unlocked_customizations || [];
+  if (unlocked.includes(customization_id)) {
+    return new Response(JSON.stringify({
+      success: true,
+      message: 'Already unlocked',
+      unlocked: true,
+      customization_id
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Staff get immediate free unlock
+  if (isStaff) {
+    const updatedUnlocked = [...unlocked, customization_id];
+    await supabase.from('commentum_users').update({ unlocked_customizations: updatedUnlocked }).eq('id', user.id);
+    return new Response(JSON.stringify({
+      success: true,
+      message: 'Unlocked for free (Staff privilege)',
+      staff: true,
+      customization_id
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Check item points in customizations_catalog
+  const { data: item } = await supabase
+    .from('customizations_catalog')
+    .select('id, points_required, title')
+    .eq('id', customization_id)
+    .single();
+
+  const pointsRequired = item?.points_required || 0;
+
+  // If item is free (0 points), unlock immediately
+  if (pointsRequired === 0) {
+    const updatedUnlocked = [...unlocked, customization_id];
+    await supabase.from('commentum_users').update({ unlocked_customizations: updatedUnlocked }).eq('id', user.id);
+    return new Response(JSON.stringify({
+      success: true,
+      message: 'Unlocked for free',
+      customization_id
+    }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Check user points from user_points table
+  const { data: userPointsRow } = await supabase
+    .from('user_points')
+    .select('total_points')
+    .eq('user_id', moderator_id)
+    .eq('client_type', normClient)
+    .single();
+
+  const currentPoints = Number(userPointsRow?.total_points || 0);
+
+  if (currentPoints < pointsRequired) {
+    return new Response(JSON.stringify({
+      error: 'Insufficient points',
+      required_points: pointsRequired,
+      current_points: currentPoints
+    }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+    });
+  }
+
+  // Deduct points from user_points and record unlock in inventory
+  const newPoints = currentPoints - pointsRequired;
+  await supabase
+    .from('user_points')
+    .update({ total_points: newPoints, updated_at: new Date().toISOString() })
+    .eq('user_id', moderator_id)
+    .eq('client_type', normClient);
+
+  const updatedUnlocked = [...unlocked, customization_id];
+  await supabase
+    .from('commentum_users')
+    .update({ unlocked_customizations: updatedUnlocked })
+    .eq('id', user.id);
+
+  return new Response(JSON.stringify({
+    success: true,
+    message: `Successfully unlocked ${item?.title || customization_id}!`,
+    customization_id,
+    points_spent: pointsRequired,
+    remaining_points: newPoints
+  }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+  });
 }
 
 async function handleLinkAccount(supabase: any, params: any) {
