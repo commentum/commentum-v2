@@ -411,3 +411,38 @@ export function createModalResponse(title: string, customId: string, inputLabel:
     { status: 200, headers: { 'Content-Type': 'application/json' } }
   )
 }
+
+// Create autocomplete response (Interaction Type 8)
+export function createAutocompleteResponse(choices: Array<{ name: string; value: string | number }>): Response {
+  return new Response(
+    JSON.stringify({
+      type: 8, // APPLICATION_COMMAND_AUTOCOMPLETE_RESULT
+      data: {
+        choices: choices.slice(0, 25).map(c => ({
+          name: String(c.name).slice(0, 100),
+          value: typeof c.value === 'number' ? c.value : String(c.value).slice(0, 100)
+        }))
+      }
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }
+  )
+}
+
+// Create embed response with interactive message components (Action Rows, Buttons, Select Menus)
+export function createEmbedWithComponentsResponse(
+  embed: any,
+  components: any[] = [],
+  ephemeral: boolean = false
+): Response {
+  return new Response(
+    JSON.stringify({
+      type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
+      data: {
+        embeds: embed ? [embed] : [],
+        components,
+        flags: ephemeral ? 64 : 0
+      }
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }
+  )
+}

@@ -128,7 +128,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Your platform user ID',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'server',
@@ -179,7 +180,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to lookup',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         }
       ]
     },
@@ -211,7 +213,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to warn',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -229,7 +232,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to unwarn',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -247,7 +251,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to mute',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -271,7 +276,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to unmute',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -404,6 +410,83 @@ async function handleGlobalCommandSync(): Promise<Response> {
       ]
     },
     {
+      name: 'search_comments',
+      description: 'Search comments with wildcards, user/media autocomplete, and delete buttons',
+      options: [
+        {
+          name: 'query',
+          description: 'Search text inside comments',
+          type: 3,
+          required: false
+        },
+        {
+          name: 'match_type',
+          description: 'Match type (contains, exact, prefix, suffix, regex)',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'Contains (Wildcard %text%)', value: 'contains' },
+            { name: 'Exact Match ("text")', value: 'exact' },
+            { name: 'Prefix / Starts With (text%)', value: 'prefix' },
+            { name: 'Suffix / Ends With (%text)', value: 'suffix' },
+            { name: 'Regex (~* pattern)', value: 'regex' }
+          ]
+        },
+        {
+          name: 'user',
+          description: 'Search by user (type username or ID for live autocomplete)',
+          type: 3,
+          required: false,
+          autocomplete: true
+        },
+        {
+          name: 'media',
+          description: 'Filter by media (type title or ID for live autocomplete)',
+          type: 3,
+          required: false,
+          autocomplete: true
+        },
+        {
+          name: 'platform',
+          description: 'Filter by platform',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'All Platforms', value: 'all' },
+            { name: 'AniList', value: 'anilist' },
+            { name: 'MyAnimeList', value: 'myanimelist' },
+            { name: 'SIMKL', value: 'simkl' },
+            { name: 'Other', value: 'other' }
+          ]
+        },
+        {
+          name: 'status',
+          description: 'Filter by comment status',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'Active Comments Only (default)', value: 'active' },
+            { name: 'All Comments (including deleted)', value: 'all' },
+            { name: 'Deleted Comments Only', value: 'deleted' },
+            { name: 'Reported Comments Only', value: 'reported' },
+            { name: 'Pinned Comments Only', value: 'pinned' },
+            { name: 'Locked Comments Only', value: 'locked' }
+          ]
+        },
+        {
+          name: 'limit',
+          description: 'Number of results to show (default: 5, max: 10)',
+          type: 4,
+          required: false,
+          choices: [
+            { name: '3 comments', value: 3 },
+            { name: '5 comments', value: 5 },
+            { name: '10 comments', value: 10 }
+          ]
+        }
+      ]
+    },
+    {
       name: 'ban',
       description: 'Ban a user from the system',
       options: [
@@ -411,7 +494,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to ban',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -435,7 +519,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to unban',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -453,7 +538,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to shadow ban',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -471,7 +557,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to unshadow ban',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'reason',
@@ -489,7 +576,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to promote',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'role',
@@ -519,7 +607,8 @@ async function handleGlobalCommandSync(): Promise<Response> {
           name: 'user_id',
           description: 'Platform user ID to demote',
           type: 3,
-          required: true
+          required: true,
+          autocomplete: true
         },
         {
           name: 'role',

@@ -1,6 +1,7 @@
 import { handleAddCommand, handleRegisterCommand, handleStatsCommand, handleHelpCommand, getAvailableServers } from './info.ts'
 import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand, handleQueueCommand } from './moderation.ts'
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
+import { handleAutocomplete, handleSearchCommentsCommand } from './search.ts'
 import { createModalResponse, createDiscordResponse } from '../utils.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
@@ -431,13 +432,18 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
   
   try {
     switch (action) {
+      case 'select_delete_comment':
       case 'mod_delete': {
-        // mod_delete:commentId:userId
+        // select_delete_comment:userId or mod_delete:commentId:userId
         if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can delete comments.', true)
         }
-        const commentId = id1
-        const userId = id2
+        const commentId = action === 'select_delete_comment' ? data?.values?.[0] : id1
+        const targetModId = action === 'select_delete_comment' ? id1 : id2
+
+        if (!commentId) {
+          return createButtonResponse('❌ No comment selected.', true)
+        }
 
         // Check if already deleted
         const { data: comment } = await supabase
@@ -953,7 +959,12 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
     return await handleModalSubmit(supabase, interaction)
   }
 
-  // Handle button clicks (type 3)
+  // Handle autocomplete interactions (type 4)
+  if (interaction.type === 4) {
+    return await handleAutocomplete(supabase, interaction)
+  }
+
+  // Handle button clicks and select menus (type 3)
   if (interaction.type === 3) {
     return await handleButtonInteraction(supabase, interaction)
   }
@@ -1039,6 +1050,8 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
         return await handleQueueCommand(supabase, registration, userRole)
       case 'delete':
         return await handleDeleteCommand(supabase, userId, username, data.options, registration, userRole)
+      case 'search_comments':
+        return await handleSearchCommentsCommand(supabase, userId, username, data.options, userRole)
 
       // Admin Commands
       case 'ban':
