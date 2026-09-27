@@ -711,7 +711,8 @@ export async function handleCommentCommand(supabase: any, options: any, userRole
       return createErrorResponse('Comment not found.')
     }
 
-    return createCommentEmbed(comment)
+    const isMod = ['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)
+    return createCommentEmbed(comment, false, isMod)
 
   } catch (error) {
     console.error('Comment command error:', error)

@@ -1,4 +1,4 @@
-import { createDiscordResponse, createErrorResponse, createModerationEmbed } from '../utils.ts'
+import { createDiscordResponse, createErrorResponse, createModerationEmbed, createEmbedResponse } from '../utils.ts'
 import { canModerate } from '../../shared/auth.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
@@ -892,13 +892,41 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
       reason: 'Deleted via Discord bot',
     })
     
-    return createDiscordResponse(
-      `🗑️ **Comment Deleted**\n\n` +
-      `💬 **Comment ID:** ${commentId}\n` +
-      `👤 **Author:** ${comment.username} (${comment.user_id})\n` +
-      `🛡️ **Deleted by:** <@${moderatorId}> (${deleterRole})\n` +
-      `📅 **Time:** ${new Date().toLocaleString()}\n\n` +
-      `📄 **Deleted Content:** ${comment.content.substring(0, 200)}${comment.content.length > 200 ? '...' : ''}`
+    const snippet = (comment.content || '').length > 300 
+      ? comment.content.substring(0, 300) + '...' 
+      : (comment.content || '')
+
+    const fields = [
+      {
+        name: 'Author',
+        value: `${comment.username} (\`${comment.user_id}\`)`,
+        inline: true
+      },
+      {
+        name: 'Moderator',
+        value: `<@${moderatorId}> (${deleterRole})`,
+        inline: true
+      },
+      {
+        name: 'Media',
+        value: `${comment.media_title || 'N/A'} \`[${comment.media_type || 'anime'}]\``,
+        inline: true
+      },
+      {
+        name: 'Deleted Content',
+        value: `||${snippet ? snippet.replace(/[\r\n]+/g, ' ') : 'No content'}||`,
+        inline: false
+      }
+    ]
+
+    return createEmbedResponse(
+      `Comment #${commentId} Deleted`,
+      'Comment has been removed from the platform.',
+      fields,
+      0xED4245,
+      { text: `Action by ${moderatorName} (${userRole})` },
+      undefined,
+      true
     )
 
   } catch (error) {

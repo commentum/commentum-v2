@@ -95,7 +95,7 @@ export function createEmbedResponse(title: string, description: string, fields: 
   )
 }
 
-export function createCommentEmbed(comment: any, showFullContent: boolean = false): Response {
+export function createCommentEmbed(comment: any, showFullContent: boolean = false, isMod: boolean = false): Response {
   const reports = JSON.parse(comment.reports || '[]')
   const userVotes = JSON.parse(comment.user_votes || '{}')
   const tags = JSON.parse(comment.tags || '[]')
@@ -155,9 +155,16 @@ export function createCommentEmbed(comment: any, showFullContent: boolean = fals
     inline: true
   })
 
-  // Add content preview
-  const content = showFullContent ? comment.content : 
-    comment.content.length > 200 ? comment.content.substring(0, 200) + '...' : comment.content
+  // Add content preview (mask if deleted for regular users, spoiler for mods)
+  let content = ''
+  if (comment.deleted) {
+    const rawContent = showFullContent ? comment.content : 
+      comment.content.length > 200 ? comment.content.substring(0, 200) + '...' : comment.content
+    content = isMod ? `||${rawContent}||` : '*[This comment has been deleted]*'
+  } else {
+    content = showFullContent ? comment.content : 
+      comment.content.length > 200 ? comment.content.substring(0, 200) + '...' : comment.content
+  }
 
   return createEmbedResponse(
     `Comment #${comment.id}`,
@@ -445,4 +452,22 @@ export function createEmbedWithComponentsResponse(
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } }
   )
-}
+}
+
+// Update existing message with new embed and components (Interaction Type 7 -> UPDATE_MESSAGE)
+export function createUpdateEmbedWithComponentsResponse(
+  embed: any,
+  components: any[] = []
+): Response {
+  return new Response(
+    JSON.stringify({
+      type: 7, // UPDATE_MESSAGE
+      data: {
+        embeds: embed ? [embed] : [],
+        components
+      }
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } }
+  )
+}
+

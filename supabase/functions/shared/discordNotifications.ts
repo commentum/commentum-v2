@@ -454,9 +454,28 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
 
     // ── Enrich notification data: resolve "Unknown" user/media/comment info ──
     // When callers (e.g. Discord bot handlers, moderation edge functions) only
-    // pass `user.id` without username / comment / media, we fetch the missing
+    // pass `user.id` or `comment.id` with partial data, we fetch the missing
     // data from the database so Discord messages never show "Unknown".
     try {
+      // 1. Direct comment enrichment: fetch comment details if missing content or media
+      if (data.comment?.id && (!data.comment.content || !data.comment.username || !data.comment.media_title)) {
+        const { data: c } = await supabase
+          .from('comments')
+          .select('id, user_id, username, content, media_id, media_type, media_title, client_type, user_avatar')
+          .eq('id', data.comment.id)
+          .single()
+
+        if (c) {
+          data.comment.username = data.comment.username || c.username
+          data.comment.content = data.comment.content || c.content
+          data.comment.client_type = data.comment.client_type || c.client_type
+          data.comment.media_id = data.comment.media_id || c.media_id
+          data.comment.media_type = data.comment.media_type || c.media_type
+          data.comment.media_title = data.comment.media_title || c.media_title
+          data.comment.user_avatar = data.comment.user_avatar || c.user_avatar
+        }
+      }
+
       const needsUserEnrichment  = data.user?.id && !data.user.username
       const needsCommentEnrichment = data.user?.id && !data.comment && !data.media
 
@@ -811,8 +830,14 @@ Media: ${mediaLine}
 ${section(originalLanguage && originalLanguage !== 'en' ? `Updated Content (${getLanguageName(originalLanguage)})` : 'Updated Content', commentContent)}${translationBlock}`
       break
 
-    case 'comment_deleted':
+    case 'comment_deleted': {
       accentColor = 0xE74C3C // Red
+      const safeDeletedContent = commentContent ? `||${commentContent.trim()}||` : '*No content*'
+      const safeTranslated = translatedContent ? `||${translatedContent.trim()}||` : ''
+      const delTranslationBlock = (safeTranslated && originalLanguage && originalLanguage !== 'en')
+        ? `\n\n${section(`Translated (${getLanguageName(originalLanguage)} → English)`, safeTranslated)}`
+        : ''
+
       content = `🗑️  **Comment Deleted**
 
 Actor: ${moderatorName}  \`${moderatorId}\`
@@ -820,10 +845,11 @@ Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Media: ${mediaLine}
 
-${section(originalLanguage && originalLanguage !== 'en' ? `Deleted Content (${getLanguageName(originalLanguage)})` : 'Deleted Content', commentContent)}${translationBlock}
+${section(originalLanguage && originalLanguage !== 'en' ? `Deleted Content (${getLanguageName(originalLanguage)})` : 'Deleted Content', safeDeletedContent)}${delTranslationBlock}
 
-${section('Reason', reason)}`
+${section('Reason', reason || 'No reason specified')}`
       break
+    }
 
     case 'comment_pinned':
       accentColor = 0x00BFFF // Sky Blue

@@ -1,7 +1,7 @@
 import { handleAddCommand, handleRegisterCommand, handleStatsCommand, handleHelpCommand, getAvailableServers } from './info.ts'
 import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand, handleQueueCommand } from './moderation.ts'
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
-import { handleAutocomplete, handleSearchCommentsCommand } from './search.ts'
+import { handleAutocomplete, handleSearchCommentsCommand, handleSearchPageInteraction } from './search.ts'
 import { createModalResponse, createDiscordResponse } from '../utils.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
@@ -73,7 +73,7 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
         const commentId = id1
         const { data: comment } = await supabase
           .from('comments')
-          .select('user_id, client_type')
+          .select('id, user_id, username, client_type, content, media_id, media_type, media_title')
           .eq('id', commentId)
           .single()
         const { error } = await supabase
@@ -97,6 +97,12 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
           comment: {
             id: commentId,
             user_id: comment?.user_id || id2,
+            username: comment?.username,
+            content: comment?.content,
+            client_type: comment?.client_type,
+            media_id: comment?.media_id,
+            media_type: comment?.media_type,
+            media_title: comment?.media_title,
           },
           moderator: { id: userId, username: username },
           reason,
@@ -248,7 +254,7 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
         // Delete comment
         const { data: comment } = await supabase
           .from('comments')
-          .select('user_id, client_type')
+          .select('id, user_id, username, client_type, content, media_id, media_type, media_title')
           .eq('id', commentId)
           .single()
         await supabase
@@ -296,6 +302,12 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
           comment: {
             id: commentId,
             user_id: comment?.user_id || targetUserId,
+            username: comment?.username,
+            content: comment?.content,
+            client_type: comment?.client_type,
+            media_id: comment?.media_id,
+            media_type: comment?.media_type,
+            media_title: comment?.media_title,
           },
           moderator: { id: userId, username: username },
           reason,
@@ -320,7 +332,7 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
         // Delete comment
         const { data: comment } = await supabase
           .from('comments')
-          .select('user_id, client_type')
+          .select('id, user_id, username, client_type, content, media_id, media_type, media_title')
           .eq('id', commentId)
           .single()
         await supabase
@@ -369,6 +381,12 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
           comment: {
             id: commentId,
             user_id: comment?.user_id || targetUserId,
+            username: comment?.username,
+            content: comment?.content,
+            client_type: comment?.client_type,
+            media_id: comment?.media_id,
+            media_type: comment?.media_type,
+            media_title: comment?.media_title,
           },
           moderator: { id: userId, username: username },
           reason,
@@ -432,6 +450,19 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
   
   try {
     switch (action) {
+      case 'search_page': {
+        // search_page:targetPage:sessionId
+        if (id1 === 'noop') {
+          return new Response(JSON.stringify({ type: 6 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          })
+        }
+        const targetPage = parseInt(id1, 10) || 1
+        const sessionId = id2
+        return await handleSearchPageInteraction(supabase, userId, username, userRole, targetPage, sessionId)
+      }
+
       case 'select_delete_comment':
       case 'mod_delete': {
         // select_delete_comment:userId or mod_delete:commentId:userId

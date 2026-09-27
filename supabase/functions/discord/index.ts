@@ -475,14 +475,20 @@ async function handleGlobalCommandSync(): Promise<Response> {
         },
         {
           name: 'limit',
-          description: 'Number of results to show (default: 5, max: 10)',
+          description: 'Number of results per page (default: 5, max: 10)',
           type: 4,
           required: false,
           choices: [
-            { name: '3 comments', value: 3 },
-            { name: '5 comments', value: 5 },
-            { name: '10 comments', value: 10 }
+            { name: '3 comments per page', value: 3 },
+            { name: '5 comments per page', value: 5 },
+            { name: '10 comments per page', value: 10 }
           ]
+        },
+        {
+          name: 'page',
+          description: 'Page number (default: 1)',
+          type: 4,
+          required: false
         }
       ]
     },
