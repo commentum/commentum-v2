@@ -27,11 +27,11 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes, delete_comment, token } = await req.json()
+    const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes, delete_comment, token, anilist_token } = await req.json()
 
     switch (action) {
       case 'create':
-        return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes, token: token || access_token })
+        return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes, token: anilist_token || token || access_token })
       
       case 'resolve':
         // Resolve requires admin authentication via client token
@@ -311,8 +311,8 @@ async function handleCreateReport(supabase: any, params: any) {
         .maybeSingle()
 
       if (mapping?.dantotsu_comment_id) {
-        let auth = token ? await danAuthenticate(token) : null
-        if (!auth) auth = await getDanModAuth()
+        let auth = token ? await danAuthenticate(token, supabase) : null
+        if (!auth) auth = await getDanModAuth(supabase)
         if (auth) {
           const success = await danReportComment({
             authToken: auth.authToken,

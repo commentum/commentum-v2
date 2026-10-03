@@ -15,6 +15,7 @@ import {
   danEditComment,
   danDeleteComment,
 } from '../shared/dantotsuClient.ts'
+import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -45,7 +46,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info, access_token, target_language } = await req.json()
+    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info, access_token, target_language, anilist_token } = await req.json()
 
     switch (action) {
       case 'create':
@@ -292,6 +293,7 @@ serve(async (req) => {
     }
 
     const userAuthToken = token || access_token
+    const userAnilistToken = anilist_token || (client_type === 'anilist' ? userAuthToken : null)
 
     switch (action) {
       case 'create':
@@ -307,7 +309,8 @@ serve(async (req) => {
           userRole,
           req,
           configs,
-          token: userAuthToken
+          token: userAuthToken,
+          anilistToken: userAnilistToken
         })
 
       case 'edit':
@@ -317,7 +320,8 @@ serve(async (req) => {
           content,
           userRole,
           req,
-          token: userAuthToken
+          token: userAuthToken,
+          anilistToken: userAnilistToken
         })
 
       case 'delete':
@@ -326,7 +330,8 @@ serve(async (req) => {
           user_id,
           userRole,
           req,
-          token: userAuthToken
+          token: userAuthToken,
+          anilistToken: userAnilistToken
         })
 
       case 'mod_delete':
@@ -336,7 +341,8 @@ serve(async (req) => {
           userRole,
           req,
           verifiedUserFromToken,
-          token: userAuthToken
+          token: userAuthToken,
+          anilistToken: userAnilistToken
         })
 
       case 'translate':
@@ -362,7 +368,7 @@ serve(async (req) => {
 })
 
 async function handleCreateComment(supabase: any, params: any) {
-  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req, configs, token } = params
+  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req, configs, token, anilistToken } = params
 
   if (parent_id) {
     const { data: parentComment } = await supabase
@@ -645,14 +651,12 @@ async function handleCreateComment(supabase: any, params: any) {
   }
 
   // Queue Dantotsu 2-way sync in background - NON-BLOCKING
-  if (client_type === 'anilist') {
+  // Push to Dantotsu if user has AniList credentials (either direct AniList user, or anilistToken from MAL/SIMKL)
+  const danToken = anilistToken || (client_type === 'anilist' ? token : null)
+  if (danToken) {
     (async () => {
       try {
-        let auth = token ? await danAuthenticate(token) : null
-        if (!auth) {
-          // Fallback to shared/mod token if available so Dantotsu gets the comment
-          auth = await getDanModAuth()
-        }
+        const auth = await danAuthenticate(danToken, supabase)
         if (!auth) return
 
         let danParentId: number | null = null
@@ -674,13 +678,22 @@ async function handleCreateComment(supabase: any, params: any) {
           if (!isNaN(n)) parsedTag = n
         }
 
-        const numericMediaId = parseInt(String(media_id), 10)
-        if (isNaN(numericMediaId)) return
+        let targetMediaId: number | null = null
+        if (client_type === 'anilist') {
+          const parsed = parseInt(String(media_id), 10)
+          if (!isNaN(parsed)) targetMediaId = parsed
+        } else {
+          targetMediaId = await resolveAnilistMediaId(supabase, client_type, media_id, mediaInfo?.type)
+        }
+        if (!targetMediaId) {
+          console.warn(`[DantotsuSync] Could not resolve AniList media ID for ${client_type} ${media_id}`)
+          return
+        }
 
         const danCommentId = await danPostComment({
           authToken: auth.authToken,
           userId: auth.userId,
-          mediaId: numericMediaId,
+          mediaId: targetMediaId,
           content,
           tag: parsedTag,
           parentCommentId: danParentId,
@@ -690,9 +703,9 @@ async function handleCreateComment(supabase: any, params: any) {
           await supabase.from('dantotsu_id_mappings').upsert({
             dantotsu_comment_id: danCommentId,
             commentum_id: comment.id,
-            media_id: numericMediaId,
+            media_id: targetMediaId,
           }, { onConflict: 'dantotsu_comment_id' })
-          console.log(`[DantotsuSync] Comment ${comment.id} mapped to Dantotsu ${danCommentId}`)
+          console.log(`[DantotsuSync] Comment ${comment.id} mapped to Dantotsu ${danCommentId} (media ${targetMediaId})`)
         }
       } catch (err) {
         console.error('[DantotsuSync] Error syncing new comment to Dantotsu:', err)
@@ -707,7 +720,7 @@ async function handleCreateComment(supabase: any, params: any) {
 }
 
 async function handleEditComment(supabase: any, params: any) {
-  const { comment_id, user_id, content, userRole, req, token } = params
+  const { comment_id, user_id, content, userRole, req, token, anilistToken } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -837,8 +850,9 @@ async function handleEditComment(supabase: any, params: any) {
         .maybeSingle()
 
       if (mapping?.dantotsu_comment_id) {
-        let auth = token ? await danAuthenticate(token) : null
-        if (!auth) auth = await getDanModAuth()
+        const danToken = anilistToken || token
+        let auth = danToken ? await danAuthenticate(danToken, supabase) : null
+        if (!auth) auth = await getDanModAuth(supabase)
         if (auth) {
           const success = await danEditComment({
             authToken: auth.authToken,
@@ -861,7 +875,7 @@ async function handleEditComment(supabase: any, params: any) {
 
 // Original delete - for own comments only
 async function handleDeleteComment(supabase: any, params: any) {
-  const { comment_id, user_id, userRole, req, token } = params
+  const { comment_id, user_id, userRole, req, token, anilistToken } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -948,8 +962,9 @@ async function handleDeleteComment(supabase: any, params: any) {
         .maybeSingle()
 
       if (mapping?.dantotsu_comment_id) {
-        let auth = token ? await danAuthenticate(token) : null
-        if (!auth) auth = await getDanModAuth()
+        const danToken = anilistToken || token
+        let auth = danToken ? await danAuthenticate(danToken, supabase) : null
+        if (!auth) auth = await getDanModAuth(supabase)
         if (auth) {
           const success = await danDeleteComment({
             authToken: auth.authToken,
@@ -971,7 +986,7 @@ async function handleDeleteComment(supabase: any, params: any) {
 
 // Mod delete - for moderators to delete other users' comments
 async function handleModDeleteComment(supabase: any, params: any) {
-  const { comment_id, user_id, userRole, req, verifiedUserFromToken, token } = params
+  const { comment_id, user_id, userRole, req, verifiedUserFromToken, token, anilistToken } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -1082,8 +1097,11 @@ async function handleModDeleteComment(supabase: any, params: any) {
 
       if (mapping?.dantotsu_comment_id) {
         // Moderator auth: try mod token or caller's token if caller is Dantotsu mod
-        let auth = await getDanModAuth()
-        if (!auth && token) auth = await danAuthenticate(token)
+        let auth = await getDanModAuth(supabase)
+        if (!auth) {
+          const danToken = anilistToken || token
+          if (danToken) auth = await danAuthenticate(danToken, supabase)
+        }
         if (auth) {
           const success = await danDeleteComment({
             authToken: auth.authToken,

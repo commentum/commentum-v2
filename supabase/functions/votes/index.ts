@@ -24,7 +24,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { comment_id, user_info, vote_type, token } = await req.json()
+    const { comment_id, user_info, vote_type, token, anilist_token } = await req.json()
 
     // Validate required fields
     if (!comment_id || !user_info || !vote_type) {
@@ -268,8 +268,9 @@ serve(async (req) => {
           .maybeSingle()
 
         if (mapping?.dantotsu_comment_id) {
-          let auth = token ? await danAuthenticate(token) : null
-          if (!auth) auth = await getDanModAuth()
+          const danToken = anilist_token || token
+          let auth = danToken ? await danAuthenticate(danToken, supabase) : null
+          if (!auth) auth = await getDanModAuth(supabase)
           if (auth) {
             const danVoteType = vote_type === 'upvote' ? 1 : vote_type === 'downvote' ? -1 : 0
             const success = await danVoteComment({

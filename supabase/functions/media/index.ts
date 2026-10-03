@@ -4,6 +4,7 @@ import { getLanguageName } from '../shared/translate.ts'
 import { resolveUserBadges } from '../shared/badges.ts'
 import { getConfig } from '../shared/configCache.ts'
 import { syncMediaFromDantotsu } from '../shared/dantotsuClient.ts'
+import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,12 +39,18 @@ serve(async (req) => {
       )
     }
 
-    // On-demand sync from Dantotsu for AniList media
+    // On-demand sync from Dantotsu (AniList directly, or resolved from MAL / SIMKL)
+    let syncAnilistId: number | null = null
     if (client_type === 'anilist') {
       const mid = parseInt(media_id, 10)
-      if (!isNaN(mid)) {
-        await syncMediaFromDantotsu(supabase, mid, page || 1).catch(() => {})
-      }
+      if (!isNaN(mid)) syncAnilistId = mid
+    } else {
+      const mediaType = url.searchParams.get('media_type') || url.searchParams.get('type')
+      syncAnilistId = await resolveAnilistMediaId(supabase, client_type, media_id, mediaType)
+    }
+
+    if (syncAnilistId) {
+      await syncMediaFromDantotsu(supabase, syncAnilistId, page || 1).catch(() => {})
     }
 
     // ====================================
