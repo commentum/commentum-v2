@@ -8,6 +8,13 @@ import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { parseMentions } from '../shared/mentionUtils.ts'
 import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
 import { translateText, getLanguageName } from '../shared/translate.ts'
+import {
+  danAuthenticate,
+  getDanModAuth,
+  danPostComment,
+  danEditComment,
+  danDeleteComment,
+} from '../shared/dantotsuClient.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -284,6 +291,8 @@ serve(async (req) => {
       }
     }
 
+    const userAuthToken = token || access_token
+
     switch (action) {
       case 'create':
         return await handleCreateComment(supabase, {
@@ -297,7 +306,8 @@ serve(async (req) => {
           mediaInfo,
           userRole,
           req,
-          configs
+          configs,
+          token: userAuthToken
         })
 
       case 'edit':
@@ -306,7 +316,8 @@ serve(async (req) => {
           user_id,
           content,
           userRole,
-          req
+          req,
+          token: userAuthToken
         })
 
       case 'delete':
@@ -314,7 +325,8 @@ serve(async (req) => {
           comment_id,
           user_id,
           userRole,
-          req
+          req,
+          token: userAuthToken
         })
 
       case 'mod_delete':
@@ -323,7 +335,8 @@ serve(async (req) => {
           user_id,
           userRole,
           req,
-          verifiedUserFromToken
+          verifiedUserFromToken,
+          token: userAuthToken
         })
 
       case 'translate':
@@ -349,7 +362,7 @@ serve(async (req) => {
 })
 
 async function handleCreateComment(supabase: any, params: any) {
-  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req, configs } = params
+  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req, configs, token } = params
 
   if (parent_id) {
     const { data: parentComment } = await supabase
@@ -631,6 +644,62 @@ async function handleCreateComment(supabase: any, params: any) {
     }
   }
 
+  // Queue Dantotsu 2-way sync in background - NON-BLOCKING
+  if (client_type === 'anilist') {
+    (async () => {
+      try {
+        let auth = token ? await danAuthenticate(token) : null
+        if (!auth) {
+          // Fallback to shared/mod token if available so Dantotsu gets the comment
+          auth = await getDanModAuth()
+        }
+        if (!auth) return
+
+        let danParentId: number | null = null
+        if (parent_id) {
+          const { data: parentMap } = await supabase
+            .from('dantotsu_id_mappings')
+            .select('dantotsu_comment_id')
+            .eq('commentum_id', parent_id)
+            .maybeSingle()
+          if (parentMap?.dantotsu_comment_id) {
+            danParentId = parentMap.dantotsu_comment_id
+          }
+        }
+
+        let parsedTag: number | null = null
+        if (typeof tag === 'number') parsedTag = tag
+        else if (typeof tag === 'string') {
+          const n = parseInt(tag, 10)
+          if (!isNaN(n)) parsedTag = n
+        }
+
+        const numericMediaId = parseInt(String(media_id), 10)
+        if (isNaN(numericMediaId)) return
+
+        const danCommentId = await danPostComment({
+          authToken: auth.authToken,
+          userId: auth.userId,
+          mediaId: numericMediaId,
+          content,
+          tag: parsedTag,
+          parentCommentId: danParentId,
+        })
+
+        if (danCommentId) {
+          await supabase.from('dantotsu_id_mappings').upsert({
+            dantotsu_comment_id: danCommentId,
+            commentum_id: comment.id,
+            media_id: numericMediaId,
+          }, { onConflict: 'dantotsu_comment_id' })
+          console.log(`[DantotsuSync] Comment ${comment.id} mapped to Dantotsu ${danCommentId}`)
+        }
+      } catch (err) {
+        console.error('[DantotsuSync] Error syncing new comment to Dantotsu:', err)
+      }
+    })()
+  }
+
   return new Response(
     JSON.stringify({ success: true, comment: stripSensitiveFields(comment) }),
     { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -638,7 +707,7 @@ async function handleCreateComment(supabase: any, params: any) {
 }
 
 async function handleEditComment(supabase: any, params: any) {
-  const { comment_id, user_id, content, userRole, req } = params
+  const { comment_id, user_id, content, userRole, req, token } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -758,6 +827,32 @@ async function handleEditComment(supabase: any, params: any) {
 
   // No FCM notification for self-edits — user already knows they edited their own comment
 
+  // Queue Dantotsu 2-way edit sync in background - NON-BLOCKING
+  (async () => {
+    try {
+      const { data: mapping } = await supabase
+        .from('dantotsu_id_mappings')
+        .select('dantotsu_comment_id')
+        .eq('commentum_id', comment_id)
+        .maybeSingle()
+
+      if (mapping?.dantotsu_comment_id) {
+        let auth = token ? await danAuthenticate(token) : null
+        if (!auth) auth = await getDanModAuth()
+        if (auth) {
+          const success = await danEditComment({
+            authToken: auth.authToken,
+            danCommentId: mapping.dantotsu_comment_id,
+            content,
+          })
+          console.log(`[DantotsuSync] Edited comment ${comment_id} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+        }
+      }
+    } catch (err) {
+      console.error('[DantotsuSync] Error syncing edit to Dantotsu:', err)
+    }
+  })()
+
   return new Response(
     JSON.stringify({ success: true, comment: stripSensitiveFields(updatedComment) }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -766,7 +861,7 @@ async function handleEditComment(supabase: any, params: any) {
 
 // Original delete - for own comments only
 async function handleDeleteComment(supabase: any, params: any) {
-  const { comment_id, user_id, userRole, req } = params
+  const { comment_id, user_id, userRole, req, token } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -843,6 +938,31 @@ async function handleDeleteComment(supabase: any, params: any) {
 
   // No FCM notification for self-deletes — user already knows they deleted their own comment
 
+  // Queue Dantotsu 2-way delete sync in background - NON-BLOCKING
+  (async () => {
+    try {
+      const { data: mapping } = await supabase
+        .from('dantotsu_id_mappings')
+        .select('dantotsu_comment_id')
+        .eq('commentum_id', comment_id)
+        .maybeSingle()
+
+      if (mapping?.dantotsu_comment_id) {
+        let auth = token ? await danAuthenticate(token) : null
+        if (!auth) auth = await getDanModAuth()
+        if (auth) {
+          const success = await danDeleteComment({
+            authToken: auth.authToken,
+            danCommentId: mapping.dantotsu_comment_id,
+          })
+          console.log(`[DantotsuSync] Deleted comment ${comment_id} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+        }
+      }
+    } catch (err) {
+      console.error('[DantotsuSync] Error syncing delete to Dantotsu:', err)
+    }
+  })()
+
   return new Response(
     JSON.stringify({ success: true, comment: stripSensitiveFields(deletedComment) }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -851,7 +971,7 @@ async function handleDeleteComment(supabase: any, params: any) {
 
 // Mod delete - for moderators to delete other users' comments
 async function handleModDeleteComment(supabase: any, params: any) {
-  const { comment_id, user_id, userRole, req, verifiedUserFromToken } = params
+  const { comment_id, user_id, userRole, req, verifiedUserFromToken, token } = params
 
   const { data: comment } = await supabase
     .from('comments')
@@ -949,6 +1069,33 @@ async function handleModDeleteComment(supabase: any, params: any) {
       },
     })
   }
+
+  // Queue Dantotsu 2-way mod-delete sync in background - NON-BLOCKING
+  // Uses moderator credentials so mod deletes on AnymeX reflect on Dantotsu
+  (async () => {
+    try {
+      const { data: mapping } = await supabase
+        .from('dantotsu_id_mappings')
+        .select('dantotsu_comment_id')
+        .eq('commentum_id', comment_id)
+        .maybeSingle()
+
+      if (mapping?.dantotsu_comment_id) {
+        // Moderator auth: try mod token or caller's token if caller is Dantotsu mod
+        let auth = await getDanModAuth()
+        if (!auth && token) auth = await danAuthenticate(token)
+        if (auth) {
+          const success = await danDeleteComment({
+            authToken: auth.authToken,
+            danCommentId: mapping.dantotsu_comment_id,
+          })
+          console.log(`[DantotsuSync] Mod-deleted comment ${comment_id} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+        }
+      }
+    } catch (err) {
+      console.error('[DantotsuSync] Error syncing mod delete to Dantotsu:', err)
+    }
+  })()
 
   return new Response(
     JSON.stringify({ 

@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 import { getLanguageName } from '../shared/translate.ts'
 import { resolveUserBadges } from '../shared/badges.ts'
 import { getConfig } from '../shared/configCache.ts'
+import { syncMediaFromDantotsu } from '../shared/dantotsuClient.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,6 +36,14 @@ serve(async (req) => {
         JSON.stringify({ error: 'media_id and client_type are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // On-demand sync from Dantotsu for AniList media
+    if (client_type === 'anilist') {
+      const mid = parseInt(media_id, 10)
+      if (!isNaN(mid)) {
+        await syncMediaFromDantotsu(supabase, mid, page || 1).catch(() => {})
+      }
     }
 
     // ====================================

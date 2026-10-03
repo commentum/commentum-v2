@@ -4,6 +4,12 @@ import { verifyAdminAccess, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
+import {
+  danAuthenticate,
+  getDanModAuth,
+  danReportComment,
+  danDeleteComment,
+} from '../shared/dantotsuClient.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,11 +27,11 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes, delete_comment } = await req.json()
+    const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes, delete_comment, token } = await req.json()
 
     switch (action) {
       case 'create':
-        return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes })
+        return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes, token: token || access_token })
       
       case 'resolve':
         // Resolve requires admin authentication via client token
@@ -112,7 +118,7 @@ serve(async (req) => {
 })
 
 async function handleCreateReport(supabase: any, params: any) {
-  const { comment_id, reporter_info, reason, notes } = params
+  const { comment_id, reporter_info, reason, notes, token } = params
 
   // Validate required fields
   if (!comment_id || !reporter_info || !reason) {
@@ -295,6 +301,35 @@ async function handleCreateReport(supabase: any, params: any) {
     })
   }
 
+  // Queue Dantotsu 2-way report sync in background - NON-BLOCKING
+  (async () => {
+    try {
+      const { data: mapping } = await supabase
+        .from('dantotsu_id_mappings')
+        .select('dantotsu_comment_id')
+        .eq('commentum_id', comment_id)
+        .maybeSingle()
+
+      if (mapping?.dantotsu_comment_id) {
+        let auth = token ? await danAuthenticate(token) : null
+        if (!auth) auth = await getDanModAuth()
+        if (auth) {
+          const success = await danReportComment({
+            authToken: auth.authToken,
+            danCommentId: mapping.dantotsu_comment_id,
+            username: comment.username || 'unknown',
+            mediaTitle: comment.media_title || 'Unknown Media',
+            reporter: reporterUsername || 'unknown',
+            reportedId: String(comment.user_id),
+          })
+          console.log(`[DantotsuSync] Reported comment ${comment_id} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+        }
+      }
+    } catch (err) {
+      console.error('[DantotsuSync] Error syncing report to Dantotsu:', err)
+    }
+  })()
+
   return new Response(
     JSON.stringify({
       success: true,
@@ -420,6 +455,32 @@ async function handleResolveReport(supabase: any, params: any) {
     .single()
 
   if (error) throw error
+
+  // If report resolution deleted the comment, sync delete to Dantotsu - NON-BLOCKING
+  if (delete_comment) {
+    (async () => {
+      try {
+        const { data: mapping } = await supabase
+          .from('dantotsu_id_mappings')
+          .select('dantotsu_comment_id')
+          .eq('commentum_id', comment_id)
+          .maybeSingle()
+
+        if (mapping?.dantotsu_comment_id) {
+          const auth = await getDanModAuth(supabase)
+          if (auth) {
+            const success = await danDeleteComment({
+              authToken: auth.authToken,
+              danCommentId: mapping.dantotsu_comment_id,
+            })
+            console.log(`[DantotsuSync] Report resolve deleted comment ${comment_id} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+          }
+        }
+      } catch (err) {
+        console.error('[DantotsuSync] Error syncing report delete to Dantotsu:', err)
+      }
+    })()
+  }
 
   // Queue Discord notification for report resolution in background - NON-BLOCKING
   queueDiscordNotification({

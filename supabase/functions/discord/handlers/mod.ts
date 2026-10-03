@@ -5,6 +5,7 @@ import { handleAutocomplete, handleSearchCommentsCommand, handleSearchPageIntera
 import { createModalResponse, createDiscordResponse } from '../utils.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
+import { getDanModAuth, danDeleteComment } from '../../shared/dantotsuClient.ts'
 
 // Discord interaction types
 const InteractionType = {
@@ -107,6 +108,31 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
           moderator: { id: userId, username: username },
           reason,
         })
+
+        // Queue Dantotsu 2-way mod delete sync in background - NON-BLOCKING
+        (async () => {
+          try {
+            const { data: mapping } = await supabase
+              .from('dantotsu_id_mappings')
+              .select('dantotsu_comment_id')
+              .eq('commentum_id', commentId)
+              .maybeSingle()
+
+            if (mapping?.dantotsu_comment_id) {
+              const auth = await getDanModAuth(supabase)
+              if (auth) {
+                const success = await danDeleteComment({
+                  authToken: auth.authToken,
+                  danCommentId: mapping.dantotsu_comment_id,
+                })
+                console.log(`[DantotsuSync] Discord mod deleted comment ${commentId} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+              }
+            }
+          } catch (err) {
+            console.error('[DantotsuSync] Error syncing Discord mod delete to Dantotsu:', err)
+          }
+        })()
+
         return createDiscordResponse(`✅ Comment \`${commentId}\` deleted! Reason: ${reason}`)
       }
 

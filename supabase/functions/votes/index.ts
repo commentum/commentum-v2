@@ -2,6 +2,11 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
+import {
+  danAuthenticate,
+  getDanModAuth,
+  danVoteComment,
+} from '../shared/dantotsuClient.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,7 +24,7 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { comment_id, user_info, vote_type } = await req.json()
+    const { comment_id, user_info, vote_type, token } = await req.json()
 
     // Validate required fields
     if (!comment_id || !user_info || !vote_type) {
@@ -252,6 +257,33 @@ serve(async (req) => {
         })
       }
     }
+
+    // Queue Dantotsu 2-way vote sync in background - NON-BLOCKING
+    (async () => {
+      try {
+        const { data: mapping } = await supabase
+          .from('dantotsu_id_mappings')
+          .select('dantotsu_comment_id')
+          .eq('commentum_id', comment_id)
+          .maybeSingle()
+
+        if (mapping?.dantotsu_comment_id) {
+          let auth = token ? await danAuthenticate(token) : null
+          if (!auth) auth = await getDanModAuth()
+          if (auth) {
+            const danVoteType = vote_type === 'upvote' ? 1 : vote_type === 'downvote' ? -1 : 0
+            const success = await danVoteComment({
+              authToken: auth.authToken,
+              danCommentId: mapping.dantotsu_comment_id,
+              voteType: danVoteType,
+            })
+            console.log(`[DantotsuSync] Voted on Dantotsu comment ${mapping.dantotsu_comment_id} (${vote_type}): ${success}`)
+          }
+        }
+      } catch (err) {
+        console.error('[DantotsuSync] Error syncing vote to Dantotsu:', err)
+      }
+    })()
 
     return new Response(
     JSON.stringify({
