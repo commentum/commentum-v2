@@ -64,10 +64,32 @@ export async function danAuthenticate(
       return null
     }
 
-    const rawMod = data.user.is_mod
-    const rawAdmin = data.user.is_admin
+    // Dantotsu /authenticate does NOT return is_mod/is_admin.
+    // Fetch /user with Authorization header to accurately check mod & admin permissions.
+    let rawMod = data.user.is_mod
+    let rawAdmin = data.user.is_admin
+
+    try {
+      const userRes = await fetch(`${DANTOTSU_API}/user`, {
+        headers: {
+          'appauth': APP_AUTH_KEY,
+          'Authorization': data.authToken,
+        },
+        signal: AbortSignal.timeout(4000),
+      })
+      if (userRes.ok) {
+        const userData = await userRes.json()
+        if (userData?.user) {
+          rawMod = userData.user.is_mod ?? rawMod
+          rawAdmin = userData.user.is_admin ?? rawAdmin
+        }
+      }
+    } catch (e) {
+      console.warn('[danAuth] Failed to fetch /user permissions:', e)
+    }
+
     const isMod = rawMod === true || rawMod === 1 || rawMod === '1' || rawAdmin === true || rawAdmin === 1 || rawAdmin === '1'
-    const isAdmin = rawAdmin === true || rawAdmin === 1 || rawAdmin === '1'
+    const isAdmin = rawAdmin === true || rawAdmin === 1 || rawAdmin === '1' || rawMod === true || rawMod === 1 || rawMod === '1'
 
     const result: DanAuthResult = {
       authToken: data.authToken,
