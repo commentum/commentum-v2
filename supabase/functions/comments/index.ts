@@ -654,7 +654,7 @@ async function handleCreateComment(supabase: any, params: any) {
   // Push to Dantotsu if user has AniList credentials (either direct AniList user, or anilistToken from MAL/SIMKL)
   const danToken = anilistToken || (client_type === 'anilist' ? token : null)
   if (danToken) {
-    (async () => {
+    const danPromise = (async () => {
       try {
         const auth = await danAuthenticate(danToken, supabase)
         if (!auth) return
@@ -711,6 +711,11 @@ async function handleCreateComment(supabase: any, params: any) {
         console.error('[DantotsuSync] Error syncing new comment to Dantotsu:', err)
       }
     })()
+    // @ts-ignore
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(danPromise)
+    }
   }
 
   return new Response(
@@ -841,7 +846,7 @@ async function handleEditComment(supabase: any, params: any) {
   // No FCM notification for self-edits — user already knows they edited their own comment
 
   // Queue Dantotsu 2-way edit sync in background - NON-BLOCKING
-  (async () => {
+  const danEditPromise = (async () => {
     try {
       const { data: mapping } = await supabase
         .from('dantotsu_id_mappings')
@@ -866,6 +871,11 @@ async function handleEditComment(supabase: any, params: any) {
       console.error('[DantotsuSync] Error syncing edit to Dantotsu:', err)
     }
   })()
+  // @ts-ignore
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(danEditPromise)
+  }
 
   return new Response(
     JSON.stringify({ success: true, comment: stripSensitiveFields(updatedComment) }),
@@ -953,7 +963,7 @@ async function handleDeleteComment(supabase: any, params: any) {
   // No FCM notification for self-deletes — user already knows they deleted their own comment
 
   // Queue Dantotsu 2-way delete sync in background - NON-BLOCKING
-  (async () => {
+  const danDeletePromise = (async () => {
     try {
       const { data: mapping } = await supabase
         .from('dantotsu_id_mappings')
@@ -977,6 +987,11 @@ async function handleDeleteComment(supabase: any, params: any) {
       console.error('[DantotsuSync] Error syncing delete to Dantotsu:', err)
     }
   })()
+  // @ts-ignore
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(danDeletePromise)
+  }
 
   return new Response(
     JSON.stringify({ success: true, comment: stripSensitiveFields(deletedComment) }),
@@ -1087,7 +1102,7 @@ async function handleModDeleteComment(supabase: any, params: any) {
 
   // Queue Dantotsu 2-way mod-delete sync in background - NON-BLOCKING
   // Uses moderator credentials so mod deletes on AnymeX reflect on Dantotsu
-  (async () => {
+  const danModDeletePromise = (async () => {
     try {
       const { data: mapping } = await supabase
         .from('dantotsu_id_mappings')
@@ -1114,6 +1129,11 @@ async function handleModDeleteComment(supabase: any, params: any) {
       console.error('[DantotsuSync] Error syncing mod delete to Dantotsu:', err)
     }
   })()
+  // @ts-ignore
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(danModDeletePromise)
+  }
 
   return new Response(
     JSON.stringify({ 

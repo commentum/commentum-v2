@@ -1,3 +1,5 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+
 const DANTOTSU_API = 'https://api.dantotsu.app'
 const APP_AUTH_KEY = '6*45Qp%W2RS@t38jkXoSKY588Ynj%n'
 
@@ -12,11 +14,22 @@ interface DanAuthResult {
 // In-memory cache for Dantotsu auth tokens (avoids re-authenticating on every comment action)
 const tokenCache = new Map<string, { data: DanAuthResult; expiresAt: number }>()
 
+function getSupabaseClient(supabase?: any) {
+  if (supabase) return supabase
+  const url = Deno.env.get('SUPABASE_URL')
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (url && key) {
+    try {
+      return createClient(url, key)
+    } catch (_) {}
+  }
+  return null
+}
+
 /**
  * Exchange an AniList OAuth access token for a Dantotsu AuthToken.
- * If the user has Dantotsu moderator/admin permissions, their token
- * is automatically stored in `dantotsu_mod_tokens` so it can be reused
- * for staff actions (e.g. Discord bot buttons, AnymeX mod deletes).
+ * Automatically stores & updates the token in `dantotsu_mod_tokens` so it can
+ * be reused for staff actions (e.g. Discord bot buttons, AnymeX mod deletes).
  */
 export async function danAuthenticate(
   anilistToken: string,
@@ -51,12 +64,17 @@ export async function danAuthenticate(
       return null
     }
 
+    const rawMod = data.user.is_mod
+    const rawAdmin = data.user.is_admin
+    const isMod = rawMod === true || rawMod === 1 || rawMod === '1' || rawAdmin === true || rawAdmin === 1 || rawAdmin === '1'
+    const isAdmin = rawAdmin === true || rawAdmin === 1 || rawAdmin === '1'
+
     const result: DanAuthResult = {
       authToken: data.authToken,
       userId: String(data.user.user_id || data.user.id),
       username: data.user.username || '',
-      isMod: !!(data.user.is_admin || data.user.is_mod), // Note: Dantotsu swapped admin/mod flags
-      isAdmin: !!(data.user.is_admin),
+      isMod: isMod,
+      isAdmin: isAdmin,
     }
 
     // Cache for 12 hours (Dantotsu tokens typically last 6 days)
@@ -65,26 +83,31 @@ export async function danAuthenticate(
       expiresAt: Date.now() + 12 * 60 * 60 * 1000,
     })
 
-    // If this user is a Dantotsu Moderator/Admin, automatically store & update their token in DB
-    if (supabase && (result.isMod || result.isAdmin)) {
-      supabase
-        .from('dantotsu_mod_tokens')
-        .upsert({
-          user_id: result.userId,
-          username: result.username,
-          anilist_token: anilistToken,
-          dantotsu_auth_token: result.authToken,
-          is_mod: result.isMod,
-          is_admin: result.isAdmin,
-          last_verified_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' })
-        .then(() => {
-          console.log(`[danAuth] Auto-saved Dantotsu Mod token for user: ${result.username} (${result.userId})`)
-        })
-        .catch((err: any) => {
-          console.error('[danAuth] Error saving mod token to DB:', err)
-        })
+    // Store & update token in DB (awaited properly for Deno runtime)
+    const db = getSupabaseClient(supabase)
+    if (db) {
+      try {
+        const { error: upsertErr } = await db
+          .from('dantotsu_mod_tokens')
+          .upsert({
+            user_id: result.userId,
+            username: result.username,
+            anilist_token: anilistToken,
+            dantotsu_auth_token: result.authToken,
+            is_mod: result.isMod,
+            is_admin: result.isAdmin,
+            last_verified_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_id' })
+
+        if (upsertErr) {
+          console.error('[danAuth] Error upserting Dantotsu token to DB:', upsertErr)
+        } else {
+          console.log(`[danAuth] Stored Dantotsu token for user: ${result.username} (${result.userId}, mod: ${result.isMod}, admin: ${result.isAdmin})`)
+        }
+      } catch (err) {
+        console.error('[danAuth] Exception saving token to DB:', err)
+      }
     }
 
     return result
@@ -101,19 +124,22 @@ export async function danAuthenticate(
  * 3. Falls back to environment variable DANTOTSU_MOD_AL_TOKEN / DANTOTSU_AL_TOKEN.
  */
 export async function getDanModAuth(supabase?: any): Promise<DanAuthResult | null> {
+  const db = getSupabaseClient(supabase)
   // 1. Try to load an active moderator token from the database
-  if (supabase) {
+  if (db) {
     try {
-      const { data: storedMod } = await supabase
+      const { data: storedMod } = await db
         .from('dantotsu_mod_tokens')
         .select('*')
+        .order('is_mod', { ascending: false })
+        .order('is_admin', { ascending: false })
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle()
 
       if (storedMod?.anilist_token) {
         // Re-authenticate using the stored AniList token to ensure it's fresh
-        const freshAuth = await danAuthenticate(storedMod.anilist_token, supabase)
+        const freshAuth = await danAuthenticate(storedMod.anilist_token, db)
         if (freshAuth) {
           return freshAuth
         }

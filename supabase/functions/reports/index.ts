@@ -302,7 +302,7 @@ async function handleCreateReport(supabase: any, params: any) {
   }
 
   // Queue Dantotsu 2-way report sync in background - NON-BLOCKING
-  (async () => {
+  const danReportPromise = (async () => {
     try {
       const { data: mapping } = await supabase
         .from('dantotsu_id_mappings')
@@ -329,6 +329,11 @@ async function handleCreateReport(supabase: any, params: any) {
       console.error('[DantotsuSync] Error syncing report to Dantotsu:', err)
     }
   })()
+  // @ts-ignore
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(danReportPromise)
+  }
 
   return new Response(
     JSON.stringify({

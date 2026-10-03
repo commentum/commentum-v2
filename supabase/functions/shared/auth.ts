@@ -119,6 +119,9 @@ export async function getUserRole(supabase: any, userId: string) {
 
 // Check if user can moderate target user
 export function canModerate(moderatorRole: string, targetRole: string) {
+  if (moderatorRole === 'owner') return true
+  if (moderatorRole === 'app_owner' && targetRole !== 'owner') return true
+  if (moderatorRole === 'super_admin' && !['owner', 'app_owner'].includes(targetRole)) return true
   const roleHierarchy: { [key: string]: number } = {
     'user': 0,
     'moderator': 1,
@@ -128,7 +131,7 @@ export function canModerate(moderatorRole: string, targetRole: string) {
     'owner': 5
   }
   
-  return roleHierarchy[moderatorRole] > roleHierarchy[targetRole]
+  return (roleHierarchy[moderatorRole] || 0) > (roleHierarchy[targetRole] || 0)
 }
 
 // Unmasked roles: return actual role in API responses

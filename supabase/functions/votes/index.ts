@@ -259,7 +259,7 @@ serve(async (req) => {
     }
 
     // Queue Dantotsu 2-way vote sync in background - NON-BLOCKING
-    (async () => {
+    const danVotePromise = (async () => {
       try {
         const { data: mapping } = await supabase
           .from('dantotsu_id_mappings')
@@ -285,6 +285,11 @@ serve(async (req) => {
         console.error('[DantotsuSync] Error syncing vote to Dantotsu:', err)
       }
     })()
+    // @ts-ignore
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(danVotePromise)
+    }
 
     return new Response(
     JSON.stringify({

@@ -6,6 +6,7 @@ import { createModalResponse, createDiscordResponse } from '../utils.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
 import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
 import { getDanModAuth, danDeleteComment } from '../../shared/dantotsuClient.ts'
+import { getUserRole } from '../../shared/auth.ts'
 
 // Discord interaction types
 const InteractionType = {
@@ -40,7 +41,13 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
     .eq('is_active', true)
     .single()
 
-  const userRole = registration?.user_role || 'user'
+  let userRole = registration?.user_role || 'user'
+  if (userRole !== 'owner') {
+    const fallbackRole = await getUserRole(supabase, userId)
+    if (fallbackRole === 'owner' || (ROLE_HIERARCHY[fallbackRole] || 0) > (ROLE_HIERARCHY[userRole] || 0)) {
+      userRole = fallbackRole
+    }
+  }
 
   // Extract reason from modal input
   let reason = ''
@@ -110,7 +117,7 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
         })
 
         // Queue Dantotsu 2-way mod delete sync in background - NON-BLOCKING
-        (async () => {
+        const danSyncPromise = (async () => {
           try {
             const { data: mapping } = await supabase
               .from('dantotsu_id_mappings')
@@ -132,6 +139,11 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
             console.error('[DantotsuSync] Error syncing Discord mod delete to Dantotsu:', err)
           }
         })()
+        // @ts-ignore
+        if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+          // @ts-ignore
+          EdgeRuntime.waitUntil(danSyncPromise)
+        }
 
         return createDiscordResponse(`✅ Comment \`${commentId}\` deleted! Reason: ${reason}`)
       }
@@ -464,7 +476,13 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
     .eq('is_active', true)
     .single()
   
-  const userRole = registration?.user_role || 'user'
+  let userRole = registration?.user_role || 'user'
+  if (userRole !== 'owner') {
+    const fallbackRole = await getUserRole(supabase, userId)
+    if (fallbackRole === 'owner' || (ROLE_HIERARCHY[fallbackRole] || 0) > (ROLE_HIERARCHY[userRole] || 0)) {
+      userRole = fallbackRole
+    }
+  }
   
   // Parse custom_id (format: action:id1:id2)
   const parts = customId.split(':')
@@ -505,7 +523,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
         // Check if already deleted
         const { data: comment } = await supabase
           .from('comments')
-          .select('deleted, deleted_by, user_id')
+          .select('deleted, deleted_by, user_id, user_role, client_type')
           .eq('id', commentId)
           .single()
 
@@ -524,9 +542,10 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
           return createButtonResponse(`🗑️ Comment already deleted by **${deleterName}**.`, true)
         }
 
-        // Check if target user has equal or higher role
-        const targetUserRole = await getTargetUserRole(supabase, comment.user_id)
-        if (!canModerateUser(userRole, targetUserRole)) {
+        // Allow user to delete their own comment, or if moderator can moderate target user
+        const isSelf = String(comment.user_id) === String(userId)
+        const targetUserRole = comment.user_role || await getTargetUserRole(supabase, comment.user_id, comment.client_type)
+        if (!isSelf && !canModerateUser(userRole, targetUserRole)) {
           return createButtonResponse(`❌ Cannot delete comment from **${targetUserRole}**. You need higher role.`, true)
         }
 
@@ -993,17 +1012,21 @@ const ROLE_HIERARCHY: Record<string, number> = {
 
 // Check if moderator can perform action on target
 function canModerateUser(moderatorRole: string, targetRole: string): boolean {
+  if (moderatorRole === 'owner') return true
+  if (moderatorRole === 'super_admin' && targetRole !== 'owner') return true
   return (ROLE_HIERARCHY[moderatorRole] || 0) > (ROLE_HIERARCHY[targetRole] || 0)
 }
 
 // Get target user's role from commentum_users table
-async function getTargetUserRole(supabase: any, targetUserId: string): Promise<string> {
-  const { data } = await supabase
+async function getTargetUserRole(supabase: any, targetUserId: string, clientType?: string): Promise<string> {
+  let query = supabase
     .from('commentum_users')
     .select('commentum_user_role')
     .eq('commentum_user_id', targetUserId)
-    .limit(1)
-    .single()
+  if (clientType) {
+    query = query.eq('commentum_client_type', clientType)
+  }
+  const { data } = await query.limit(1).maybeSingle()
   
   return data?.commentum_user_role || 'user'
 }
