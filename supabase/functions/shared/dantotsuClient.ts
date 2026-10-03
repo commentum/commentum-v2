@@ -383,7 +383,8 @@ export async function danFetchComments(
   mediaId: number,
   page = 1,
   tag?: number,
-  sort?: string
+  sort?: string,
+  authToken?: string
 ): Promise<any | null> {
   try {
     let url = `${DANTOTSU_API}/comments/${mediaId}/${page}`
@@ -393,14 +394,22 @@ export async function danFetchComments(
     const qs = params.toString()
     if (qs) url += `?${qs}`
 
+    const headers: Record<string, string> = {
+      'appauth': APP_AUTH_KEY,
+    }
+    if (authToken) {
+      headers['Authorization'] = authToken
+    }
+
     const res = await fetch(url, {
-      headers: {
-        'appauth': APP_AUTH_KEY,
-      },
+      headers,
       signal: AbortSignal.timeout(5000),
     })
 
-    if (!res.ok) return null
+    if (!res.ok) {
+      console.warn(`[danFetchComments] HTTP ${res.status} for media ${mediaId} page ${page}`)
+      return null
+    }
     return await res.json()
   } catch (err) {
     console.error('[danFetchComments] Exception fetching comments from Dantotsu:', err)
@@ -413,17 +422,26 @@ export async function danFetchComments(
  */
 export async function danFetchReplies(
   parentCommentId: number,
-  page = 1
+  page = 1,
+  authToken?: string
 ): Promise<any | null> {
   try {
+    const headers: Record<string, string> = {
+      'appauth': APP_AUTH_KEY,
+    }
+    if (authToken) {
+      headers['Authorization'] = authToken
+    }
+
     const res = await fetch(`${DANTOTSU_API}/comments/parent/${parentCommentId}/${page}`, {
-      headers: {
-        'appauth': APP_AUTH_KEY,
-      },
+      headers,
       signal: AbortSignal.timeout(5000),
     })
 
-    if (!res.ok) return null
+    if (!res.ok) {
+      console.warn(`[danFetchReplies] HTTP ${res.status} for parent ${parentCommentId}`)
+      return null
+    }
     return await res.json()
   } catch (err) {
     console.error(`[danFetchReplies] Exception fetching replies for ${parentCommentId}:`, err)
@@ -436,15 +454,16 @@ const mediaSyncCooldown = new Map<string, number>()
 
 /**
  * On-demand sync for a media from Dantotsu:
- * 1. Fetches pages starting from requestedPage (or page 1..totalPages).
- * 2. Ingests all unmapped comments across pages.
- * 3. Ingests replies for comments that have reply_count > 0.
+ * 1. Fetches pages starting from requestedPage (or page 1..totalPages) using active auth token.
+ * 2. Ingests all unmapped comments across pages, deduplicating against existing DB comments.
+ * 3. Ingests replies recursively for comments that have reply_count > 0.
  * 4. Stops early if it encounters a page where all comments are already synced.
  */
 export async function syncMediaFromDantotsu(
   supabase: any,
   mediaId: number,
-  requestedPage = 1
+  requestedPage = 1,
+  callerAuthToken?: string
 ): Promise<void> {
   const cooldownKey = `${mediaId}:${requestedPage}`
   const lastSync = mediaSyncCooldown.get(cooldownKey)
@@ -454,6 +473,31 @@ export async function syncMediaFromDantotsu(
   mediaSyncCooldown.set(cooldownKey, Date.now())
 
   try {
+    // 1. Get an active auth token to access Dantotsu API (requires Authorization header)
+    let authToken = callerAuthToken
+    if (!authToken && supabase) {
+      const auth = await getDanModAuth(supabase)
+      authToken = auth?.authToken
+    }
+    if (!authToken && supabase) {
+      try {
+        const { data: anyToken } = await supabase
+          .from('dantotsu_mod_tokens')
+          .select('dantotsu_auth_token')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (anyToken?.dantotsu_auth_token) {
+          authToken = anyToken.dantotsu_auth_token
+        }
+      } catch (_) {}
+    }
+
+    if (!authToken) {
+      console.warn('[syncMediaFromDantotsu] No Dantotsu auth token available for sync')
+      return
+    }
+
     // Get media title from cache if available
     const { data: cachedMedia } = await supabase
       .from('dantotsu_media_cache')
@@ -464,12 +508,12 @@ export async function syncMediaFromDantotsu(
     const mediaTitle = cachedMedia?.media_title || 'Unknown Media'
     const mediaType = cachedMedia?.media_type || 'anime'
 
-    // We fetch starting from requestedPage up to totalPages (capped at 5 pages per request for performance)
+    // We fetch starting from requestedPage up to totalPages (capped at 3 pages per request for performance)
     let currentPage = requestedPage
     let maxPages = requestedPage
 
-    while (currentPage <= maxPages && currentPage <= requestedPage + 4) {
-      const data = await danFetchComments(mediaId, currentPage)
+    while (currentPage <= maxPages && currentPage <= requestedPage + 2) {
+      const data = await danFetchComments(mediaId, currentPage, undefined, undefined, authToken)
       const danComments = data?.comments
       if (!Array.isArray(danComments) || danComments.length === 0) break
 
@@ -500,9 +544,44 @@ export async function syncMediaFromDantotsu(
       // Ingest unmapped top-level comments
       for (const c of unmapped) {
         const isDel = !!c.deleted
+
+        // First check if already in comments table to prevent duplicate insertion
+        let existingId: number | null = null
+        if (c.timestamp) {
+          const { data: existing } = await supabase
+            .from('comments')
+            .select('id')
+            .eq('media_id', String(mediaId))
+            .eq('user_id', String(c.user_id))
+            .eq('created_at', c.timestamp)
+            .limit(1)
+            .maybeSingle()
+          if (existing?.id) {
+            existingId = existing.id
+          }
+        }
+
+        if (existingId) {
+          idMap.set(c.comment_id, existingId)
+          await supabase.from('dantotsu_id_mappings').upsert({
+            dantotsu_comment_id: c.comment_id,
+            commentum_id: existingId,
+            media_id: mediaId,
+          }, { onConflict: 'dantotsu_comment_id' })
+          continue
+        }
+
         let pid: number | null = null
         if (c.parent_comment_id && c.parent_comment_id !== 0) {
           pid = idMap.get(c.parent_comment_id) || null
+          if (!pid) {
+            const { data: pMap } = await supabase
+              .from('dantotsu_id_mappings')
+              .select('commentum_id')
+              .eq('dantotsu_comment_id', c.parent_comment_id)
+              .maybeSingle()
+            if (pMap?.commentum_id) pid = pMap.commentum_id
+          }
         }
 
         const { data: inserted, error } = await supabase
@@ -544,59 +623,101 @@ export async function syncMediaFromDantotsu(
       }
 
       // Check for replies on comments that report reply_count > 0
+      // Support nested replies through a processing queue
+      const replyQueue: { danParentId: number; comParentId: number }[] = []
       for (const c of danComments) {
         if (c.reply_count && c.reply_count > 0) {
           const parentCommentumId = idMap.get(c.comment_id)
           if (parentCommentumId) {
-            const repliesData = await danFetchReplies(c.comment_id, 1)
-            const replies = repliesData?.comments
-            if (Array.isArray(replies) && replies.length > 0) {
-              const replyIds = replies.map((r: any) => r.comment_id).filter(Boolean)
-              const { data: existingReplies } = await supabase
-                .from('dantotsu_id_mappings')
-                .select('dantotsu_comment_id')
-                .in('dantotsu_comment_id', replyIds)
+            replyQueue.push({ danParentId: c.comment_id, comParentId: parentCommentumId })
+          }
+        }
+      }
 
-              const mappedReplies = new Set((existingReplies || []).map((r: any) => r.dantotsu_comment_id))
-              const unmappedReplies = replies.filter((r: any) => !mappedReplies.has(r.comment_id))
+      while (replyQueue.length > 0) {
+        const item = replyQueue.shift()!
+        const repliesData = await danFetchReplies(item.danParentId, 1, authToken)
+        const replies = repliesData?.comments
+        if (!Array.isArray(replies) || replies.length === 0) continue
 
-              for (const r of unmappedReplies) {
-                const isReplyDel = !!r.deleted
-                const { data: insertedReply } = await supabase
-                  .from('comments')
-                  .insert({
-                    client_type: 'anilist',
-                    user_id: String(r.user_id),
-                    media_id: String(mediaId),
-                    content: isReplyDel ? '[deleted]' : (r.content || ''),
-                    username: (r.username || 'unknown').slice(0, 50),
-                    user_avatar: r.profile_picture_url || null,
-                    user_role: (r.is_admin || r.is_mod) ? 'moderator' : 'user',
-                    media_type: mediaType,
-                    media_title: mediaTitle,
-                    media_year: cachedMedia?.media_year || null,
-                    media_poster: cachedMedia?.media_poster || null,
-                    parent_id: parentCommentumId,
-                    deleted: isReplyDel,
-                    deleted_at: isReplyDel ? r.timestamp || null : null,
-                    upvotes: r.upvotes || 0,
-                    downvotes: r.downvotes || 0,
-                    vote_score: (r.upvotes || 0) - (r.downvotes || 0),
-                    tags: r.tag ? JSON.stringify(['spoiler', `episode:${r.tag}`]) : null,
-                    created_at: r.timestamp || null,
-                    updated_at: r.timestamp || null,
-                  })
-                  .select('id')
-                  .single()
+        const replyIds = replies.map((r: any) => r.comment_id).filter(Boolean)
+        const { data: existingReplies } = await supabase
+          .from('dantotsu_id_mappings')
+          .select('dantotsu_comment_id, commentum_id')
+          .in('dantotsu_comment_id', replyIds)
 
-                if (insertedReply?.id) {
-                  await supabase.from('dantotsu_id_mappings').upsert({
-                    dantotsu_comment_id: r.comment_id,
-                    commentum_id: insertedReply.id,
-                    media_id: mediaId,
-                  }, { onConflict: 'dantotsu_comment_id' })
-                }
-              }
+        const mappedReplies = new Map<number, number>()
+        if (existingReplies) {
+          for (const er of existingReplies) {
+            mappedReplies.set(er.dantotsu_comment_id, er.commentum_id)
+            idMap.set(er.dantotsu_comment_id, er.commentum_id)
+          }
+        }
+
+        for (const r of replies) {
+          let replyComId = mappedReplies.get(r.comment_id)
+
+          if (!replyComId && r.timestamp) {
+            // Check if already in comments table by timestamp/user/media to prevent duplicate
+            const { data: existingRep } = await supabase
+              .from('comments')
+              .select('id')
+              .eq('media_id', String(mediaId))
+              .eq('user_id', String(r.user_id))
+              .eq('created_at', r.timestamp)
+              .limit(1)
+              .maybeSingle()
+            if (existingRep?.id) {
+              replyComId = existingRep.id
+            }
+          }
+
+          if (!replyComId) {
+            const isReplyDel = !!r.deleted
+            const { data: insertedReply } = await supabase
+              .from('comments')
+              .insert({
+                client_type: 'anilist',
+                user_id: String(r.user_id),
+                media_id: String(mediaId),
+                content: isReplyDel ? '[deleted]' : (r.content || ''),
+                username: (r.username || 'unknown').slice(0, 50),
+                user_avatar: r.profile_picture_url || null,
+                user_role: (r.is_admin || r.is_mod) ? 'moderator' : 'user',
+                media_type: mediaType,
+                media_title: mediaTitle,
+                media_year: cachedMedia?.media_year || null,
+                media_poster: cachedMedia?.media_poster || null,
+                parent_id: item.comParentId,
+                deleted: isReplyDel,
+                deleted_at: isReplyDel ? r.timestamp || null : null,
+                upvotes: r.upvotes || 0,
+                downvotes: r.downvotes || 0,
+                vote_score: (r.upvotes || 0) - (r.downvotes || 0),
+                tags: r.tag ? JSON.stringify(['spoiler', `episode:${r.tag}`]) : null,
+                created_at: r.timestamp || null,
+                updated_at: r.timestamp || null,
+              })
+              .select('id')
+              .single()
+
+            if (insertedReply?.id) {
+              replyComId = insertedReply.id
+            }
+          }
+
+          if (replyComId) {
+            idMap.set(r.comment_id, replyComId)
+            await supabase.from('dantotsu_id_mappings').upsert({
+              dantotsu_comment_id: r.comment_id,
+              commentum_id: replyComId,
+              media_id: mediaId,
+            }, { onConflict: 'dantotsu_comment_id' })
+            console.log(`[DantotsuSync] Synced Dantotsu reply ${r.comment_id} -> commentum ${replyComId} (parent ${item.comParentId})`)
+
+            // If this reply itself has replies, queue them too
+            if (r.reply_count && r.reply_count > 0) {
+              replyQueue.push({ danParentId: r.comment_id, comParentId: replyComId })
             }
           }
         }
