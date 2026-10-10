@@ -61,7 +61,7 @@ Your app makes simple HTTP requests:
 
 ```javascript
 // Create a comment from your app
-const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/comments', {
+const response = await fetch('http://anymex.duckdns.org:8000/functions/v1/comments', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -85,11 +85,11 @@ const response = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions
 
 // Get comments for a media
 const comments = await fetch(
-  `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/media?media_id=${animeId}&client_type=anilist`
+  `http://anymex.duckdns.org:8000/functions/v1/media?media_id=${animeId}&client_type=anilist`
 ).then(r => r.json());
 
 // Vote on a comment
-const voteResponse = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/votes', {
+const voteResponse = await fetch('http://anymex.duckdns.org:8000/functions/v1/votes', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -127,6 +127,7 @@ const voteResponse = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/funct
 - **MyAnimeList**: REST API integration
 - **SIMKL**: REST API integration
 - **Other**: Custom platform support
+- **Other**: Custom platform support
 
 ### Security & Reliability
 - **Rate Limiting**: Configurable limits per user
@@ -141,7 +142,7 @@ const voteResponse = await fetch('https://whzwmfxngelicmjyxwmr.supabase.co/funct
 
 ### Quick Start
 
-**Base URL**: `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/`
+**Base URL**: `http://anymex.duckdns.org:8000/functions/v1/`
 
 **🔑 NO API KEYS REQUIRED** - Open system design
 
