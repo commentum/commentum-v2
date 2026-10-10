@@ -1076,6 +1076,17 @@ async function handleDeleteAnnouncement(supabase: any, announcementId: number, r
 
   if (error) throw error
 
+  // Clean up all user notifications associated with this announcement
+  const { error: notifError } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('type', 'announcement_published')
+    .eq('metadata->>announcement_id', String(announcementId))
+
+  if (notifError) {
+    console.error(`Failed to clean up notifications for announcement ${announcementId}:`, notifError)
+  }
+
   return jsonResponse({ success: true, message: 'Announcement deleted' })
 }
 

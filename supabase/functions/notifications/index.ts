@@ -313,6 +313,42 @@ async function handleGetHistory(supabase: any, body: any) {
     )
   }
 
+  let filteredNotifications = notifications || []
+
+  // Filter out and clean up any orphaned announcement notifications whose announcement was deleted
+  const announcementNotifs = filteredNotifications.filter(
+    (n: any) => n.type === 'announcement_published' && n.metadata?.announcement_id
+  )
+
+  if (announcementNotifs.length > 0) {
+    const annIds = [...new Set(announcementNotifs.map((n: any) => parseInt(n.metadata.announcement_id)).filter(Boolean))]
+    if (annIds.length > 0) {
+      const { data: existingAnns } = await supabase
+        .from('announcements')
+        .select('id')
+        .in('id', annIds)
+
+      const existingIdSet = new Set((existingAnns || []).map((a: any) => String(a.id)))
+      const orphanedIds = annIds.filter((id: number) => !existingIdSet.has(String(id)))
+
+      if (orphanedIds.length > 0) {
+        // Clean up orphaned records from notifications in the background
+        for (const orphanId of orphanedIds) {
+          supabase
+            .from('notifications')
+            .delete()
+            .eq('type', 'announcement_published')
+            .eq('metadata->>announcement_id', String(orphanId))
+            .then(() => {})
+        }
+
+        filteredNotifications = filteredNotifications.filter(
+          (n: any) => n.type !== 'announcement_published' || existingIdSet.has(String(n.metadata?.announcement_id))
+        )
+      }
+    }
+  }
+
   // Get unread count
   let unreadQuery = supabase
     .from('notifications')
@@ -333,7 +369,7 @@ async function handleGetHistory(supabase: any, body: any) {
   return new Response(
     JSON.stringify({
       success: true,
-      notifications: notifications || [],
+      notifications: filteredNotifications,
       total: count || 0,
       unread_count: unreadCount || 0,
       pagination: {
