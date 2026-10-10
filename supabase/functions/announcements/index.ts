@@ -563,23 +563,63 @@ async function verifyAdmin(supabase: any, req: Request) {
     }
   }
 
-  // 2. Direct Service Role Key or Custom Admin Secret
-  const adminKeyHeader = req.headers.get('x-admin-key')
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  // 2. Dedicated Release Bot / Announcement API Key or Direct Service Role Key
+  const announcementKeyHeader = req.headers.get('x-announcement-key') || req.headers.get('x-admin-key')
+  const dedicatedApiKey = Deno.env.get('ANNOUNCEMENT_API_KEY')
   const customAdminSecret = Deno.env.get('ADMIN_SECRET')
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
-  const isValidSecret = (k: string | null | undefined) =>
+  const ANIMEX_BOT_AVATAR = 'https://raw.githubusercontent.com/Shebyyy/AnymeX-Desk/main/public/favicon.gif'
+
+  const isValidAnnouncementKey = (k: string | null | undefined) =>
     !!k && (
-      (serviceRoleKey && k === serviceRoleKey) ||
+      (dedicatedApiKey && k === dedicatedApiKey) ||
       (customAdminSecret && k === customAdminSecret)
     )
 
-  if (isValidSecret(adminKeyHeader)) {
-    return { valid: true, userId: 'admin', role: 'owner', username: 'Administrator' }
+  if (isValidAnnouncementKey(announcementKeyHeader)) {
+    return {
+      valid: true,
+      userId: 'anymex_bot',
+      role: 'admin',
+      username: 'AnymeX Bot',
+      avatarUrl: ANIMEX_BOT_AVATAR
+    }
+  }
+
+  if (serviceRoleKey && announcementKeyHeader === serviceRoleKey) {
+    return {
+      valid: true,
+      userId: 'admin',
+      role: 'owner',
+      username: 'Administrator',
+      avatarUrl: ANIMEX_BOT_AVATAR
+    }
   }
 
   const body = await req.clone().json().catch(() => ({}))
-  const { client_type, access_token, admin_key, session_token } = body
+  const { client_type, access_token, admin_key, announcement_key, session_token } = body
+  const incomingKey = announcement_key || admin_key
+
+  if (isValidAnnouncementKey(incomingKey)) {
+    return {
+      valid: true,
+      userId: 'anymex_bot',
+      role: 'admin',
+      username: 'AnymeX Bot',
+      avatarUrl: ANIMEX_BOT_AVATAR
+    }
+  }
+
+  if (serviceRoleKey && incomingKey === serviceRoleKey) {
+    return {
+      valid: true,
+      userId: 'admin',
+      role: 'owner',
+      username: 'Administrator',
+      avatarUrl: ANIMEX_BOT_AVATAR
+    }
+  }
 
   if (session_token) {
     const session = await getSession(supabase, session_token)
@@ -593,10 +633,6 @@ async function verifyAdmin(supabase: any, req: Request) {
         staffUserId: session.user_id
       }
     }
-  }
-
-  if (isValidSecret(admin_key)) {
-    return { valid: true, userId: 'admin', role: 'owner', username: 'Administrator' }
   }
 
   // 3. Client token verification (OAuth from AniList/MAL/Simkl)
@@ -931,6 +967,7 @@ async function handleCreateAnnouncement(supabase: any, req: Request) {
     expires_at: expires_at || null,
     author_id: adminCheck.userId,
     author_name: adminCheck.username || 'Staff',
+    author_avatar: adminCheck.avatarUrl || 'https://raw.githubusercontent.com/Shebyyy/AnymeX-Desk/main/public/favicon.gif',
     status: isPublishing ? 'published' : 'draft',
     published_at: isPublishing ? new Date().toISOString() : null
   }
