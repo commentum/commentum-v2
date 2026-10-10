@@ -85,6 +85,12 @@ serve(async (req) => {
       if (method === 'GET' && authAction === 'me') {
         return await handleAuthMe(supabase, req)
       }
+      if (method === 'POST' && authAction === 'change-password') {
+        return await handleChangePassword(supabase, req)
+      }
+      if (method === 'PATCH' && authAction === 'profile') {
+        return await handleUpdateProfile(supabase, req)
+      }
       return jsonResponse({ error: 'Auth action not found' }, 404)
     }
 
@@ -137,6 +143,10 @@ serve(async (req) => {
     
     if (method === 'POST' && announcementId && action === 'publish') {
       return await handlePublishAnnouncement(supabase, announcementId, req)
+    }
+
+    if (method === 'GET' && announcementId && action === 'analytics') {
+      return await handleGetAnnouncementAnalytics(supabase, announcementId, req)
     }
     
     if (method === 'POST' && announcementId && action === 'archive') {
@@ -299,6 +309,77 @@ async function handleAuthMe(supabase: any, req: Request) {
     return jsonResponse({ error: 'Invalid or expired session' }, 401)
   }
   return jsonResponse({ success: true, user: session })
+}
+
+async function handleChangePassword(supabase: any, req: Request) {
+  const token = extractToken(req)
+  if (!token) {
+    return jsonResponse({ error: 'Not authenticated' }, 401)
+  }
+  const session = await getSession(supabase, token)
+  if (!session) {
+    return jsonResponse({ error: 'Invalid or expired session' }, 401)
+  }
+
+  const body = await req.json().catch(() => ({}))
+  const { current_password, new_password } = body
+
+  if (!current_password || !new_password) {
+    return jsonResponse({ error: 'Current password and new password are required' }, 400)
+  }
+  if (new_password.length < 6) {
+    return jsonResponse({ error: 'New password must be at least 6 characters' }, 400)
+  }
+
+  const users = await getDashboardUsers(supabase)
+  const user = users.find(u => u.id === session.user_id)
+  if (!user) {
+    return jsonResponse({ error: 'User not found' }, 404)
+  }
+
+  const matches = await verifyPassword(current_password, user.password_hash, user.salt)
+  if (!matches) {
+    return jsonResponse({ error: 'Current password is incorrect' }, 401)
+  }
+
+  const { hash, salt } = await hashPassword(new_password)
+  await saveDashboardUser(supabase, {
+    id: user.id,
+    password_hash: hash,
+    salt
+  })
+
+  return jsonResponse({ success: true, message: 'Password changed successfully' })
+}
+
+async function handleUpdateProfile(supabase: any, req: Request) {
+  const token = extractToken(req)
+  if (!token) {
+    return jsonResponse({ error: 'Not authenticated' }, 401)
+  }
+  const session = await getSession(supabase, token)
+  if (!session) {
+    return jsonResponse({ error: 'Invalid or expired session' }, 401)
+  }
+
+  const body = await req.json().catch(() => ({}))
+  const { display_name, avatar_url } = body
+
+  const updatePayload: Partial<DashboardUser> = { id: session.user_id }
+  if (display_name !== undefined) updatePayload.display_name = display_name.trim()
+  if (avatar_url !== undefined) updatePayload.avatar_url = avatar_url.trim()
+
+  const updated = await saveDashboardUser(supabase, updatePayload)
+  return jsonResponse({
+    success: true,
+    user: {
+      id: updated.id,
+      username: updated.username,
+      display_name: updated.display_name,
+      avatar_url: updated.avatar_url,
+      role: updated.role,
+    }
+  })
 }
 
 async function handleListStaff(supabase: any, req: Request) {
@@ -1047,6 +1128,94 @@ async function handleArchiveAnnouncement(supabase: any, announcementId: number, 
   }
 
   return jsonResponse({ success: true, announcement, message: 'Announcement archived' })
+}
+
+async function handleGetAnnouncementAnalytics(supabase: any, announcementId: number, req: Request) {
+  const adminCheck = await verifyAdmin(supabase, req)
+  if (!adminCheck.valid) {
+    return jsonResponse({ error: adminCheck.error }, 401)
+  }
+
+  const { data: announcement } = await supabase
+    .from('announcements')
+    .select('id, title, app_id, view_count, published_at')
+    .eq('id', announcementId)
+    .single()
+
+  if (!announcement) {
+    return jsonResponse({ error: 'Announcement not found' }, 404)
+  }
+
+  // Fetch read records
+  const { data: reads } = await supabase
+    .from('announcement_reads')
+    .select('user_id, app_id, read_at')
+    .eq('announcement_id', announcementId)
+    .order('read_at', { ascending: false })
+    .limit(100)
+
+  const readUserIds = (reads || []).map((r: any) => r.user_id)
+
+  // Fetch profiles from commentum_users
+  const userProfilesMap = new Map<string, any>()
+  if (readUserIds.length > 0) {
+    const { data: users } = await supabase
+      .from('commentum_users')
+      .select('commentum_user_id, commentum_username, commentum_user_avatar, commentum_client_type, commentum_user_role')
+      .in('commentum_user_id', readUserIds)
+
+    if (users) {
+      for (const u of users) {
+        userProfilesMap.set(u.commentum_user_id, {
+          username: u.commentum_username,
+          avatar: u.commentum_user_avatar,
+          client_type: u.commentum_client_type,
+          role: u.commentum_user_role,
+        })
+      }
+    }
+  }
+
+  const readersList = (reads || []).map((r: any) => {
+    const profile = userProfilesMap.get(r.user_id)
+    return {
+      user_id: r.user_id,
+      username: profile?.username || `User ${r.user_id}`,
+      avatar: profile?.avatar || null,
+      client_type: profile?.client_type || r.app_id,
+      role: profile?.role || 'user',
+      read_at: r.read_at,
+    }
+  })
+
+  // Fetch push delivery stats from notifications table
+  const { data: notifs } = await supabase
+    .from('notifications')
+    .select('fcm_sent, fcm_delivered, fcm_error')
+    .eq('type', 'announcement_published')
+    .eq('metadata->>announcement_id', String(announcementId))
+
+  const totalPushed = notifs ? notifs.length : 0
+  const sentCount = notifs ? notifs.filter((n: any) => n.fcm_sent === true).length : 0
+  const deliveredCount = notifs ? notifs.filter((n: any) => n.fcm_delivered === true).length : 0
+  const failedCount = notifs ? notifs.filter((n: any) => n.fcm_error !== null).length : 0
+
+  return jsonResponse({
+    success: true,
+    analytics: {
+      announcement_id: announcementId,
+      title: announcement.title,
+      view_count: announcement.view_count || 0,
+      total_reads: reads ? reads.length : 0,
+      push_stats: {
+        queued: totalPushed,
+        sent: sentCount,
+        delivered: deliveredCount,
+        failed: failedCount,
+      },
+      readers: readersList,
+    }
+  })
 }
 
 // ====================================
