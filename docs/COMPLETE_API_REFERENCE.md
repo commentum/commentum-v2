@@ -2,9 +2,9 @@
 
 **🎯 IMPORTANT**: This is a **backend API service** documentation. These endpoints are designed for apps to integrate with, not for end users to access directly.
 
-**Base URL**: `https://whzwmfxngelicmjyxwmr.supabase.co/functions/v1/`
+**Base URL**: `http://anymex.duckdns.org:8000/functions/v1/`
 
-**🔑 TOKEN-BASED AUTH** - Mod+ actions require `client_type` + `access_token` for verification with provider APIs.
+**🔑 TOKEN-BASED AUTH** - Mod+ actions require `client_type` + `access_token`. Dantotsu 2-way sync requires provider/AniList tokens (`token` or `anilist_token`).
 
 ---
 
@@ -75,19 +75,21 @@ Basic operations use `user_info` objects:
 
 ### When Token Auth is Required
 
-| Endpoint | Operation | Auth Required |
-|----------|-----------|---------------|
-| `/comments` | Create | ❌ No |
-| `/comments` | Edit | ❌ No (user_id match only) |
-| `/comments` | Delete (own) | ❌ No (user_id match only) |
-| `/comments` | mod_delete (others) | ✅ Token required |
-| `/votes` | Vote | ❌ No |
-| `/media` | Get comments | ❌ No |
-| `/reports` | Create report | ❌ No |
-| `/reports` | Resolve report | ✅ Token required |
-| `/reports` | Get queue | ✅ Token required |
-| `/moderation` | All actions | ✅ Token required |
-| `/users` | All actions | ✅ Token required |
+| Endpoint | Operation | Local Commentum Auth | Dantotsu 2-Way Sync Auth |
+|----------|-----------|----------------------|--------------------------|
+| `/comments` | Create | ❌ No (`user_info` only) | ✅ `token` (AniList) or `anilist_token` (MAL/SIMKL) |
+| `/comments` | Edit | ❌ No (`user_id` match only) | ✅ `token` (AniList) or `anilist_token` (MAL/SIMKL) |
+| `/comments` | Delete (own) | ❌ No (`user_id` match only) | ✅ `token` (AniList) or `anilist_token` (MAL/SIMKL) |
+| `/comments` | mod_delete (others) | ✅ Token required | ⚡ Automatic (Handled by backend) |
+| `/votes` | Vote | ❌ No (`user_info` only) | ⚡ Optional `token` / `anilist_token` (or automatic fallback) |
+| `/media` | Get comments | ❌ No | ❌ No |
+| `/reports` | Create report | ❌ No | ⚡ Automatic (Handled by backend) |
+| `/reports` | Resolve report | ✅ Token required | ⚡ Automatic (Handled by backend) |
+| `/reports` | Get queue | ✅ Token required | ❌ No |
+| `/moderation` | All actions | ✅ Token required | N/A |
+| `/users` | All actions | ✅ Token required | N/A |
+
+> **💡 Dantotsu Sync Note**: Basic Commentum operations never block or fail if tokens are omitted. If tokens are not provided, actions are saved locally as `AnymeX Only`. Providing valid tokens automatically triggers background two-way sync with Dantotsu.
 
 ---
 
@@ -103,12 +105,14 @@ Basic operations use `user_info` objects:
 
 ### 1. Create Comment
 
-**Auth**: Not required
+**Auth**: Not required for local storage; **Token required for Dantotsu sync**.
 
 ```json
 {
   "action": "create",
   "client_type": "anilist",
+  "token": "user_oauth_token_here",
+  "anilist_token": "optional_anilist_token_for_mal_or_simkl",
   "user_info": {
     "user_id": "12345",
     "username": "TestUser",
@@ -123,9 +127,14 @@ Basic operations use `user_info` objects:
   },
   "content": "This was an amazing episode!",
   "parent_id": null,
-  "tag": "1"
+  "tag": 1
 }
 ```
+
+**Parameters for Dantotsu Sync:**
+- `token` (or `access_token`): User's OAuth token for their `client_type`. For `anilist` users, this token is used to log in to Dantotsu and mirror the comment to Dantotsu.
+- `anilist_token`: Optional AniList token for non-AniList users (`mal` or `simkl`). If supplied, Commentum resolves the MAL/SIMKL media to an AniList ID and mirrors the comment to Dantotsu as this AniList user.
+- `tag`: Episode number (integer or numeric string) for episode-specific spoiler comments (e.g. `1` for Episode 1).
 
 **Response (201):**
 ```json
@@ -206,7 +215,7 @@ Basic operations use `user_info` objects:
 
 **Method**: `POST`
 
-**Auth**: Not required
+**Auth**: Not required for local vote; **Optional token for Dantotsu sync**
 
 ```json
 {
@@ -215,11 +224,14 @@ Basic operations use `user_info` objects:
     "user_id": "12345",
     "username": "TestUser"
   },
-  "vote_type": "upvote"
+  "vote_type": "upvote",
+  "token": "optional_user_oauth_token",
+  "anilist_token": "optional_anilist_token_for_dantotsu_sync"
 }
 ```
 
-**vote_type**: `"upvote"`, `"downvote"`, or `"remove"`
+- **vote_type**: `"upvote"`, `"downvote"`, or `"remove"`
+- **token** / **anilist_token**: If the target comment is mapped to a Dantotsu comment ID, providing this token syncs the vote to Dantotsu in the background. If omitted, the server attempts to use a Dantotsu mod token.
 
 **Response (200):**
 ```json
@@ -921,4 +933,33 @@ POST /announcements/1/read
 
 ---
 
+## 🔄 Dantotsu 2-Way Sync
+
+Commentum v2 supports real-time, bidirectional synchronization with the **Dantotsu** comment ecosystem.
+
+### Key Capabilities
+1. **Comment Creation**: When an AnymeX user posts a comment, it is mirrored to Dantotsu in real time and tracked in `dantotsu_id_mappings`.
+2. **Comment Editing**: Edits made on AnymeX reflect on Dantotsu.
+3. **Comment Deletion**: Both self-deletes and moderator deletes (via API or Discord bot buttons) delete the corresponding Dantotsu comment.
+4. **Voting**: Upvotes and downvotes cast in AnymeX sync to Dantotsu.
+5. **Cross-Client Media Resolution**: MAL and SIMKL media IDs are automatically resolved to AniList IDs so non-AniList users can still sync with Dantotsu.
+6. **Discord Embed Tracking**: All Discord notification embeds show sync status:
+   - `Dantotsu: Synced (#<id>)`
+   - `Dantotsu: Posted on Dantotsu (#<id>)`
+   - `Dantotsu: AnymeX Only`
+
+### Token Requirements for Dantotsu Sync
+
+| Client Type | Field to Provide | Requirement | Notes |
+|-------------|------------------|-------------|-------|
+| `anilist` | `token` or `access_token` | **Required** for sync | User's AniList OAuth token; used to log in to Dantotsu API |
+| `mal` | `anilist_token` | Optional | If linked, syncs to Dantotsu using this AniList account |
+| `simkl` | `anilist_token` | Optional | If linked, syncs to Dantotsu using this AniList account |
+| Moderator actions | None from app | **Automatic** | Backend uses internal moderator token pool to mirror deletions/reports to Dantotsu |
+
+> ⚠️ If tokens are omitted, the action succeeds locally on Commentum without failing, but Dantotsu sync is skipped (`AnymeX Only`).
+
+---
+
 **Ready to integrate?** Start with the [Quick Start Guide](./QUICK_START.md)! 🚀
+

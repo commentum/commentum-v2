@@ -196,7 +196,7 @@ async function csvImport(db: any) {
       const { data: ins, error } = await db.from('comments').insert(insertRows).select('id')
       if (error) { console.error(`[csv] err @${idx}:`, error.message); errors += batch.length; idx += 200; continue }
       if (ins?.length) {
-        const mappings = ins.map((r: any, i: number) => ({ dantotsu_comment_id: danIds[i], commentum_id: r.id, media_id: batch[i].media_id }))
+        const mappings = ins.map((r: any, i: number) => ({ dantotsu_comment_id: danIds[i], commentum_id: r.id, media_id: batch[i].media_id, origin: 'dantotsu' }))
         for (const m of mappings) map.set(m.dantotsu_comment_id, m.commentum_id)
         const mr = await db.from('dantotsu_id_mappings').upsert(mappings, { onConflict: 'dantotsu_comment_id' })
         if (mr.error) { console.error('[csv] map err:', mr.error.message); errors += mappings.length }
@@ -551,7 +551,7 @@ async function apiSync(db: any) {
         const { data: ins, error } = await db.from('comments').insert(b.map(x => x.row)).select('id')
         if (error) { errors += b.length; continue }
         if (ins?.length) {
-          const mappings = ins.map((r: any, j: number) => ({ dantotsu_comment_id: b[j].danId, commentum_id: r.id, media_id: b[j].mid }))
+          const mappings = ins.map((r: any, j: number) => ({ dantotsu_comment_id: b[j].danId, commentum_id: r.id, media_id: b[j].mid, origin: 'dantotsu' }))
           for (const m of mappings) map.set(m.dantotsu_comment_id, m.commentum_id)
           await db.from('dantotsu_id_mappings').upsert(mappings, { onConflict: 'dantotsu_comment_id' })
           inserted += ins.length

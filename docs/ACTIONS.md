@@ -40,22 +40,22 @@ Verified with provider APIs:
 
 ### Create Comment
 - **Endpoint**: `POST /comments`
-- **Auth**: user_info
+- **Auth**: `user_info` (local) | `token` (AniList) or `anilist_token` (MAL/SIMKL) for Dantotsu 2-way sync
 - **Role**: user
 
 ### Edit Comment
 - **Endpoint**: `POST /comments`
-- **Auth**: user_info (owner only)
+- **Auth**: `user_info` (owner only) | `token` or `anilist_token` for Dantotsu sync
 - **Role**: user
 
 ### Delete Comment (Own)
 - **Endpoint**: `POST /comments`
-- **Auth**: user_info (owner only)
+- **Auth**: `user_info` (owner only) | `token` or `anilist_token` for Dantotsu sync
 - **Role**: user
 
 ### Mod Delete Comment
 - **Endpoint**: `POST /comments`
-- **Auth**: ✅ token required
+- **Auth**: ✅ token required (moderator+) — Dantotsu deletion is handled automatically by the backend
 - **Role**: moderator+
 
 ---
@@ -64,7 +64,7 @@ Verified with provider APIs:
 
 ### Vote
 - **Endpoint**: `POST /votes`
-- **Auth**: user_info
+- **Auth**: `user_info` (local) | optional `token` / `anilist_token` for Dantotsu sync
 - **Role**: user
 - **Types**: `upvote`, `downvote`, `remove`
 
@@ -80,7 +80,7 @@ Verified with provider APIs:
 
 ### Resolve Report
 - **Endpoint**: `POST /reports`
-- **Auth**: ✅ token required
+- **Auth**: ✅ token required (moderator+) — Dantotsu deletion is handled automatically by the backend
 - **Role**: moderator+
 
 ### Get Reports Queue

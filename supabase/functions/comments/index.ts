@@ -485,31 +485,38 @@ async function handleCreateComment(supabase: any, params: any) {
     comment.translated_at = translation.translatedContent ? new Date().toISOString() : null
   }
 
-  // Queue Discord notification in background - NON-BLOCKING
-  queueDiscordNotification({
-    type: 'comment_created',
-    comment: {
-      id: comment.id,
-      username: comment.username,
-      user_id: comment.user_id,
-      content: comment.content,
-      client_type: comment.client_type,
-      media_id: comment.media_id,
-      media_type: comment.media_type,
-      parent_id: comment.parent_id,
-      translated_content: comment.translated_content || null,
-      original_language: comment.original_language || null
-    },
-    user: userInfo,
-    media: {
-      id: mediaInfo.media_id,
-      title: mediaInfo.title,
-      year: mediaInfo.year,
-      poster: mediaInfo.poster,
-      type: mediaInfo.type,
-      client_type: comment.client_type
-    }
-  })
+  const sendCreatedNotification = (danId?: number | null) => {
+    queueDiscordNotification({
+      type: 'comment_created',
+      comment: {
+        id: comment.id,
+        username: comment.username,
+        user_id: comment.user_id,
+        content: comment.content,
+        client_type: comment.client_type,
+        media_id: comment.media_id,
+        media_type: comment.media_type,
+        parent_id: comment.parent_id,
+        translated_content: comment.translated_content || null,
+        original_language: comment.original_language || null
+      },
+      user: userInfo,
+      media: {
+        id: mediaInfo.media_id,
+        title: mediaInfo.title,
+        year: mediaInfo.year,
+        poster: mediaInfo.poster,
+        type: mediaInfo.type,
+        client_type: comment.client_type
+      },
+      dantotsuSync: danId ? {
+        status: 'synced',
+        dantotsuCommentId: danId
+      } : {
+        status: 'anymex_only'
+      }
+    })
+  }
 
   // Queue FCM Push Notification - NON-BLOCKING
   if (parent_id) {
@@ -655,9 +662,13 @@ async function handleCreateComment(supabase: any, params: any) {
   const danToken = anilistToken || (client_type === 'anilist' ? token : null)
   if (danToken) {
     const danPromise = (async () => {
+      let syncedDanId: number | null = null
       try {
         const auth = await danAuthenticate(danToken, supabase)
-        if (!auth) return
+        if (!auth) {
+          sendCreatedNotification(null)
+          return
+        }
 
         let danParentId: number | null = null
         if (parent_id) {
@@ -687,6 +698,7 @@ async function handleCreateComment(supabase: any, params: any) {
         }
         if (!targetMediaId) {
           console.warn(`[DantotsuSync] Could not resolve AniList media ID for ${client_type} ${media_id}`)
+          sendCreatedNotification(null)
           return
         }
 
@@ -700,15 +712,19 @@ async function handleCreateComment(supabase: any, params: any) {
         })
 
         if (danCommentId) {
+          syncedDanId = danCommentId
           await supabase.from('dantotsu_id_mappings').upsert({
             dantotsu_comment_id: danCommentId,
             commentum_id: comment.id,
             media_id: targetMediaId,
+            origin: 'anymex',
           }, { onConflict: 'dantotsu_comment_id' })
           console.log(`[DantotsuSync] Comment ${comment.id} mapped to Dantotsu ${danCommentId} (media ${targetMediaId})`)
         }
       } catch (err) {
         console.error('[DantotsuSync] Error syncing new comment to Dantotsu:', err)
+      } finally {
+        sendCreatedNotification(syncedDanId)
       }
     })()
     // @ts-ignore
@@ -716,6 +732,8 @@ async function handleCreateComment(supabase: any, params: any) {
       // @ts-ignore
       EdgeRuntime.waitUntil(danPromise)
     }
+  } else {
+    sendCreatedNotification(null)
   }
 
   return new Response(

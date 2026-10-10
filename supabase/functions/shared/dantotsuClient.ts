@@ -567,6 +567,7 @@ export async function syncMediaFromDantotsu(
             dantotsu_comment_id: c.comment_id,
             commentum_id: existingId,
             media_id: mediaId,
+            origin: 'dantotsu',
           }, { onConflict: 'dantotsu_comment_id' })
           continue
         }
@@ -617,6 +618,7 @@ export async function syncMediaFromDantotsu(
             dantotsu_comment_id: c.comment_id,
             commentum_id: inserted.id,
             media_id: mediaId,
+            origin: 'dantotsu',
           }, { onConflict: 'dantotsu_comment_id' })
           console.log(`[DantotsuSync] Ingested Dantotsu comment ${c.comment_id} -> commentum ${inserted.id}`)
         }
@@ -712,6 +714,7 @@ export async function syncMediaFromDantotsu(
               dantotsu_comment_id: r.comment_id,
               commentum_id: replyComId,
               media_id: mediaId,
+              origin: 'dantotsu',
             }, { onConflict: 'dantotsu_comment_id' })
             console.log(`[DantotsuSync] Synced Dantotsu reply ${r.comment_id} -> commentum ${replyComId} (parent ${item.comParentId})`)
 

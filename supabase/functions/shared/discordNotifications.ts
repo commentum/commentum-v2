@@ -67,6 +67,10 @@ export interface DiscordNotificationData {
   voteType?: 'upvote' | 'downvote';
   voteScore?: number;
   notes?: string;
+  dantotsuSync?: {
+    status?: 'synced' | 'dantotsu_origin' | 'anymex_only';
+    dantotsuCommentId?: number | string;
+  };
 }
 
 // ====================================
@@ -520,6 +524,25 @@ async function sendDiscordNotificationInternal(supabase: any, data: DiscordNotif
           }
         }
       }
+      // Enrich Dantotsu sync status if comment ID is available and status not yet set
+      if (!data.dantotsuSync && data.comment?.id) {
+        const { data: danMap } = await supabase
+          .from('dantotsu_id_mappings')
+          .select('dantotsu_comment_id, origin')
+          .eq('commentum_id', data.comment.id)
+          .maybeSingle()
+
+        if (danMap?.dantotsu_comment_id) {
+          data.dantotsuSync = {
+            status: danMap.origin === 'dantotsu' ? 'dantotsu_origin' : 'synced',
+            dantotsuCommentId: danMap.dantotsu_comment_id,
+          }
+        } else {
+          data.dantotsuSync = {
+            status: 'anymex_only',
+          }
+        }
+      }
     } catch (enrichError) {
       // Enrichment is best-effort; never block a notification from sending
       console.error('Discord notification enrichment error:', enrichError)
@@ -788,6 +811,19 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
   // Clean media line: "Media Title  [media_id · client · type]"
   const mediaLine = `${mediaTitle}  \`[${mediaId} · ${clientType} · ${mediaType}]\``
 
+  // Dantotsu sync line
+  const dantotsuInfo = data.dantotsuSync
+  let dantotsuLine = ''
+  if (dantotsuInfo) {
+    if (dantotsuInfo.status === 'dantotsu_origin') {
+      dantotsuLine = `Dantotsu: Posted on Dantotsu (\`#${dantotsuInfo.dantotsuCommentId}\`)`
+    } else if (dantotsuInfo.status === 'synced') {
+      dantotsuLine = `Dantotsu: Synced (\`#${dantotsuInfo.dantotsuCommentId}\`)`
+    } else if (dantotsuInfo.status === 'anymex_only') {
+      dantotsuLine = `Dantotsu: AnymeX Only`
+    }
+  }
+
   const reason = data.reason || ''
   const reportReason = data.reportReason || ''
   const voteType = data.voteType === 'upvote' ? 'Upvote ▲' : 'Downvote ▼'
@@ -814,7 +850,7 @@ function buildNotificationContent(data: DiscordNotificationData): ContainerCompo
 
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Content (${getLanguageName(originalLanguage)})` : 'Content', commentContent)}${translationBlock}`
       break
@@ -825,7 +861,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Content (${getLanguag
 
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Updated Content (${getLanguageName(originalLanguage)})` : 'Updated Content', commentContent)}${translationBlock}`
       break
@@ -843,7 +879,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Updated Content (${ge
 Actor: ${moderatorName}  \`${moderatorId}\`
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Deleted Content (${getLanguageName(originalLanguage)})` : 'Deleted Content', safeDeletedContent)}${delTranslationBlock}
 
@@ -858,7 +894,7 @@ ${section('Reason', reason || 'No reason specified')}`
 Actor: ${moderatorName}  \`${moderatorId}\`
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
@@ -870,7 +906,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguag
 Actor: ${moderatorName}  \`${moderatorId}\`
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
@@ -882,7 +918,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguag
 Actor: ${moderatorName}  \`${moderatorId}\`
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
@@ -894,7 +930,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguag
 Actor: ${moderatorName}  \`${moderatorId}\`
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
@@ -910,7 +946,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguag
 Reporter: ${reporterName}  \`${reporterId}\`
 Reported: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Reported Comment (${getLanguageName(originalLanguage)})` : 'Reported Comment', commentContent)}${translationBlock}
 
@@ -924,7 +960,7 @@ ${section('Report Reason', reportReason)}${notes ? `\n\n${section('Notes', notes
 Actor: ${moderatorName}  \`${moderatorId}\`
 Reported: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
@@ -936,7 +972,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguag
 Actor: ${moderatorName}  \`${moderatorId}\`
 Reported: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
@@ -960,7 +996,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguag
 Actor: ${moderatorName}  \`${moderatorId}\`
 User: ${authorName}  \`${authorId}\`
 Comment ID: \`${warnCommentId}\`
-Media: ${warnMediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${warnMediaLine}
 
 ${section('Comment', warnCommentContent)}
 
@@ -972,7 +1008,7 @@ ${section('Reason', reason)}${notes ? `\n\n${section('User Notes', notes)}` : ''
       accentColor = 0x808080 // Gray
       const hasMuteComment = !!(commentId && commentContent)
       const muteCommentBlock = hasMuteComment
-        ? `Comment ID  — \`${commentId}\`\nMedia       — ${mediaLine}\n\n${section('Comment', commentContent)}\n\n`
+        ? `Comment ID  — \`${commentId}\`\n${dantotsuLine ? `${dantotsuLine}\n` : ''}Media       — ${mediaLine}\n\n${section('Comment', commentContent)}\n\n`
         : ''
 
       content = `🔇  **User Muted**
@@ -1019,7 +1055,7 @@ ${section('Reason', reason)}`
       accentColor = 0x8B0000 // Dark Red
       const hasBanComment = !!(commentId && commentContent)
       const banCommentBlock = hasBanComment
-        ? `Comment ID  — \`${commentId}\`\nMedia       — ${mediaLine}\n\n${section('Comment', commentContent)}\n\n`
+        ? `Comment ID  — \`${commentId}\`\n${dantotsuLine ? `${dantotsuLine}\n` : ''}Media       — ${mediaLine}\n\n${section('Comment', commentContent)}\n\n`
         : ''
 
       content = `⛔  **User Banned**
@@ -1062,7 +1098,7 @@ Voter: ${voterName}  \`${voterId}\`
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
 Vote: ${voteType}
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
@@ -1074,7 +1110,7 @@ ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguag
 Voter: ${voterName}  \`${voterId}\`
 Author: ${authorName}  \`${authorId}\`
 Comment ID: \`${commentId}\`
-Media: ${mediaLine}
+${dantotsuLine ? `${dantotsuLine}\n` : ''}Media: ${mediaLine}
 
 ${section(originalLanguage && originalLanguage !== 'en' ? `Comment (${getLanguageName(originalLanguage)})` : 'Comment', commentContent)}${translationBlock}`
       break
