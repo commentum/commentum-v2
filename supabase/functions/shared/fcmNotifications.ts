@@ -558,24 +558,16 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       const fcmMessage: any = {
         message: {
           token: tokenRecord.fcm_token,
-          notification: {
-            title,
-            body,
-          },
           data: messageData,
           android: {
             priority: 'HIGH' as const,
-            notification: {
-              channel_id: getAndroidChannelId(payload.type),
-              sound: 'default',
-              default_vibrate_timings: true,
-            },
           },
           apns: {
             payload: {
               aps: {
                 sound: 'default',
                 badge: 1,
+                'content-available': 1,
               }
             }
           },
