@@ -554,7 +554,12 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
     let totalFailure = 0
     const invalidTokens: string[] = []
 
+    const sentTokensInThisRun = new Set<string>()
     for (const tokenRecord of tokens) {
+      if (sentTokensInThisRun.has(tokenRecord.fcm_token)) {
+        continue
+      }
+      sentTokensInThisRun.add(tokenRecord.fcm_token)
       const fcmMessage: any = {
         message: {
           token: tokenRecord.fcm_token,

@@ -1306,8 +1306,19 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
       })
     }
 
-    // Deduplicate by user_id so we don't queue duplicate notifications for multi-device users
-    const uniqueEligibleUsers = Array.from(new Set(eligibleTokens.map(t => t.user_id)))
+    // Deduplicate by fcm_token first so a single physical device with multiple accounts
+    // (e.g. AniList + SIMKL on the same phone) only receives one push notification.
+    const seenFcmTokens = new Set<string>()
+    const uniqueTokens = eligibleTokens.filter(token => {
+      if (!token.fcm_token || seenFcmTokens.has(token.fcm_token)) {
+        return false
+      }
+      seenFcmTokens.add(token.fcm_token)
+      return true
+    })
+
+    // Now deduplicate by user_id from these unique device tokens
+    const uniqueEligibleUsers = Array.from(new Set(uniqueTokens.map(t => t.user_id)))
 
     for (const userId of uniqueEligibleUsers) {
       try {
