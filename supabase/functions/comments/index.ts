@@ -17,9 +17,12 @@ import {
 } from '../shared/dantotsuClient.ts'
 import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
 
+import { getAuthUser, hasRoleLevel } from '../shared/authMiddleware.ts'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-session-token, apikey',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 }
 
 const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
@@ -46,32 +49,75 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, content, comment_id, parent_id, token, tag, user_info, media_info, access_token, target_language, anilist_token } = await req.json()
+    const body = await req.json().catch(() => ({}))
+    const auth = await getAuthUser(req, { requireAuth: false, supabase, checkDb: true })
+    const isTokenAuth = auth.valid && !!auth.user
+
+    let action = (body.action || '').toLowerCase()
+    if (!action) {
+      if (req.method === 'PATCH') action = 'edit'
+      else if (req.method === 'DELETE') action = 'delete'
+      else if (req.method === 'POST') action = 'create'
+    }
+
+    let client_type = body.client_type || (isTokenAuth ? auth.user!.provider : null)
+    const content = body.content
+    const comment_id = body.comment_id
+    const parent_id = body.parent_id
+    const token = body.token
+    const tag = body.tag
+    let user_info = body.user_info
+    let media_info = body.media_info
+    const access_token = body.access_token
+    const target_language = body.target_language
+    const anilist_token = body.anilist_token
+
+    // If media_id is provided directly at root of body, build media_info
+    if (!media_info && (body.media_id !== undefined && body.media_id !== null)) {
+      media_info = {
+        media_id: String(body.media_id),
+        type: body.media_type || body.type || 'anime',
+        title: body.media_title || body.title || 'Unknown Media',
+        year: body.media_year || body.year || 2024,
+        poster: body.media_poster || body.poster || null,
+      }
+    }
+
+    // If authenticated via token, synthesize verified user_info
+    if (isTokenAuth) {
+      user_info = {
+        user_id: auth.user!.uid,
+        username: auth.user!.username,
+        avatar: user_info?.avatar || null,
+        avatar_decoration: user_info?.avatar_decoration || null,
+        banner_url: user_info?.banner_url || null,
+      }
+    }
 
     switch (action) {
       case 'create':
         if (!client_type || !content || !user_info || !media_info) {
           return new Response(
-            JSON.stringify({ error: 'client_type, content, user_info, and media_info are required for create action' }),
+            JSON.stringify({ error: 'client_type, content, and media information are required for create action' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
         break
         
       case 'edit':
-        if (!comment_id || !user_info || !content) {
+        if (!comment_id || (!user_info && !isTokenAuth) || !content) {
           return new Response(
-            JSON.stringify({ error: 'comment_id, user_info, and content are required for edit action' }),
+            JSON.stringify({ error: 'comment_id and content are required for edit action' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
         break
         
       case 'delete':
-        // Original delete - for own comments only, uses user_info
-        if (!comment_id || !user_info) {
+        // Delete own comments or mod delete with token
+        if (!comment_id || (!user_info && !isTokenAuth)) {
           return new Response(
-            JSON.stringify({ error: 'comment_id and user_info are required for delete action' }),
+            JSON.stringify({ error: 'comment_id is required for delete action' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
@@ -79,9 +125,9 @@ serve(async (req) => {
 
       case 'mod_delete':
         // Mod delete - for deleting other users' comments, requires token auth
-        if (!comment_id || !client_type || !access_token) {
+        if (!comment_id || (!client_type && !isTokenAuth) || (!access_token && !isTokenAuth)) {
           return new Response(
-            JSON.stringify({ error: 'comment_id, client_type, and access_token are required for mod_delete action' }),
+            JSON.stringify({ error: 'comment_id, client_type, and access_token (or Bearer token) are required for mod_delete action' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           )
         }
@@ -163,13 +209,23 @@ serve(async (req) => {
     let verifiedUserFromToken = null
     
     if (action === 'create') {
-      if (!validateUserInfo(user_info)) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+      if (isTokenAuth) {
+        userInfo = {
+          user_id: auth.user!.uid,
+          username: auth.user!.username,
+          avatar: user_info?.avatar || auth.user!.avatar_url || null,
+          avatar_decoration: user_info?.avatar_decoration || null,
+          banner_url: user_info?.banner_url || null,
+        }
+      } else {
+        if (!validateUserInfo(user_info)) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        userInfo = user_info
       }
-      userInfo = user_info
 
       if (!validateMediaInfo(media_info)) {
         return new Response(
@@ -179,26 +235,42 @@ serve(async (req) => {
       }
       mediaInfo = media_info
     } else if (action === 'edit' || action === 'delete') {
-      if (!validateUserInfo(user_info)) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+      if (isTokenAuth) {
+        userInfo = {
+          user_id: auth.user!.uid,
+          username: auth.user!.username,
+          avatar: user_info?.avatar || auth.user!.avatar_url || null,
+        }
+      } else {
+        if (!validateUserInfo(user_info)) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid user_info format. Required: user_id, username (1-50 chars), optional: avatar' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        userInfo = user_info
       }
-      userInfo = user_info
     } else if (action === 'mod_delete') {
-      // Verify token for mod_delete
-      verifiedUserFromToken = await verifyClientToken(client_type, access_token)
-      if (!verifiedUserFromToken) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid or expired access token' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      userInfo = {
-        user_id: verifiedUserFromToken.provider_user_id,
-        username: verifiedUserFromToken.username,
-        avatar: verifiedUserFromToken.avatar_url
+      if (isTokenAuth) {
+        userInfo = {
+          user_id: auth.user!.uid,
+          username: auth.user!.username,
+          avatar: auth.user!.avatar_url || null,
+        }
+      } else {
+        // Verify token for mod_delete
+        verifiedUserFromToken = await verifyClientToken(client_type, access_token)
+        if (!verifiedUserFromToken) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid or expired access token' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        userInfo = {
+          user_id: verifiedUserFromToken.provider_user_id,
+          username: verifiedUserFromToken.username,
+          avatar: verifiedUserFromToken.avatar_url
+        }
       }
     }
 
@@ -221,7 +293,7 @@ serve(async (req) => {
 
     let userRole = 'user'
     if (action === 'delete') {
-      // Original delete - check if user owns the comment
+      // Check comment ownership or mod permissions
       const { data: comment } = await supabase
         .from('comments')
         .select('user_id, user_role, client_type')
@@ -235,25 +307,38 @@ serve(async (req) => {
         )
       }
 
-      if (comment.user_id !== user_id) {
+      const isOwner = String(comment.user_id) === String(user_id)
+      const isMod = isTokenAuth && hasRoleLevel(auth.user!.role, 'moderator')
+
+      if (!isOwner && !isMod) {
         return new Response(
-          JSON.stringify({ error: 'You can only delete your own comments. Use mod_delete for moderation.' }),
+          JSON.stringify({ error: 'You can only delete your own comments. Moderator privileges required for other comments.' }),
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      userRole = await getUserRole(supabase, user_id)
+      userRole = isTokenAuth ? auth.user!.role : await getUserRole(supabase, user_id)
     } else if (action === 'mod_delete') {
-      // Mod delete - verify admin access
-      const adminVerification = await verifyAdminAccess(supabase, user_id)
-      if (!adminVerification.valid) {
-        return new Response(
-          JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
-          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+      // Mod delete - verify admin/mod access
+      if (isTokenAuth) {
+        if (!hasRoleLevel(auth.user!.role, 'moderator')) {
+          return new Response(
+            JSON.stringify({ error: 'Insufficient permissions for mod_delete' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        userRole = auth.user!.role
+      } else {
+        const adminVerification = await verifyAdminAccess(supabase, user_id)
+        if (!adminVerification.valid) {
+          return new Response(
+            JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        userRole = adminVerification.role
       }
-      userRole = adminVerification.role
     } else {
-      userRole = await getUserRole(supabase, user_id)
+      userRole = isTokenAuth ? auth.user!.role : await getUserRole(supabase, user_id)
     }
 
     // Check user restrictions from commentum_users table

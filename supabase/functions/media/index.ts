@@ -5,10 +5,12 @@ import { resolveUserBadges } from '../shared/badges.ts'
 import { getConfig } from '../shared/configCache.ts'
 import { syncMediaFromDantotsu } from '../shared/dantotsuClient.ts'
 import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
+import { getAuthUser } from '../shared/authMiddleware.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-session-token, apikey',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
 }
 
 serve(async (req) => {
@@ -21,6 +23,9 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
+
+    const auth = await getAuthUser(req, { requireAuth: false })
+    const currentUserId = auth.valid && auth.user ? auth.user.uid : null
 
     const url = new URL(req.url)
     const media_id = url.searchParams.get('media_id')
@@ -260,6 +265,25 @@ serve(async (req) => {
         stripped.nameplate_theme = custom?.nameplate_theme || null
         stripped.linked_accounts = custom?.linked_accounts || null
       }
+
+      // User vote resolution
+      let userVoteScore = 0
+      let userVoteType: string | null = null
+      if (currentUserId && comment.user_votes) {
+        try {
+          const uv = typeof comment.user_votes === 'string' ? JSON.parse(comment.user_votes) : comment.user_votes
+          const userChoice = uv[currentUserId]
+          if (userChoice === 'upvote') {
+            userVoteScore = 1
+            userVoteType = 'upvote'
+          } else if (userChoice === 'downvote') {
+            userVoteScore = -1
+            userVoteType = 'downvote'
+          }
+        } catch (_) {}
+      }
+      stripped.user_vote = userVoteScore
+      stripped.user_vote_type = userVoteType
 
       return stripped
     })
