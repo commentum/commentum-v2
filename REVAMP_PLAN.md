@@ -478,7 +478,7 @@ Interacts with Discord guilds using ed25519-signed interactions.
 | `GET` | `/auth/me` | Bearer Token | None | Get authenticated user profile & roles |
 | `POST` | `/auth/refresh` | Bearer Token | None | Refresh 7-day JWT session |
 | **COMMENTS** | | | | |
-| `GET` | `/media` | Optional Token | Query Params | Fetch media comments (includes `user_vote`) |
+| `GET` | `/media` | Bearer Token | Query Params | Fetch media comments (requires login, includes `user_vote`) |
 | `POST` | `/comments` | Bearer Token | JSON `{ media_id, content, tag, parent_id }` | Post top-level comment or reply |
 | `PATCH` | `/comments/:id` | Bearer Token | JSON `{ content }` | Edit own comment |
 | `DELETE` | `/comments/:id` | Bearer Token | None | Delete comment (own or mod) |
@@ -623,7 +623,7 @@ Phase 1: Auth & Cryptographic JWT Subsystem
 
 Phase 2: Comments & Media Modernization
   ├── 2.1 Refactor supabase/functions/comments/index.ts to require Bearer JWT (strip user_info)
-  ├── 2.2 Refactor supabase/functions/media/index.ts to support optional JWT and inject user_vote
+  ├── 2.2 Refactor supabase/functions/media/index.ts to require Bearer JWT and inject user_vote
   ├── 2.3 Ensure Discord notifications receive verified user data
   └── 2.4 Verify cross-client media merge (media_id_map)
 

@@ -5,9 +5,12 @@ import { verifyClientToken, VerifiedUser } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 
+import { getAuthUser, hasRoleLevel } from '../shared/authMiddleware.ts'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-session-token, apikey',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
 const FIELDS_TO_STRIP = ['ip_address', 'user_agent']
@@ -34,27 +37,59 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, client_type, access_token, target_user_id, comment_id, reason, severity, duration, shadow_ban } = await req.json()
+    const auth = await getAuthUser(req, { requireAuth: false, supabase, checkDb: true })
+    const isTokenAuth = auth.valid && !!auth.user
 
-    // All moderation actions require client authentication
-    if (!client_type || !access_token) {
-      return new Response(
-        JSON.stringify({ error: 'client_type and access_token are required for moderation actions' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    const body = await req.json().catch(() => ({}))
+    const { action, client_type, access_token, target_user_id, comment_id, reason, severity, duration, shadow_ban } = body
+
+    let moderator_id: string
+    let verifiedUser: any
+    let moderatorRole: string
+
+    if (isTokenAuth) {
+      if (!hasRoleLevel(auth.user!.role, 'moderator')) {
+        return new Response(
+          JSON.stringify({ error: 'Insufficient permissions for moderation actions' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      moderator_id = auth.user!.uid
+      moderatorRole = auth.user!.role
+      verifiedUser = {
+        provider_user_id: auth.user!.uid,
+        username: auth.user!.username,
+        provider: auth.user!.provider,
+      }
+    } else {
+      // Legacy path: All moderation actions require client authentication
+      if (!client_type || !access_token) {
+        return new Response(
+          JSON.stringify({ error: 'client_type and access_token (or Bearer token) are required for moderation actions' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Verify the client token with the provider API
+      const providerUser = await verifyClientToken(client_type, access_token)
+      if (!providerUser) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid or expired access token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      moderator_id = providerUser.provider_user_id
+      const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+      if (!adminVerification.valid) {
+        return new Response(
+          JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      verifiedUser = providerUser
+      moderatorRole = adminVerification.role!
     }
-
-    // Verify the client token with the provider API
-    const verifiedUser = await verifyClientToken(client_type, access_token)
-    if (!verifiedUser) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid or expired access token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Use provider_user_id as the moderator_id
-    const moderator_id = verifiedUser.provider_user_id
 
     // Validate comment_id if provided (must be integer)
     if (comment_id && (!Number.isInteger(comment_id) || comment_id <= 0)) {
@@ -63,17 +98,6 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-
-    // Verify admin access with verified user_id
-    const adminVerification = await verifyAdminAccess(supabase, moderator_id)
-    if (!adminVerification.valid) {
-      return new Response(
-        JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const moderatorRole = adminVerification.role
 
     switch (action) {
       case 'pin_comment':

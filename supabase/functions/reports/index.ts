@@ -10,10 +10,12 @@ import {
   danReportComment,
   danDeleteComment,
 } from '../shared/dantotsuClient.ts'
+import { getAuthUser, hasRoleLevel } from '../shared/authMiddleware.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-session-token, apikey',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
 serve(async (req) => {
@@ -27,31 +29,72 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes, delete_comment, token, anilist_token } = await req.json()
+    const auth = await getAuthUser(req, { requireAuth: false, supabase, checkDb: true })
+    const isTokenAuth = auth.valid && !!auth.user
+
+    const body = await req.json().catch(() => ({}))
+    const { action, comment_id, reason, notes, client_type, access_token, resolution, review_notes, delete_comment, token, anilist_token } = body
+    let reporter_info = body.reporter_info
+
+    // Populate reporter from verified JWT if authenticated
+    if (isTokenAuth && !reporter_info) {
+      reporter_info = {
+        user_id: auth.user!.uid,
+        username: auth.user!.username,
+      }
+    }
 
     switch (action) {
       case 'create':
         return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes, token: anilist_token || token || access_token })
       
-      case 'resolve':
-        // Resolve requires admin authentication via client token
-        if (!client_type || !access_token) {
-          return new Response(
-            JSON.stringify({ error: 'client_type and access_token are required to resolve reports' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
+      case 'resolve': {
+        // Resolve requires moderator+ authentication
+        let moderator_id: string
+        let verifiedUser: any
+        let moderatorRole: string
 
-        // Verify the client token with the provider API
-        const verifiedUser = await verifyClientToken(client_type, access_token)
-        if (!verifiedUser) {
-          return new Response(
-            JSON.stringify({ error: 'Invalid or expired access token' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
+        if (isTokenAuth) {
+          if (!hasRoleLevel(auth.user!.role, 'moderator')) {
+            return new Response(
+              JSON.stringify({ error: 'Insufficient permissions to resolve reports' }),
+              { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          moderator_id = auth.user!.uid
+          verifiedUser = {
+            provider_user_id: auth.user!.uid,
+            username: auth.user!.username,
+            provider: auth.user!.provider,
+          }
+          moderatorRole = auth.user!.role
+        } else {
+          if (!client_type || !access_token) {
+            return new Response(
+              JSON.stringify({ error: 'client_type and access_token (or Bearer token) are required to resolve reports' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
 
-        const moderator_id = verifiedUser.provider_user_id
+          const providerUser = await verifyClientToken(client_type, access_token)
+          if (!providerUser) {
+            return new Response(
+              JSON.stringify({ error: 'Invalid or expired access token' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+
+          moderator_id = providerUser.provider_user_id
+          const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+          if (!adminVerification.valid) {
+            return new Response(
+              JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          verifiedUser = providerUser
+          moderatorRole = adminVerification.role!
+        }
 
         // Validate comment_id (must be integer)
         if (!Number.isInteger(comment_id) || comment_id <= 0) {
@@ -61,45 +104,58 @@ serve(async (req) => {
           )
         }
 
-        const adminVerification = await verifyAdminAccess(supabase, moderator_id)
-        if (!adminVerification.valid) {
-          return new Response(
-            JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-
-        return await handleResolveReport(supabase, { comment_id, reporter_info, moderator_id, resolution, review_notes, delete_comment, verifiedUser, moderatorRole: adminVerification.role })
+        return await handleResolveReport(supabase, { comment_id, reporter_info, moderator_id, resolution, review_notes, delete_comment, verifiedUser, moderatorRole })
+      }
       
-      case 'get_queue':
-        // Get queue requires admin authentication via client token
-        if (!client_type || !access_token) {
-          return new Response(
-            JSON.stringify({ error: 'client_type and access_token are required to view reports queue' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
+      case 'get_queue': {
+        let queueModeratorId: string
+        let queueVerifiedUser: any
+        let queueModeratorRole: string
+
+        if (isTokenAuth) {
+          if (!hasRoleLevel(auth.user!.role, 'moderator')) {
+            return new Response(
+              JSON.stringify({ error: 'Insufficient permissions to view reports queue' }),
+              { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          queueModeratorId = auth.user!.uid
+          queueVerifiedUser = {
+            provider_user_id: auth.user!.uid,
+            username: auth.user!.username,
+            provider: auth.user!.provider,
+          }
+          queueModeratorRole = auth.user!.role
+        } else {
+          if (!client_type || !access_token) {
+            return new Response(
+              JSON.stringify({ error: 'client_type and access_token (or Bearer token) are required to view reports queue' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+
+          const providerUser = await verifyClientToken(client_type, access_token)
+          if (!providerUser) {
+            return new Response(
+              JSON.stringify({ error: 'Invalid or expired access token' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+
+          queueModeratorId = providerUser.provider_user_id
+          const queueAdminVerification = await verifyAdminAccess(supabase, queueModeratorId)
+          if (!queueAdminVerification.valid) {
+            return new Response(
+              JSON.stringify({ error: queueAdminVerification.reason || 'Insufficient permissions' }),
+              { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            )
+          }
+          queueVerifiedUser = providerUser
+          queueModeratorRole = queueAdminVerification.role!
         }
 
-        // Verify the client token with the provider API
-        const queueVerifiedUser = await verifyClientToken(client_type, access_token)
-        if (!queueVerifiedUser) {
-          return new Response(
-            JSON.stringify({ error: 'Invalid or expired access token' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-
-        const queueModeratorId = queueVerifiedUser.provider_user_id
-
-        const queueAdminVerification = await verifyAdminAccess(supabase, queueModeratorId)
-        if (!queueAdminVerification.valid) {
-          return new Response(
-            JSON.stringify({ error: queueAdminVerification.reason || 'Insufficient permissions' }),
-            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-
-        return await handleGetReportsQueue(supabase, { queueModeratorId, verifiedUser: queueVerifiedUser, moderatorRole: queueAdminVerification.role })
+        return await handleGetReportsQueue(supabase, { queueModeratorId, verifiedUser: queueVerifiedUser, moderatorRole: queueModeratorRole })
+      }
       
       default:
         return new Response(

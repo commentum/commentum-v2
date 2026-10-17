@@ -8,9 +8,12 @@ import {
   danVoteComment,
 } from '../shared/dantotsuClient.ts'
 
+import { getAuthUser } from '../shared/authMiddleware.ts'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-session-token, apikey',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
 serve(async (req) => {
@@ -24,21 +27,41 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { comment_id, user_info, vote_type, token, anilist_token } = await req.json()
+    const auth = await getAuthUser(req, { requireAuth: false, supabase, checkDb: true })
+    const isTokenAuth = auth.valid && !!auth.user
 
-    // Validate required fields
-    if (!comment_id || !user_info || !vote_type) {
-      return new Response(
-        JSON.stringify({ error: 'comment_id, user_info, and vote_type are required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    const body = await req.json().catch(() => ({}))
+    const comment_id = body.comment_id
+    let rawVoteType = body.vote_type !== undefined ? body.vote_type : body.type
+    const token = body.token
+    const anilist_token = body.anilist_token
+    let user_info = body.user_info
+
+    // Map numeric vote types to strings: 1 -> upvote, -1 -> downvote, 0 -> remove
+    let vote_type: string
+    if (rawVoteType === 1 || rawVoteType === '1' || rawVoteType === 'upvote') {
+      vote_type = 'upvote'
+    } else if (rawVoteType === -1 || rawVoteType === '-1' || rawVoteType === 'downvote') {
+      vote_type = 'downvote'
+    } else if (rawVoteType === 0 || rawVoteType === '0' || rawVoteType === 'remove' || rawVoteType === 'none') {
+      vote_type = 'remove'
+    } else {
+      vote_type = String(rawVoteType || '')
     }
 
-    // Extract user_id from user_info
-    const user_id = user_info?.user_id
-    if (!user_id) {
+    // Extract user_id: prioritize verified token
+    let user_id = isTokenAuth ? auth.user!.uid : user_info?.user_id
+    if (isTokenAuth && !user_info) {
+      user_info = {
+        user_id: auth.user!.uid,
+        username: auth.user!.username,
+      }
+    }
+
+    // Validate required fields
+    if (!comment_id || !user_id || !vote_type) {
       return new Response(
-        JSON.stringify({ error: 'user_info.user_id is required' }),
+        JSON.stringify({ error: 'comment_id, vote_type, and user authentication are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -54,7 +77,7 @@ serve(async (req) => {
     // Validate vote_type
     if (!['upvote', 'downvote', 'remove'].includes(vote_type)) {
       return new Response(
-        JSON.stringify({ error: 'vote_type must be upvote, downvote, or remove' }),
+        JSON.stringify({ error: 'vote_type must be upvote, downvote, or remove (or 1, -1, 0)' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

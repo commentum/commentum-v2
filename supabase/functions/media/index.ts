@@ -24,8 +24,14 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const auth = await getAuthUser(req, { requireAuth: false })
-    const currentUserId = auth.valid && auth.user ? auth.user.uid : null
+    const auth = await getAuthUser(req, { requireAuth: true, supabase, checkDb: true })
+    if (!auth.valid || !auth.user) {
+      return new Response(
+        JSON.stringify({ error: auth.error || 'Authentication required to view comments. Please log in.' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    const currentUserId = auth.user.uid
 
     const url = new URL(req.url)
     const media_id = url.searchParams.get('media_id')
