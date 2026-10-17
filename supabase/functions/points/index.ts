@@ -4,9 +4,12 @@ import { getUserRole } from '../shared/auth.ts'
 import { resolveUserBadges } from '../shared/badges.ts'
 import { getConfig } from '../shared/configCache.ts'
 
+import { getAuthUser } from '../shared/authMiddleware.ts'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-session-token, apikey',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
 serve(async (req) => {
@@ -34,12 +37,23 @@ serve(async (req) => {
       )
     }
 
-    const body = await req.json()
+    const auth = await getAuthUser(req, { requireAuth: false })
+    const isTokenAuth = auth.valid && !!auth.user
+
+    const body = await req.json().catch(() => ({}))
     const { action, user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, user_ids, page, limit } = body
 
     switch (action) {
       case 'get_user_points':
-        return await handleGetUserPoints(supabase, { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type })
+        return await handleGetUserPoints(supabase, {
+          user_info,
+          client_type,
+          target_user_id,
+          target_client_type,
+          requester_user_id: isTokenAuth ? auth.user!.uid : requester_user_id,
+          requester_client_type: isTokenAuth ? auth.user!.provider : requester_client_type,
+          authUser: isTokenAuth ? auth.user : null
+        })
 
       case 'get_leaderboard':
         return await handleGetLeaderboard(supabase, { client_type: target_client_type, page, limit })
@@ -124,7 +138,7 @@ function resolveBonusTag(role?: string, roleBonus?: number, isInfinite?: boolean
  * Otherwise, negative breakdown is stripped from the response.
  */
 async function handleGetUserPoints(supabase: any, params: any) {
-  const { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type } = params
+  const { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, authUser } = params
 
   let query_client_type: string
   let query_user_id: string
@@ -133,13 +147,17 @@ async function handleGetUserPoints(supabase: any, params: any) {
   if (target_user_id && target_client_type) {
     query_client_type = target_client_type
     query_user_id = target_user_id
+  } else if (authUser) {
+    // If authenticated via Bearer token, look up the authenticated user
+    query_client_type = authUser.provider
+    query_user_id = authUser.uid
   } else if (user_info?.user_id && client_type) {
-    // Otherwise, look up the requesting user
+    // Otherwise, look up the requesting user via legacy user_info
     query_client_type = client_type
     query_user_id = user_info.user_id
   } else {
     return new Response(
-      JSON.stringify({ error: 'Provide either (user_info + client_type) or (target_user_id + target_client_type)' }),
+      JSON.stringify({ error: 'Provide Bearer token or (user_info + client_type) or (target_user_id + target_client_type)' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }

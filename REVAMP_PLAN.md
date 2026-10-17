@@ -612,37 +612,45 @@ class CommentumService extends GetxController {
 
 ---
 
-## 16. Step-by-Step Implementation Roadmap
+## 16. Step-by-Step Implementation Roadmap & Live Progress
+
+### Status Summary
+- **Phase 1 (Auth & JWT Subsystem):** ✅ Completed (`df147f6`)
+- **Phase 2 (Comments & Media Modernization):** ✅ Completed (`d36eaf7`)
+- **Phase 3 (Votes, Reports & Moderation):** ✅ Completed (`6c75346`)
+- **Phase 4 (Users, Customizations & Points):** ✅ Completed
+- **Phase 5 (Notifications & Announcements):** ⏳ Pending
+- **Phase 6 (Client Integration - AnymeX):** ⏳ Pending
 
 ```
-Phase 1: Auth & Cryptographic JWT Subsystem
-  ├── 1.1 Create supabase/functions/shared/jwt.ts (HMAC-SHA256 signer, verifier, claims extractor)
-  ├── 1.2 Implement POST /auth/login with multi-provider token verification (AniList, MAL, Simkl)
-  ├── 1.3 Implement GET /auth/me and POST /auth/refresh
-  └── 1.4 Create reusable getAuthUser(req) middleware in supabase/functions/shared/authMiddleware.ts
+[x] Phase 1: Auth & Cryptographic JWT Subsystem (Commit df147f6)
+    ├── [x] 1.1 Create supabase/functions/shared/jwt.ts (HMAC-SHA256 signer, verifier, claims extractor)
+    ├── [x] 1.2 Implement POST /auth/login with multi-provider token verification (AniList, MAL, Simkl)
+    ├── [x] 1.3 Implement GET /auth/me and POST /auth/refresh
+    └── [x] 1.4 Create reusable getAuthUser(req) middleware in supabase/functions/shared/authMiddleware.ts
 
-Phase 2: Comments & Media Modernization
-  ├── 2.1 Refactor supabase/functions/comments/index.ts to require Bearer JWT (strip user_info)
-  ├── 2.2 Refactor supabase/functions/media/index.ts to require Bearer JWT and inject user_vote
-  ├── 2.3 Ensure Discord notifications receive verified user data
-  └── 2.4 Verify cross-client media merge (media_id_map)
+[x] Phase 2: Comments & Media Modernization (Commit d36eaf7)
+    ├── [x] 2.1 Refactor supabase/functions/comments/index.ts to require Bearer JWT (strip user_info)
+    ├── [x] 2.2 Refactor supabase/functions/media/index.ts to require Bearer JWT and inject user_vote
+    ├── [x] 2.3 Ensure Discord notifications receive verified user data
+    └── [x] 2.4 Verify cross-client media merge (media_id_map)
 
-Phase 3: Votes, Reports & Moderation
-  ├── 3.1 Refactor supabase/functions/votes/index.ts to use verified user from JWT
-  ├── 3.2 Refactor supabase/functions/reports/index.ts (create report uses verified user, resolve uses JWT mod role)
-  └── 3.3 Refactor supabase/functions/moderation/index.ts to verify role directly from JWT
+[x] Phase 3: Votes, Reports & Moderation (Commit 6c75346)
+    ├── [x] 3.1 Refactor supabase/functions/votes/index.ts to use verified user from JWT
+    ├── [x] 3.2 Refactor supabase/functions/reports/index.ts (create report uses verified user, resolve uses JWT mod role)
+    └── [x] 3.3 Refactor supabase/functions/moderation/index.ts to verify role directly from JWT
 
-Phase 4: Users, Customizations & Points
-  ├── 4.1 Update supabase/functions/users/index.ts (profile customization & linking via JWT)
-  ├── 4.2 Update supabase/functions/points/index.ts to calculate points on verified actions
-  └── 4.3 Verify optimizations in supabase/functions/customizations/index.ts
+[x] Phase 4: Users, Customizations & Points
+    ├── [x] 4.1 Update supabase/functions/users/index.ts (profile customization & linking via JWT)
+    ├── [x] 4.2 Update supabase/functions/points/index.ts to calculate points on verified actions
+    └── [x] 4.3 Verify optimizations in supabase/functions/customizations/index.ts
 
-Phase 5: Push Notifications & Announcements
-  ├── 5.1 Refactor supabase/functions/notifications/index.ts to bind FCM tokens to verified JWT users
-  └── 5.2 Validate announcements CRUD and public listing
+[ ] Phase 5: Push Notifications & Announcements
+    ├── [ ] 5.1 Refactor supabase/functions/notifications/index.ts to bind FCM tokens to verified JWT users
+    └── [ ] 5.2 Validate announcements CRUD and public listing
 
-Phase 6: Client Integration (AnymeX) & E2E Validation
-  ├── 6.1 Implement ensureAuthenticated() & token caching in AnymeX CommentumService
-  ├── 6.2 Strip user_info parameters from comment, vote, and report calls
-  └── 6.3 Execute full suite test (Post comment -> Discord alert -> Push notification -> Points update)
+[ ] Phase 6: Client Integration (AnymeX) & E2E Validation
+    ├── [ ] 6.1 Implement ensureAuthenticated() & token caching in AnymeX CommentumService
+    ├── [ ] 6.2 Strip user_info parameters from comment, vote, and report calls
+    └── [ ] 6.3 Execute full suite test (Post comment -> Discord alert -> Push notification -> Points update)
 ```

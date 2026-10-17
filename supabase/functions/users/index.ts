@@ -5,9 +5,12 @@ import { verifyClientToken } from '../shared/clientAuth.ts'
 import { getConfig } from '../shared/configCache.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 
+import { getAuthUser, hasRoleLevel } from '../shared/authMiddleware.ts'
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-session-token, apikey',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 }
 
 serve(async (req) => {
@@ -21,56 +24,78 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
+    const body = await req.json().catch(() => ({}))
+    const auth = await getAuthUser(req, { requireAuth: false, supabase, checkDb: true })
+    const isTokenAuth = auth.valid && !!auth.user
+
     const { 
-      action, client_type, access_token, target_user_id, target_client_type, 
+      action, access_token, target_user_id, target_client_type, 
       reason, notes, duration, role, new_role, banned, muted, shadow_banned, shadow_ban, 
       page, limit, username, delete_comment_id, delete_all_comments,
       avatar_decoration, banner_url, banner_theme, nameplate_theme, profile_effect_url,
       target_access_token, service_to_unlink, user_ids, customization_id
-    } = await req.json()
+    } = body
+    let client_type = body.client_type || (isTokenAuth ? auth.user!.provider : null)
 
-    // All user management actions require token authentication
-    if (!client_type || !access_token) {
-      return new Response(
-        JSON.stringify({ error: 'client_type and access_token are required for user management actions' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Verify the client token with the provider API
-    const verifiedUser = await verifyClientToken(client_type, access_token)
-    if (!verifiedUser) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid or expired access token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const moderator_id = verifiedUser.provider_user_id
-
-    // These actions are available to all authenticated users
-    // get_user_history: anyone can view other users' public comments
-    // get_role: anyone can check their own role
-    // update_customizations / unlock_customization / link_account / unlink_account: personal profile customization
     const publicActions = [
       'get_user_history', 'get_role', 'search_users_public', 'get_user_info',
       'update_customizations', 'unlock_customization', 'link_account', 'unlink_account', 'get_profile',
       'get_batch_customizations'
     ]
 
+    let moderator_id: string
+    let verifiedUser: any
     let moderatorRole: string
-    if (publicActions.includes(action)) {
-      moderatorRole = await getUserRole(supabase, moderator_id)
+
+    if (isTokenAuth) {
+      moderator_id = auth.user!.uid
+      moderatorRole = auth.user!.role
+      verifiedUser = {
+        provider_user_id: auth.user!.uid,
+        username: auth.user!.username,
+        provider: auth.user!.provider,
+      }
+
+      if (!publicActions.includes(action)) {
+        if (!hasRoleLevel(moderatorRole, 'moderator')) {
+          return new Response(
+            JSON.stringify({ error: 'Insufficient permissions for moderation user action' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
     } else {
-      // Moderation actions require admin/moderator access
-      const adminVerification = await verifyAdminAccess(supabase, moderator_id)
-      if (!adminVerification.valid) {
+      // Legacy path: require client_type and access_token
+      if (!client_type || !access_token) {
         return new Response(
-          JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
+          JSON.stringify({ error: 'client_type and access_token (or Bearer token) are required for user management actions' }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      moderatorRole = adminVerification.role
+
+      const providerUser = await verifyClientToken(client_type, access_token)
+      if (!providerUser) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid or expired access token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      moderator_id = providerUser.provider_user_id
+      verifiedUser = providerUser
+
+      if (publicActions.includes(action)) {
+        moderatorRole = await getUserRole(supabase, moderator_id)
+      } else {
+        const adminVerification = await verifyAdminAccess(supabase, moderator_id)
+        if (!adminVerification.valid) {
+          return new Response(
+            JSON.stringify({ error: adminVerification.reason || 'Insufficient permissions' }),
+            { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+        moderatorRole = adminVerification.role!
+      }
     }
 
     switch (action) {
