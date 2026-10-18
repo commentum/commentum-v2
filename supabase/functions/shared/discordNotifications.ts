@@ -1153,7 +1153,7 @@ function buildDeepLinkUrl(data: DiscordNotificationData): string {
   const mediaType  = data.comment?.media_type  || data.media?.type        || 'anime'
   const mediaId    = data.comment?.media_id    || data.media?.id          || ''
 
-  const base = 'http://anymex.duckdns.org:8081/open'
+  const base = 'https://anymex.duckdns.org:8081/open'
   return `${base}?source=${clientType}&type=${mediaType}&id=${mediaId}`
 }
 
