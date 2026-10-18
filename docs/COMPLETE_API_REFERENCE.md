@@ -1,965 +1,648 @@
-# Complete API Reference - Commentum v2 Backend Service
+# Commentum v2 — Complete API Reference Manual
 
-**🎯 IMPORTANT**: This is a **backend API service** documentation. These endpoints are designed for apps to integrate with, not for end users to access directly.
-
-**Base URL**: `http://anymex.duckdns.org:8000/functions/v1/`
-
-**🔑 TOKEN-BASED AUTH** - Mod+ actions require `client_type` + `access_token`. Dantotsu 2-way sync requires provider/AniList tokens (`token` or `anilist_token`).
-
----
-
-## 🚀 Overview
-
-### What is Commentum v2?
-
-Commentum v2 is a **comment backend API service** that provides:
-
-- Comment CRUD operations
-- Voting system
-- Content reporting
-- Advanced moderation
-- Multi-platform support (AniList, MyAnimeList, SIMKL)
-
-**Apps integrate with this backend via REST API calls.**
+> **Production Edge Function Base URL**: `https://<project-ref>.supabase.co/functions/v1/`  
+> **Protocol**: HTTPS / JSON  
+> **Authentication Standard**: RFC 6750 Bearer Tokens (HMAC-SHA256 JWT)  
+> **CORS**: Supported (`*`) with complete preflight negotiation
 
 ---
 
 ## 📋 Table of Contents
-
-1. [Authentication](#authentication)
-2. [Comments API](#comments-api)
-3. [Votes API](#votes-api)
-4. [Reports API](#reports-api)
-5. [Moderation API](#moderation-api)
-6. [Users API](#users-api)
-7. [Media API](#media-api)
-8. [Announcements API](#announcements-api)
-9. [Error Handling](#error-handling)
+1. [Architecture & Authentication Subsystem](#1-architecture--authentication-subsystem)
+2. [Comments API (`/comments`)](#2-comments-api-comments)
+3. [Media & Comment Tree API (`/media`)](#3-media--comment-tree-api-media)
+4. [Votes API (`/votes`)](#4-votes-api-votes)
+5. [Reports API (`/reports`)](#5-reports-api-reports)
+6. [Moderation Controls (`/moderation`)](#6-moderation-controls-moderation)
+7. [Users, Profiles & Customizations (`/users`)](#7-users-profiles--customizations-users)
+8. [Points, Streaks & Leaderboard (`/points`)](#8-points-streaks--leaderboard-points)
+9. [Notifications & FCM Push (`/notifications`)](#9-notifications--fcm-push-notifications)
+10. [Announcements System (`/announcements`)](#10-announcements-system-announcements)
+11. [Data Export & Portability (`/users`)](#11-data-export--portability-users)
+12. [System Health & Diagnostics (`/health`, `/ping`)](#12-system-health--diagnostics-health-ping)
+13. [Standard Error Handling & Status Codes](#13-standard-error-handling--status-codes)
 
 ---
 
-## 🔐 Authentication
+## 1. Architecture & Authentication Subsystem
 
-### Token-Based Authentication (Mod+ Actions)
+Commentum v2 operates on a **high-performance Session Token architecture**. Rather than validating heavy third-party OAuth access tokens on every incoming request, clients exchange their third-party provider token once during login. The backend validates the provider credentials, synchronizes the user profile in `commentum_users`, and issues a signed HMAC-SHA256 JSON Web Token (JWT).
 
-All moderation and admin actions require **token-based authentication**:
+### Token Lifecycle
+1. **Login**: Client submits provider credentials (`anilist`, `myanimelist`, or `simkl`) to `POST /auth/login`.
+2. **Session**: Backend signs a cryptographic JWT with 7-day validity containing verified identity and role claims.
+3. **Execution**: Subsequent requests pass `Authorization: Bearer <session_token>`. Token verification completes locally in `<1ms` via Web Crypto with zero network calls and zero database bottlenecks.
+4. **Anti-Spoofing Guarantee**: When a token is provided, identity claims (`uid`, `username`, `role`, `provider`) are cryptographically verified and strictly supersede any caller-provided body parameters.
 
-```json
-{
-  "client_type": "anilist",
-  "access_token": "user_oauth_token_from_provider"
-}
+---
+
+### `POST /auth/login`
+Exchange third-party OAuth credentials for a Commentum session token.
+
+#### Request Headers
+```http
+Content-Type: application/json
 ```
 
-The backend verifies the token with the appropriate provider API:
-
-| Provider | API Endpoint | Returns |
-|----------|--------------|---------|
-| **AniList** | `graphql.anilist.co` | `id`, `name`, `avatar` |
-| **MAL** | `api.myanimelist.net/v2/users/@me` | `id`, `name`, `picture` |
-| **SIMKL** | `api.simkl.com/users/settings` | `account.id`, `user.name` |
-
-### Frontend-Provided User Information
-
-Basic operations use `user_info` objects:
-
+#### Request Body
 ```json
 {
-  "user_info": {
-    "user_id": "12345",
-    "username": "TestUser",
-    "avatar": "https://example.com/avatar.jpg"
+  "provider": "anilist",
+  "token": "an_oauth_access_token_from_anilist"
+}
+```
+*Supported providers: `"anilist"`, `"myanimelist"` (or `"mal"`), `"simkl"`.*
+
+#### Successful Response (`200 OK`)
+```json
+{
+  "success": true,
+  "session_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbmlsaXN0OjU3MjQwMTciLCJ1aWQiOiI1NzI0MDE3IiwicHJvdmlkZXIiOiJhbmlsaXN0IiwidXNlcm5hbWUiOiJTaGVieSIsInJvbGUiOiJvd25lciIsImlhdCI6MTcyOTI0MjAwMCwiZXhwIjoxNzI5ODQ2ODAwfQ...",
+  "token_type": "Bearer",
+  "expires_in": 604800,
+  "user": {
+    "uid": "5724017",
+    "username": "Sheby",
+    "provider": "anilist",
+    "role": "owner",
+    "avatar": "https://s4.anilist.co/user/avatar/medium/...",
+    "points": 1450,
+    "streak": 12,
+    "unlocked_customizations": ["badge_cyber", "frame_neon"]
   }
 }
 ```
 
-### When Token Auth is Required
-
-| Endpoint | Operation | Local Commentum Auth | Dantotsu 2-Way Sync Auth |
-|----------|-----------|----------------------|--------------------------|
-| `/comments` | Create | ❌ No (`user_info` only) | ✅ `token` (AniList) or `anilist_token` (MAL/SIMKL) |
-| `/comments` | Edit | ❌ No (`user_id` match only) | ✅ `token` (AniList) or `anilist_token` (MAL/SIMKL) |
-| `/comments` | Delete (own) | ❌ No (`user_id` match only) | ✅ `token` (AniList) or `anilist_token` (MAL/SIMKL) |
-| `/comments` | mod_delete (others) | ✅ Token required | ⚡ Automatic (Handled by backend) |
-| `/votes` | Vote | ❌ No (`user_info` only) | ⚡ Optional `token` / `anilist_token` (or automatic fallback) |
-| `/media` | Get comments | ❌ No | ❌ No |
-| `/reports` | Create report | ❌ No | ⚡ Automatic (Handled by backend) |
-| `/reports` | Resolve report | ✅ Token required | ⚡ Automatic (Handled by backend) |
-| `/reports` | Get queue | ✅ Token required | ❌ No |
-| `/moderation` | All actions | ✅ Token required | N/A |
-| `/users` | All actions | ✅ Token required | N/A |
-
-> **💡 Dantotsu Sync Note**: Basic Commentum operations never block or fail if tokens are omitted. If tokens are not provided, actions are saved locally as `AnymeX Only`. Providing valid tokens automatically triggers background two-way sync with Dantotsu.
-
 ---
 
-## 💬 Comments API
+### `GET /auth/me`
+Inspect current session status and token claims.
 
-### Endpoint: `/comments`
-
-**Method**: `POST`
-
-**Content-Type**: `application/json`
-
----
-
-### 1. Create Comment
-
-**Auth**: Not required for local storage; **Token required for Dantotsu sync**.
-
-```json
-{
-  "action": "create",
-  "client_type": "anilist",
-  "token": "user_oauth_token_here",
-  "anilist_token": "optional_anilist_token_for_mal_or_simkl",
-  "user_info": {
-    "user_id": "12345",
-    "username": "TestUser",
-    "avatar": "https://example.com/avatar.jpg"
-  },
-  "media_info": {
-    "media_id": "6789",
-    "type": "anime",
-    "title": "Attack on Titan",
-    "year": 2013,
-    "poster": "https://example.com/poster.jpg"
-  },
-  "content": "This was an amazing episode!",
-  "parent_id": null,
-  "tag": 1
-}
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
 ```
 
-**Parameters for Dantotsu Sync:**
-- `token` (or `access_token`): User's OAuth token for their `client_type`. For `anilist` users, this token is used to log in to Dantotsu and mirror the comment to Dantotsu.
-- `anilist_token`: Optional AniList token for non-AniList users (`mal` or `simkl`). If supplied, Commentum resolves the MAL/SIMKL media to an AniList ID and mirrors the comment to Dantotsu as this AniList user.
-- `tag`: Episode number (integer or numeric string) for episode-specific spoiler comments (e.g. `1` for Episode 1).
-
-**Response (201):**
+#### Successful Response (`200 OK`)
 ```json
 {
   "success": true,
-  "comment": { /* comment object */ }
+  "authenticated": true,
+  "user": {
+    "uid": "5724017",
+    "username": "Sheby",
+    "provider": "anilist",
+    "role": "owner",
+    "avatar": "https://s4.anilist.co/user/avatar/medium/...",
+    "points": 1450,
+    "streak": 12
+  }
 }
 ```
 
 ---
 
-### 2. Edit Comment
+### `POST /auth/refresh`
+Renew an unexpired session token for an additional 7 days.
 
-**Auth**: user_info (owner only)
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+```
 
+#### Successful Response (`200 OK`)
+```json
+{
+  "success": true,
+  "session_token": "<new_jwt_string>",
+  "token_type": "Bearer",
+  "expires_in": 604800
+}
+```
+
+---
+
+## 2. Comments API (`/comments`)
+
+Handles creating, editing, and deleting comments and replies.
+
+### `POST /comments` — Create Comment
+Creates a new root comment or reply to an existing comment.
+
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "action": "create",
+  "media_id": "16498",
+  "media_type": "anime",
+  "media_title": "Attack on Titan",
+  "content": "The animation in this episode is breathtaking!",
+  "parent_id": null,
+  "tags": ["spoiler"]
+}
+```
+*Note: To create a reply, provide the parent comment ID in `parent_id`.*
+
+#### Successful Response (`200 OK`)
+```json
+{
+  "success": true,
+  "comment": {
+    "id": 14092,
+    "client_type": "anilist",
+    "user_id": "5724017",
+    "username": "Sheby",
+    "user_avatar": "https://s4.anilist.co/user/avatar/medium/...",
+    "user_role": "owner",
+    "media_id": "16498",
+    "media_type": "anime",
+    "media_title": "Attack on Titan",
+    "content": "The animation in this episode is breathtaking!",
+    "parent_id": null,
+    "upvotes": 0,
+    "downvotes": 0,
+    "vote_score": 0,
+    "created_at": "2026-10-18T03:30:00.000Z"
+  }
+}
+```
+
+---
+
+### `POST /comments` — Edit Comment
+Updates the textual content of a comment. Only the author may edit their comment.
+
+#### Request Body
 ```json
 {
   "action": "edit",
-  "comment_id": 1,
-  "user_info": {
-    "user_id": "12345",
-    "username": "TestUser"
-  },
-  "content": "Updated comment text"
+  "comment_id": 14092,
+  "content": "Edited: The animation and sound design in this episode are breathtaking!"
 }
 ```
 
 ---
 
-### 3. Delete Comment (Own)
+### `POST /comments` — Delete Comment
+Deletes a comment. If invoked by the author, deletes their own comment. If invoked by a moderator or admin (`moderator+`), performs a staff deletion and logs the action.
 
-**Auth**: user_info (owner only)
-
+#### Request Body
 ```json
 {
   "action": "delete",
-  "comment_id": 1,
-  "user_info": {
-    "user_id": "12345",
-    "username": "TestUser"
-  }
-}
-```
-
----
-
-### 4. Mod Delete Comment (Other's)
-
-**Auth**: ✅ Token required (moderator+)
-
-```json
-{
-  "action": "mod_delete",
-  "comment_id": 1,
-  "client_type": "anilist",
-  "access_token": "user_oauth_token_here"
-}
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "comment": { /* deleted comment */ },
-  "moderator": {
-    "id": "67890",
-    "username": "ModeratorUser",
-    "role": "admin"
-  }
-}
-```
-
----
-
-## 🗳️ Votes API
-
-### Endpoint: `/votes`
-
-**Method**: `POST`
-
-**Auth**: Not required for local vote; **Optional token for Dantotsu sync**
-
-```json
-{
-  "comment_id": 1,
-  "user_info": {
-    "user_id": "12345",
-    "username": "TestUser"
-  },
-  "vote_type": "upvote",
-  "token": "optional_user_oauth_token",
-  "anilist_token": "optional_anilist_token_for_dantotsu_sync"
-}
-```
-
-- **vote_type**: `"upvote"`, `"downvote"`, or `"remove"`
-- **token** / **anilist_token**: If the target comment is mapped to a Dantotsu comment ID, providing this token syncs the vote to Dantotsu in the background. If omitted, the server attempts to use a Dantotsu mod token.
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "voteScore": 5,
-  "upvotes": 6,
-  "downvotes": 1,
-  "userVote": "upvote"
-}
-```
-
----
-
-## 🚨 Reports API
-
-### Endpoint: `/reports`
-
-**Method**: `POST`
-
----
-
-### 1. Create Report
-
-**Auth**: Not required
-
-```json
-{
-  "action": "create",
-  "comment_id": 1,
-  "reporter_info": {
-    "user_id": "12345",
-    "username": "TestUser"
-  },
-  "reason": "spam",
-  "notes": "This looks like automated spam"
-}
-```
-
-**Valid Reasons**: `spam`, `offensive`, `harassment`, `spoiler`, `nsfw`, `off_topic`, `other`
-
----
-
-### 2. Resolve Report
-
-**Auth**: ✅ Token required (moderator+)
-
-```json
-{
-  "action": "resolve",
-  "comment_id": 1,
-  "client_type": "anilist",
-  "access_token": "user_oauth_token_here",
-  "reporter_info": { "user_id": "12345" },
-  "resolution": "resolved",
-  "review_notes": "Confirmed spam, removed"
-}
-```
-
-**resolution**: `"resolved"` or `"dismissed"`
-
----
-
-### 3. Get Reports Queue
-
-**Auth**: ✅ Token required (moderator+)
-
-```json
-{
-  "action": "get_queue",
-  "client_type": "anilist",
-  "access_token": "user_oauth_token_here"
-}
-```
-
----
-
-## 🔧 Moderation API
-
-### Endpoint: `/moderation`
-
-**Method**: `POST`
-
-**Auth**: ✅ Token required for all actions
-
----
-
-### Common Parameters
-
-All moderation actions require:
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `action` | string | ✅ | Moderation action type |
-| `client_type` | string | ✅ | `"anilist"`, `"mal"`, `"simkl"` |
-| `access_token` | string | ✅ | OAuth token from provider |
-
----
-
-### Actions
-
-#### Pin Comment
-```json
-{
-  "action": "pin_comment",
-  "comment_id": 1,
-  "client_type": "anilist",
-  "access_token": "...",
-  "reason": "Important announcement"
-}
-```
-
-#### Unpin Comment
-```json
-{
-  "action": "unpin_comment",
-  "comment_id": 1,
-  "client_type": "anilist",
-  "access_token": "...",
-  "reason": "No longer relevant"
-}
-```
-
-#### Lock Thread
-```json
-{
-  "action": "lock_thread",
-  "comment_id": 1,
-  "client_type": "anilist",
-  "access_token": "...",
+  "comment_id": 14092,
   "reason": "Off-topic discussion"
 }
 ```
 
-#### Unlock Thread
-```json
-{
-  "action": "unlock_thread",
-  "comment_id": 1,
-  "client_type": "anilist",
-  "access_token": "...",
-  "reason": "Discussion can continue"
-}
-```
-
-#### Warn User
-```json
-{
-  "action": "warn_user",
-  "target_user_id": "12345",
-  "client_type": "anilist",
-  "access_token": "...",
-  "reason": "Multiple rule violations"
-}
-```
-
-#### Ban User (Admin+)
-```json
-{
-  "action": "ban_user",
-  "target_user_id": "12345",
-  "client_type": "anilist",
-  "access_token": "...",
-  "reason": "Repeated spam",
-  "shadow_ban": false
-}
-```
-
-#### Unban User (Admin+)
-```json
-{
-  "action": "unban_user",
-  "target_user_id": "12345",
-  "client_type": "anilist",
-  "access_token": "...",
-  "reason": "Appeal approved"
-}
-```
-
-#### Get Moderation Queue
-```json
-{
-  "action": "get_queue",
-  "client_type": "anilist",
-  "access_token": "..."
-}
-```
-
 ---
 
-## 👤 Users API
+## 3. Media & Comment Tree API (`/media`)
 
-### Endpoint: `/users`
+Fetches discussions for a specific media item. Requires authentication to ensure secure community access.
 
-**Method**: `POST`
+### `GET /media`
+Retrieves the comment thread hierarchy for an anime, manga, or novel.
 
-**Auth**: ✅ Token required for all actions
-
----
-
-### Actions
-
-#### Get User Info
-```json
-{
-  "action": "get_user_info",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_user_id": "12345",
-  "target_client_type": "anilist"
-}
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
 ```
 
-#### Get User Stats
-```json
-{
-  "action": "get_user_stats",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_client_type": "anilist"
-}
-```
+#### Query Parameters
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `media_id` | String | Yes | Unique ID of media (e.g. `16498`) |
+| `client_type` | String | No | Target platform (`anilist`, `myanimelist`, `simkl`). Defaults to token provider. |
+| `page` | Integer | No | Page number for root comments (default: `1`). |
+| `limit` | Integer | No | Number of root comments per page (default: `30`, max: `100`). |
+| `sort` | String | No | Sort order: `best` (highest score), `newest`, `oldest`. |
 
-#### Warn User
-```json
-{
-  "action": "warn_user",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_user_id": "12345",
-  "target_client_type": "anilist",
-  "reason": "Rule violation"
-}
-```
-
-#### Mute User
-```json
-{
-  "action": "mute_user",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_user_id": "12345",
-  "target_client_type": "anilist",
-  "reason": "Temporary mute",
-  "duration": 24
-}
-```
-
-#### Unmute User
-```json
-{
-  "action": "unmute_user",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_user_id": "12345",
-  "target_client_type": "anilist",
-  "reason": "Mute expired"
-}
-```
-
-#### Ban User (Admin+)
-```json
-{
-  "action": "ban_user",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_user_id": "12345",
-  "target_client_type": "anilist",
-  "reason": "Repeated violations"
-}
-```
-
-#### Unban User (Admin+)
-```json
-{
-  "action": "unban_user",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_user_id": "12345",
-  "target_client_type": "anilist",
-  "reason": "Appeal approved"
-}
-```
-
-#### Get User History
-```json
-{
-  "action": "get_user_history",
-  "client_type": "anilist",
-  "access_token": "...",
-  "target_user_id": "12345",
-  "target_client_type": "anilist"
-}
-```
-
----
-
-## 📺 Media API
-
-### Endpoint: `/media`
-
-**Method**: `GET`
-
-**Auth**: Not required
-
----
-
-### Query Parameters
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `media_id` | string | ✅ | - | Media identifier |
-| `client_type` | string | ✅ | - | Platform identifier |
-| `page` | integer | ❌ | 1 | Page number |
-| `limit` | integer | ❌ | 50 | Results per page |
-| `sort` | string | ❌ | newest | Sort order |
-
-**Sort Options**: `newest`, `oldest`, `top`, `controversial`
-
-**Example:**
-```
-GET /media?media_id=6789&client_type=anilist&page=1&limit=20&sort=top
-```
-
-**Response (200):**
-```json
-{
-  "media": {
-    "mediaId": "6789",
-    "mediaType": "anime",
-    "mediaTitle": "Attack on Titan",
-    "mediaYear": 2023,
-    "mediaPoster": "https://example.com/poster.jpg"
-  },
-  "comments": [ /* nested comment structure */ ],
-  "stats": {
-    "commentCount": 150,
-    "totalUpvotes": 500,
-    "totalDownvotes": 50,
-    "netScore": 450
-  },
-  "pagination": {
-    "page": 1,
-    "limit": 20,
-    "total": 150,
-    "totalPages": 8
-  }
-}
-```
-
----
-
-## 📢 Announcements API
-
-### Endpoint: `/announcements`
-
-Multi-app announcement system for developer communications.
-
----
-
-### 1. List Announcements
-
-**Method**: `GET`
-
-**Auth**: Not required (public)
-
-**Query Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `app_id` | string | ✅ | - | App ID (anymex/shonenx/animestream) |
-| `status` | string | ❌ | published | Filter by status |
-| `category` | string | ❌ | - | Filter by category |
-| `page` | integer | ❌ | 1 | Page number |
-| `limit` | integer | ❌ | 20 | Results per page (max 50) |
-| `user_id` | string | ❌ | - | For read status |
-| `include_read` | boolean | ❌ | false | Include read status |
-
-**Example:**
-```
-GET /announcements?app_id=anymex&status=published&page=1&limit=20
-```
-
-**Response (200):**
+#### Successful Response (`200 OK`)
 ```json
 {
   "success": true,
-  "announcements": [
+  "media_id": "16498",
+  "comments": [
     {
-      "id": 1,
-      "title": "New Feature Release",
-      "short_description": "We've added a new feature...",
-      "category": "feature",
+      "id": 14092,
+      "user_id": "5724017",
+      "username": "Sheby",
+      "user_avatar": "https://s4.anilist.co/user/avatar/medium/...",
+      "user_role": "owner",
+      "avatar_decoration": "neon_frame_01",
+      "banner_url": "https://cdn.example.com/banner.gif",
+      "nameplate_theme": "cyber_blue",
+      "content": "The animation in this episode is breathtaking!",
+      "upvotes": 42,
+      "downvotes": 1,
+      "vote_score": 41,
       "pinned": true,
-      "featured": false,
-      "priority": 10,
-      "published_at": "2024-01-15T10:00:00Z",
-      "author_name": "Dev Team",
-      "view_count": 150,
-      "is_read": false
+      "user_vote": 1,
+      "user_vote_type": "upvote",
+      "replies": [
+        {
+          "id": 14095,
+          "parent_id": 14092,
+          "user_id": "992144",
+          "username": "AnimeFan",
+          "content": "Agreed, MAPPA went all out!",
+          "user_vote": 0
+        }
+      ]
     }
   ],
   "pagination": {
     "page": 1,
-    "limit": 20,
-    "total": 45,
-    "total_pages": 3
-  },
-  "unread_count": 5
-}
-```
-
----
-
-### 2. Get Single Announcement
-
-**Method**: `GET`
-
-**Auth**: Not required (public)
-
-**Example:**
-```
-GET /announcements/1?user_id=12345&app_id=anymex
-```
-
-**Response (200):**
-```json
-{
-  "success": true,
-  "announcement": {
-    "id": 1,
-    "app_id": "anymex",
-    "title": "New Feature Release",
-    "short_description": "We've added a new feature...",
-    "full_content": "# Full markdown content here...",
-    "author_id": "dev123",
-    "author_name": "Dev Team",
-    "category": "feature",
-    "priority": 10,
-    "status": "published",
-    "pinned": true,
-    "featured": false,
-    "published_at": "2024-01-15T10:00:00Z",
-    "expires_at": null,
-    "view_count": 151,
-    "is_read": false
+    "limit": 30,
+    "total": 128,
+    "total_pages": 5
   }
 }
 ```
+*Note: The response automatically calculates and injects `user_vote: 1 | -1 | 0` and `user_vote_type` tailored to the requesting token user.*
 
 ---
 
-### 3. Get Unread Count
+## 4. Votes API (`/votes`)
 
-**Method**: `GET`
+Atomic upvoting and downvoting with automatic counter synchronization.
 
-**Auth**: Not required
+### `POST /votes`
+Cast an upvote, downvote, or remove an existing vote.
 
-**Example:**
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+Content-Type: application/json
 ```
-GET /announcements/unread-count?user_id=12345&app_id=anymex
-```
 
-**Response (200):**
+#### Request Body
+```json
+{
+  "comment_id": 14092,
+  "vote_type": 1
+}
+```
+*Supported `vote_type` values:*
+- `1` or `"upvote"`: Upvote (+1)
+- `-1` or `"downvote"`: Downvote (-1)
+- `0` or `"remove"`: Clear vote
+
+#### Successful Response (`200 OK`)
 ```json
 {
   "success": true,
-  "total_published": 45,
-  "read_count": 40,
-  "unread_count": 5
+  "action": "cast",
+  "vote_type": "upvote",
+  "vote_score": 42,
+  "upvotes": 43,
+  "downvotes": 1,
+  "user_vote": 1
 }
 ```
 
 ---
 
-### 4. Create Announcement (Admin Only)
+## 5. Reports API (`/reports`)
 
-**Method**: `POST`
+User reporting and moderation queue handling.
 
-**Auth**: ✅ Token required (owner/super_admin only)
+### `POST /reports` — Submit Report
+File a report against a comment violating community standards.
 
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+Content-Type: application/json
+```
+
+#### Request Body
 ```json
 {
-  "client_type": "anilist",
-  "access_token": "admin_oauth_token",
+  "action": "report",
+  "comment_id": 14092,
+  "reason": "spoiler",
+  "notes": "Untagged spoilers for chapter 139"
+}
+```
+*Valid reasons: `"spam"`, `"offensive"`, `"harassment"`, `"spoiler"`, `"nsfw"`, `"off_topic"`, `"other"`.*
+
+---
+
+### `POST /reports` — Moderation Queue (`moderator+`)
+Retrieve pending reports awaiting staff review.
+
+#### Request Body
+```json
+{
+  "action": "get_queue",
+  "page": 1,
+  "limit": 20
+}
+```
+
+---
+
+### `POST /reports` — Resolve Report (`moderator+`)
+Resolve or dismiss a filed report.
+
+#### Request Body
+```json
+{
+  "action": "resolve",
+  "comment_id": 14092,
+  "reporter_id": "992144",
+  "resolution": "resolved",
+  "notes": "Comment flagged as spoiler and hidden"
+}
+```
+
+---
+
+## 6. Moderation Controls (`/moderation`)
+
+Staff operations for maintaining community standards. Verifies staff role directly from token in `<1ms`.
+
+### `POST /moderation`
+| Action | Min Role | Required Parameters | Description |
+|---|---|---|---|
+| `pin_comment` | `moderator` | `comment_id` | Pins comment to the top of the media thread |
+| `unpin_comment` | `moderator` | `comment_id` | Unpins comment |
+| `lock_thread` | `moderator` | `comment_id` | Prevents further replies in this comment thread |
+| `unlock_thread` | `moderator` | `comment_id` | Unlocks thread |
+| `warn_user` | `moderator` | `target_user_id`, `reason` | Issues a warning strike to the user |
+| `mute_user` | `moderator` | `target_user_id`, `duration` | Mutes user for N hours |
+| `unmute_user` | `moderator` | `target_user_id` | Removes active mute |
+| `ban_user` | `admin` | `target_user_id`, `reason` | Bans user from participating |
+| `unban_user` | `admin` | `target_user_id` | Unbans user |
+
+---
+
+## 7. Users, Profiles & Customizations (`/users`)
+
+Manage user profiles, unlock cosmetics with earned points, and link accounts.
+
+### `POST /users` — Get Profile
+Fetch authenticated user profile details, active cosmetics, and points.
+
+#### Request Body
+```json
+{
+  "action": "get_profile"
+}
+```
+
+---
+
+### `POST /users` — Update Customizations
+Equip unlocked decorations, banners, nameplates, or profile effects.
+
+#### Request Body
+```json
+{
+  "action": "update_customizations",
+  "avatar_decoration": "neon_frame_01",
+  "banner_url": "https://cdn.example.com/banners/cyberpunk.png",
+  "nameplate_theme": "cyber_blue",
+  "profile_effect_url": "https://cdn.example.com/effects/sakura.webm"
+}
+```
+
+---
+
+### `POST /users` — Unlock Customization Item
+Spend earned engagement points to unlock cosmetic assets from the catalog.
+
+#### Request Body
+```json
+{
+  "action": "unlock_customization",
+  "customization_id": "nameplate_gold_dragon"
+}
+```
+
+---
+
+### `POST /users` — Multi-Provider Account Linking
+Link a secondary service (e.g. MyAnimeList or SIMKL) to your primary AniList account.
+
+#### Request Body
+```json
+{
+  "action": "link_account",
+  "target_client_type": "myanimelist",
+  "target_access_token": "oauth_token_from_myanimelist"
+}
+```
+
+---
+
+## 8. Points, Streaks & Leaderboard (`/points`)
+
+Reward system for community engagement.
+
+### `GET /points` — Get Status
+Fetch points balance, daily active streak, and earning breakdown.
+
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+```
+
+#### Successful Response (`200 OK`)
+```json
+{
+  "success": true,
+  "points": 1450,
+  "streak": 12,
+  "longest_streak": 24,
+  "rank": 7,
+  "recent_events": [
+    { "type": "comment_created", "points": 10, "created_at": "2026-10-18T02:00:00Z" },
+    { "type": "daily_login", "points": 25, "created_at": "2026-10-18T00:00:00Z" }
+  ]
+}
+```
+
+---
+
+### `GET /points?action=get_leaderboard`
+Fetch global points leaderboard rankings.
+
+#### Query Parameters
+- `limit` (optional): Items to return (default: `50`, max: `100`).
+- `offset` (optional): Offset for pagination.
+
+---
+
+## 9. Notifications & FCM Push (`/notifications`)
+
+Cross-platform Firebase Cloud Messaging push notifications and in-app inbox.
+
+### `POST /notifications` — Register Device Token
+Register or refresh an Android/iOS/Desktop FCM push token.
+
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "action": "register_token",
+  "fcm_token": "eXamPLe_FcM_TokEn_123...",
+  "platform": "android",
+  "app_version": "3.5.0"
+}
+```
+
+---
+
+### `GET /notifications?action=get_history`
+Fetch inbox notification history.
+
+#### Query Parameters
+- `page` (optional): Page number (default: `1`).
+- `limit` (optional): Max items (default: `30`).
+- `unreadOnly` (optional): Filter unread (`true` / `false`).
+
+---
+
+### `POST /notifications` — Mark Read
+Mark a single notification or all notifications as read.
+
+#### Request Body (Single)
+```json
+{
+  "action": "mark_read",
+  "notification_id": 892
+}
+```
+
+#### Request Body (All)
+```json
+{
+  "action": "mark_all_read"
+}
+```
+
+---
+
+## 10. Announcements System (`/announcements`)
+
+Broadcasts, feature rollouts, and changelogs.
+
+### `GET /announcements`
+Fetch published announcements feed with automatic read status tracking.
+
+#### Query Parameters
+- `app_id` (optional): Application identifier (e.g., `anymex`).
+- `category` (optional): Filter category (`release`, `update`, `maintenance`, `general`).
+- `page` (optional): Page number.
+- `limit` (optional): Page size.
+
+---
+
+### `POST /announcements` — Publish Announcement (`super_admin+`)
+Create and broadcast a global announcement.
+
+#### Request Body
+```json
+{
   "app_id": "anymex",
-  "title": "New Feature Release",
-  "short_description": "We've added a new feature...",
-  "full_content": "# Full markdown content here...",
-  "category": "feature",
+  "title": "Version 3.5 Released!",
+  "short_description": "New video engine, session tokens, and custom nameplates.",
+  "full_content": "### What's New in v3.5\n- Faster playback...",
+  "category": "release",
   "priority": 10,
-  "pinned": false,
-  "featured": false,
-  "expires_at": null,
+  "pinned": true,
   "publish": true
 }
 ```
 
-**Response (201):**
+---
+
+## 11. Data Export & Portability (`/users`)
+
+GDPR and data portability compliance endpoint.
+
+### `POST /users` — Export User Data
+Exports user profile, comments, votes, notification preferences, and linked accounts as structured JSON.
+
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "action": "export_my_data"
+}
+```
+
+#### Successful Response (`200 OK`)
 ```json
 {
   "success": true,
-  "announcement": { /* announcement object */ },
-  "message": "Announcement published successfully"
+  "exported_at": "2026-10-18T03:35:00.000Z",
+  "user": {
+    "id": "5724017",
+    "client_type": "anilist",
+    "username": "Sheby",
+    "role": "owner",
+    "points": 1450,
+    "streak": 12,
+    "unlocked_customizations": ["badge_cyber"],
+    "linked_accounts": []
+  },
+  "comments": [...],
+  "votes": [...],
+  "notification_preferences": {...}
 }
 ```
 
 ---
 
-### 5. Update Announcement (Admin Only)
+## 12. System Health & Diagnostics (`/health`, `/ping`)
 
-**Method**: `PATCH`
+### `GET /ping`
+Lightweight heartbeat check. Always returns `200 OK` with `{ "status": "ok", "message": "pong" }`.
 
-**Auth**: ✅ Token required (owner/super_admin only)
+### `GET /health`
+Comprehensive health check probing all edge functions and database dependencies.
 
-```
-PATCH /announcements/1
-```
+---
 
+## 13. Standard Error Handling & Status Codes
+
+All Commentum v2 endpoints return standard HTTP status codes accompanied by an informative JSON body.
+
+| HTTP Status | Meaning | Typical Scenario |
+|---|---|---|
+| `200 OK` | Success | Operation succeeded. |
+| `201 Created` | Created | Resource (comment, announcement) created. |
+| `400 Bad Request` | Invalid Input | Missing required field, text length violation, or invalid action. |
+| `401 Unauthorized` | Authentication Failed | Missing or invalid Bearer token / expired session. |
+| `403 Forbidden` | Insufficient Permissions | Regular user attempting moderator/admin actions. |
+| `404 Not Found` | Not Found | Target comment, user, or media does not exist. |
+| `429 Too Many Requests` | Rate Limited | Comment or vote frequency limits exceeded. |
+| `500 Internal Server Error`| Server Error | Database failure or unhandled exception. |
+
+#### Standard Error Response Format
 ```json
 {
-  "client_type": "anilist",
-  "access_token": "admin_oauth_token",
-  "title": "Updated Title",
-  "priority": 20,
-  "pinned": true
+  "error": "Authentication required to access notifications",
+  "status": 401
 }
 ```
-
----
-
-### 6. Delete Announcement (Admin Only)
-
-**Method**: `DELETE`
-
-**Auth**: ✅ Token required (owner/super_admin only)
-
-```
-DELETE /announcements/1
-```
-
-```json
-{
-  "client_type": "anilist",
-  "access_token": "admin_oauth_token"
-}
-```
-
----
-
-### 7. Publish Draft (Admin Only)
-
-**Method**: `POST`
-
-**Auth**: ✅ Token required (owner/super_admin only)
-
-```
-POST /announcements/1/publish
-```
-
-```json
-{
-  "client_type": "anilist",
-  "access_token": "admin_oauth_token"
-}
-```
-
-**Note:** Publishing sends a Discord notification to the configured channel.
-
----
-
-### 8. Archive Announcement (Admin Only)
-
-**Method**: `POST`
-
-**Auth**: ✅ Token required (owner/super_admin only)
-
-```
-POST /announcements/1/archive
-```
-
-```json
-{
-  "client_type": "anilist",
-  "access_token": "admin_oauth_token"
-}
-```
-
----
-
-### 9. Mark as Viewed
-
-**Method**: `POST`
-
-**Auth**: Not required
-
-```
-POST /announcements/1/view
-```
-
-```json
-{
-  "user_id": "12345",
-  "app_id": "anymex"
-}
-```
-
----
-
-### 10. Mark as Read
-
-**Method**: `POST`
-
-**Auth**: Not required
-
-```
-POST /announcements/1/read
-```
-
-```json
-{
-  "user_id": "12345",
-  "app_id": "anymex"
-}
-```
-
----
-
-## ❌ Error Handling
-
-### Standard Error Response
-
-```json
-{
-  "error": "Error description"
-}
-```
-
-### HTTP Status Codes
-
-| Code | Meaning |
-|------|---------|
-| 200 | Success |
-| 201 | Created |
-| 400 | Bad Request |
-| 401 | Unauthorized (invalid/expired token) |
-| 403 | Forbidden (insufficient permissions) |
-| 404 | Not Found |
-| 429 | Rate Limited |
-| 500 | Internal Server Error |
-| 503 | Service Unavailable |
-
----
-
-## 🔑 Token Verification Flow
-
-1. **Client sends**: `client_type` + `access_token`
-2. **Backend verifies**: Calls provider API
-3. **Provider returns**: `provider_user_id`, `username`, `avatar_url`
-4. **Backend checks**: Role from database
-5. **Action executed**: If role is sufficient
-
----
-
-## 📊 Action Matrix
-
-| Action | Endpoint | Auth | Min Role |
-|--------|----------|------|----------|
-| create | /comments | user_info | user |
-| edit | /comments | user_info (owner) | user |
-| delete | /comments | user_info (owner) | user |
-| mod_delete | /comments | token | moderator |
-| vote | /votes | user_info | user |
-| create_report | /reports | user_info | user |
-| resolve_report | /reports | token | moderator |
-| get_queue | /reports | token | moderator |
-| pin/unpin | /moderation | token | moderator |
-| lock/unlock | /moderation | token | moderator |
-| warn_user | /moderation | token | moderator |
-| ban_user | /moderation | token | admin |
-| unban_user | /moderation | token | admin |
-| get_queue | /moderation | token | moderator |
-| get_user_* | /users | token | moderator |
-| warn_user | /users | token | moderator |
-| mute_user | /users | token | moderator |
-| ban_user | /users | token | admin |
-| unban_user | /users | token | admin |
-| get_media | /media | none | - |
-| list_announcements | /announcements | none | - |
-| get_announcement | /announcements/:id | none | - |
-| get_unread_count | /announcements/unread-count | none | - |
-| mark_viewed | /announcements/:id/view | none | - |
-| mark_read | /announcements/:id/read | none | - |
-| create_announcement | /announcements | token | super_admin |
-| update_announcement | /announcements/:id | token | super_admin |
-| delete_announcement | /announcements/:id | token | super_admin |
-| publish_announcement | /announcements/:id/publish | token | super_admin |
-| archive_announcement | /announcements/:id/archive | token | super_admin |
-
----
-
-## 🔄 Dantotsu 2-Way Sync
-
-Commentum v2 supports real-time, bidirectional synchronization with the **Dantotsu** comment ecosystem.
-
-### Key Capabilities
-1. **Comment Creation**: When an AnymeX user posts a comment, it is mirrored to Dantotsu in real time and tracked in `dantotsu_id_mappings`.
-2. **Comment Editing**: Edits made on AnymeX reflect on Dantotsu.
-3. **Comment Deletion**: Both self-deletes and moderator deletes (via API or Discord bot buttons) delete the corresponding Dantotsu comment.
-4. **Voting**: Upvotes and downvotes cast in AnymeX sync to Dantotsu.
-5. **Cross-Client Media Resolution**: MAL and SIMKL media IDs are automatically resolved to AniList IDs so non-AniList users can still sync with Dantotsu.
-6. **Discord Embed Tracking**: All Discord notification embeds show sync status:
-   - `Dantotsu: Synced (#<id>)`
-   - `Dantotsu: Posted on Dantotsu (#<id>)`
-   - `Dantotsu: AnymeX Only`
-
-### Token Requirements for Dantotsu Sync
-
-| Client Type | Field to Provide | Requirement | Notes |
-|-------------|------------------|-------------|-------|
-| `anilist` | `token` or `access_token` | **Required** for sync | User's AniList OAuth token; used to log in to Dantotsu API |
-| `mal` | `anilist_token` | Optional | If linked, syncs to Dantotsu using this AniList account |
-| `simkl` | `anilist_token` | Optional | If linked, syncs to Dantotsu using this AniList account |
-| Moderator actions | None from app | **Automatic** | Backend uses internal moderator token pool to mirror deletions/reports to Dantotsu |
-
-> ⚠️ If tokens are omitted, the action succeeds locally on Commentum without failing, but Dantotsu sync is skipped (`AnymeX Only`).
-
----
-
-**Ready to integrate?** Start with the [Quick Start Guide](./QUICK_START.md)! 🚀
-

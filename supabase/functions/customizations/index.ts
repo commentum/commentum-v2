@@ -3,7 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denone
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'content-type, authorization, x-client-info, apikey',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-client-info, apikey, x-session-token',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
 }
 

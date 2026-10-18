@@ -1,243 +1,321 @@
-# System Actions and Capabilities - Commentum v2
+# System Actions & Capabilities — Commentum v2
 
-Complete reference of all available actions and their authentication requirements.
+Complete reference of all available endpoints, supported actions, and their authentication requirements in Commentum v2.
 
 ---
 
-## 🔐 Authentication Methods
+## 🔐 Authentication Architecture
 
-### Token-Based Authentication (Mod+ Actions)
+Commentum v2 uses a **stateless Session Token (HMAC-SHA256 JWT)** model designed for low latency (<1ms token verification) and complete anti-spoofing guarantees.
 
-All moderation and admin actions use **token-based authentication**:
+### 1. Exchange Provider Token for Commentum JWT
+Client logs in once with their provider OAuth token (AniList, MyAnimeList, or SIMKL):
+```http
+POST /auth/login
+Content-Type: application/json
 
-```json
 {
-  "client_type": "anilist",
-  "access_token": "user_oauth_token_from_provider"
+  "provider": "anilist",
+  "token": "user_oauth_token"
 }
 ```
 
-Verified with provider APIs:
-- **AniList**: GraphQL API
-- **MAL**: REST API  
-- **SIMKL**: REST API
-
-### User Info (Basic Actions)
-
+Response:
 ```json
 {
-  "user_info": {
-    "user_id": "12345",
-    "username": "TestUser",
-    "avatar": "https://example.com/avatar.jpg"
+  "success": true,
+  "session_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 604800,
+  "user": {
+    "uid": "123456",
+    "username": "Sheby",
+    "provider": "anilist",
+    "role": "owner",
+    "avatar": "https://s4.anilist.co/user/avatar/medium/...",
+    "points": 1450,
+    "streak": 12
   }
 }
 ```
 
+### 2. Authenticated Requests
+All subsequent requests supply the token in the standard HTTP header:
+```http
+Authorization: Bearer <session_token>
+```
+*(Also accepts `x-session-token` header).*
+
 ---
 
-## 📝 Comments API
+## 📝 Comments & Threads API
 
-### Create Comment
+### Post Comment
 - **Endpoint**: `POST /comments`
-- **Auth**: `user_info` (local) | `token` (AniList) or `anilist_token` (MAL/SIMKL) for Dantotsu 2-way sync
-- **Role**: user
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `user`
+- **Body**:
+  ```json
+  {
+    "action": "create",
+    "media_id": "16498",
+    "media_type": "anime",
+    "media_title": "Attack on Titan",
+    "content": "This episode was incredible!",
+    "parent_id": null
+  }
+  ```
 
 ### Edit Comment
 - **Endpoint**: `POST /comments`
-- **Auth**: `user_info` (owner only) | `token` or `anilist_token` for Dantotsu sync
-- **Role**: user
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `user` (Comment author only)
+- **Body**:
+  ```json
+  {
+    "action": "edit",
+    "comment_id": 1042,
+    "content": "Updated thoughts on this scene..."
+  }
+  ```
 
-### Delete Comment (Own)
+### Delete Own Comment
 - **Endpoint**: `POST /comments`
-- **Auth**: `user_info` (owner only) | `token` or `anilist_token` for Dantotsu sync
-- **Role**: user
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `user` (Comment author only)
+- **Body**:
+  ```json
+  {
+    "action": "delete",
+    "comment_id": 1042
+  }
+  ```
 
-### Mod Delete Comment
+### Moderator Delete Comment
 - **Endpoint**: `POST /comments`
-- **Auth**: ✅ token required (moderator+) — Dantotsu deletion is handled automatically by the backend
-- **Role**: moderator+
-
----
-
-## 🗳️ Votes API
-
-### Vote
-- **Endpoint**: `POST /votes`
-- **Auth**: `user_info` (local) | optional `token` / `anilist_token` for Dantotsu sync
-- **Role**: user
-- **Types**: `upvote`, `downvote`, `remove`
-
----
-
-## 🚨 Reports API
-
-### Create Report
-- **Endpoint**: `POST /reports`
-- **Auth**: user_info
-- **Role**: user
-- **Reasons**: `spam`, `offensive`, `harassment`, `spoiler`, `nsfw`, `off_topic`, `other`
-
-### Resolve Report
-- **Endpoint**: `POST /reports`
-- **Auth**: ✅ token required (moderator+) — Dantotsu deletion is handled automatically by the backend
-- **Role**: moderator+
-
-### Get Reports Queue
-- **Endpoint**: `POST /reports`
-- **Auth**: ✅ token required
-- **Role**: moderator+
-
----
-
-## 🔧 Moderation API
-
-### Endpoint: `POST /moderation`
-**All actions require token auth**
-
-| Action | Role | Description |
-|--------|------|-------------|
-| `pin_comment` | moderator | Pin a comment |
-| `unpin_comment` | moderator | Unpin a comment |
-| `lock_thread` | moderator | Lock a thread |
-| `unlock_thread` | moderator | Unlock a thread |
-| `warn_user` | moderator | Warn a user |
-| `ban_user` | admin | Ban a user |
-| `unban_user` | admin | Unban a user |
-| `get_queue` | moderator | Get moderation queue |
-
----
-
-## 👤 Users API
-
-### Endpoint: `POST /users`
-**All actions require token auth**
-
-| Action | Role | Description |
-|--------|------|-------------|
-| `get_user_info` | moderator | Get user information |
-| `get_user_stats` | moderator | Get user statistics |
-| `warn_user` | moderator | Warn a user |
-| `mute_user` | moderator | Mute a user |
-| `unmute_user` | moderator | Unmute a user |
-| `ban_user` | admin | Ban a user |
-| `unban_user` | admin | Unban a user |
-| `get_user_history` | moderator | Get user history |
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `moderator+`
+- **Body**:
+  ```json
+  {
+    "action": "delete",
+    "comment_id": 1042,
+    "reason": "Violated community spoiler rules"
+  }
+  ```
 
 ---
 
 ## 📺 Media API
 
-### Get Comments
+### Get Comments for Media
 - **Endpoint**: `GET /media`
-- **Auth**: none
-- **Role**: -
+- **Auth**: ✅ Bearer JWT (Required)
+- **Query Parameters**:
+  - `media_id` (required): Media identifier (e.g., `16498`)
+  - `client_type` (optional): Default inferred from user token
+  - `page` (optional): Page number (default: `1`)
+  - `limit` (optional): Items per page (default: `30`, max: `100`)
+  - `sort` (optional): `best` | `newest` | `oldest` (default: `best`)
+- **Response**: Returns threaded comment tree with pinned comments at top and personal `user_vote` injected automatically.
+
+---
+
+## 🗳️ Votes API
+
+### Cast or Toggle Vote
+- **Endpoint**: `POST /votes`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `user`
+- **Body**:
+  ```json
+  {
+    "comment_id": 1042,
+    "vote_type": 1
+  }
+  ```
+  *(Accepts numeric `1`, `-1`, `0` or string `'upvote'`, `'downvote'`, `'remove'`)*
+
+---
+
+## 🚨 Reports API
+
+### File Report
+- **Endpoint**: `POST /reports`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `user`
+- **Body**:
+  ```json
+  {
+    "action": "report",
+    "comment_id": 1042,
+    "reason": "spoiler",
+    "notes": "Untagged manga ending spoilers"
+  }
+  ```
+
+### Resolve / Dismiss Report
+- **Endpoint**: `POST /reports`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `moderator+`
+- **Body**:
+  ```json
+  {
+    "action": "resolve",
+    "comment_id": 1042,
+    "reporter_id": "78910",
+    "resolution": "resolved",
+    "notes": "Comment removed"
+  }
+  ```
+
+### View Reports Queue
+- **Endpoint**: `POST /reports`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Role**: `moderator+`
+- **Body**:
+  ```json
+  {
+    "action": "get_queue",
+    "page": 1,
+    "limit": 20
+  }
+  ```
+
+---
+
+## 🛡️ Moderation API
+
+All moderation actions verify staff credentials directly from the verified Bearer JWT claims.
+
+### Endpoint: `POST /moderation`
+| Action | Min Role | Description |
+|---|---|---|
+| `pin_comment` | `moderator` | Pin comment to top of media discussion |
+| `unpin_comment` | `moderator` | Unpin comment |
+| `lock_thread` | `moderator` | Lock comment thread to prevent replies |
+| `unlock_thread` | `moderator` | Unlock comment thread |
+| `warn_user` | `moderator` | Issue formal warning to user |
+| `mute_user` | `moderator` | Temporarily mute user from commenting |
+| `unmute_user` | `moderator` | Lift user mute |
+| `ban_user` | `admin` | Ban user |
+| `unban_user` | `admin` | Unban user |
+| `get_queue` | `moderator` | List reported comments pending review |
+
+---
+
+## 🔔 Notifications API
+
+### Register FCM Token
+- **Endpoint**: `POST /notifications`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Body**:
+  ```json
+  {
+    "action": "register_token",
+    "fcm_token": "fcm_device_token_here",
+    "platform": "android",
+    "app_version": "3.5.0"
+  }
+  ```
+
+### Get Notification History
+- **Endpoint**: `GET /notifications?action=get_history&page=1&limit=30` (or `POST /notifications`)
+- **Auth**: ✅ Bearer JWT (Required)
+
+### Mark Notification as Read
+- **Endpoint**: `POST /notifications`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Body**:
+  ```json
+  {
+    "action": "mark_read",
+    "notification_id": 451
+  }
+  ```
+
+### Mark All as Read
+- **Endpoint**: `POST /notifications`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Body**:
+  ```json
+  {
+    "action": "mark_all_read"
+  }
+  ```
+
+### Get Unread Notification Count
+- **Endpoint**: `GET /notifications?action=get_unread_count` (or `POST /notifications`)
+- **Auth**: ✅ Bearer JWT (Required)
+
+---
+
+## 🏆 Points, Streaks & Shop API
+
+### Get Points & Streak Status
+- **Endpoint**: `GET /points` (or `POST /points` `{ "action": "get_points" }`)
+- **Auth**: ✅ Bearer JWT (Required)
+
+### Get Points Leaderboard
+- **Endpoint**: `GET /points?action=get_leaderboard&limit=50`
+- **Auth**: ✅ Bearer JWT (Required)
+
+### Unlock Customization Item
+- **Endpoint**: `POST /users`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Body**:
+  ```json
+  {
+    "action": "unlock_customization",
+    "customization_id": "neon_cyber_badge"
+  }
+  ```
+
+### Update Active Profile Customizations
+- **Endpoint**: `POST /users`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Body**:
+  ```json
+  {
+    "action": "update_customizations",
+    "avatar_decoration": "neon_frame_01",
+    "banner_url": "https://cdn.example.com/banner.gif",
+    "nameplate_theme": "cyberpunk_glow"
+  }
+  ```
+
+### Export My Data (GDPR / Portability)
+- **Endpoint**: `POST /users`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Body**:
+  ```json
+  {
+    "action": "export_my_data"
+  }
+  ```
 
 ---
 
 ## 📢 Announcements API
 
-### List Announcements
+### Public Announcements Feed
 - **Endpoint**: `GET /announcements`
-- **Auth**: none
-- **Role**: -
-- **Query**: `app_id` (required), `status`, `category`, `page`, `limit`, `user_id`
+- **Auth**: Optional / Authenticated for automatic unread status
+- **Query**: `app_id=anymex&status=published&page=1&limit=20`
 
-### Get Announcement
-- **Endpoint**: `GET /announcements/:id`
-- **Auth**: none
-- **Role**: -
-
-### Get Unread Count
-- **Endpoint**: `GET /announcements/unread-count`
-- **Auth**: none
-- **Role**: -
-- **Query**: `user_id` (required), `app_id` (required)
-
-### Mark Viewed
-- **Endpoint**: `POST /announcements/:id/view`
-- **Auth**: none
-- **Role**: -
-
-### Mark Read
-- **Endpoint**: `POST /announcements/:id/read`
-- **Auth**: none
-- **Role**: -
-- **Body**: `user_id` (required), `app_id` (required)
-
-### Create Announcement
+### Admin Create / Publish Announcement
 - **Endpoint**: `POST /announcements`
-- **Auth**: ✅ token required
-- **Role**: super_admin+ (owner or super_admin)
-- **Body**: `app_id`, `title`, `short_description`, `full_content`, `category`, `priority`, `pinned`, `publish`
-
-### Update Announcement
-- **Endpoint**: `PATCH /announcements/:id`
-- **Auth**: ✅ token required
-- **Role**: super_admin+
-
-### Delete Announcement
-- **Endpoint**: `DELETE /announcements/:id`
-- **Auth**: ✅ token required
-- **Role**: super_admin+
-
-### Publish Announcement
-- **Endpoint**: `POST /announcements/:id/publish`
-- **Auth**: ✅ token required
-- **Role**: super_admin+
-- **Note**: Sends Discord notification on publish
-
-### Archive Announcement
-- **Endpoint**: `POST /announcements/:id/archive`
-- **Auth**: ✅ token required
-- **Role**: super_admin+
+- **Auth**: ✅ Bearer JWT (`super_admin` or `owner`)
 
 ---
 
-## 🎯 Action Matrix
+## 📊 Role Hierarchy Matrix
 
-| Action | Endpoint | Auth | Min Role |
-|--------|----------|------|----------|
-| create | /comments | user_info | user |
-| edit | /comments | user_info (owner) | user |
-| delete | /comments | user_info (owner) | user |
-| mod_delete | /comments | token | moderator |
-| vote | /votes | user_info | user |
-| create_report | /reports | user_info | user |
-| resolve_report | /reports | token | moderator |
-| get_queue | /reports | token | moderator |
-| pin/unpin | /moderation | token | moderator |
-| lock/unlock | /moderation | token | moderator |
-| warn_user | /moderation | token | moderator |
-| ban_user | /moderation | token | admin |
-| unban_user | /moderation | token | admin |
-| get_queue | /moderation | token | moderator |
-| get_user_* | /users | token | moderator |
-| mute_user | /users | token | moderator |
-| ban_user | /users | token | admin |
-| unban_user | /users | token | admin |
-| get_media | /media | none | - |
-| list_announcements | /announcements | none | - |
-| get_announcement | /announcements/:id | none | - |
-| get_unread_count | /announcements/unread-count | none | - |
-| mark_viewed | /announcements/:id/view | none | - |
-| mark_read | /announcements/:id/read | none | - |
-| create_announcement | /announcements | token | super_admin |
-| update_announcement | /announcements/:id | token | super_admin |
-| delete_announcement | /announcements/:id | token | super_admin |
-| publish_announcement | /announcements/:id/publish | token | super_admin |
-| archive_announcement | /announcements/:id/archive | token | super_admin |
-
----
-
-## 📊 Role Hierarchy
-
-| Role | Level | Display As | Description |
-|------|-------|------------|-------------|
-| owner | 4 | super_admin | System owner (hidden for security) |
-| super_admin | 3 | super_admin | Full system access |
-| admin | 2 | admin | Administrative access |
-| moderator | 1 | moderator | Moderation powers |
-| user | 0 | user | Regular user |
-
-**Security Note**: The `owner` role is the highest privilege level but is displayed as `super_admin` in all API responses to hide its existence.
+| Role Level | Role Identifier | Displayed As | Capabilities |
+|---|---|---|---|
+| 5 | `owner` | `super_admin` | Full cluster ownership, backup export, staff promotions |
+| 4 | `app_owner` | `super_admin` | Dedicated app owner, system configuration |
+| 3 | `super_admin` | `super_admin` | Global announcements, system config, staff controls |
+| 2 | `admin` | `admin` | Ban/unban users, delete comments, manage roles |
+| 1 | `moderator` | `moderator` | Pin/unpin, lock/unlock, warn/mute users, resolve reports |
+| 0 | `user` | `user` | Post comments, replies, votes, unlock shop items, notifications |

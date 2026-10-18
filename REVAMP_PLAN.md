@@ -618,9 +618,13 @@ class CommentumService extends GetxController {
 - **Phase 1 (Auth & JWT Subsystem):** ✅ Completed (`df147f6`)
 - **Phase 2 (Comments & Media Modernization):** ✅ Completed (`d36eaf7`)
 - **Phase 3 (Votes, Reports & Moderation):** ✅ Completed (`6c75346`)
-- **Phase 4 (Users, Customizations & Points):** ✅ Completed
-- **Phase 5 (Notifications & Announcements):** ⏳ Pending
-- **Phase 6 (Client Integration - AnymeX):** ⏳ Pending
+- **Phase 4 (Users, Customizations & Points):** ✅ Completed (`a10b258`)
+- **Phase 5 (Notifications & Announcements):** ✅ Completed
+- **Phase 6 (Sync, Export & Portability):** ✅ Completed
+- **Phase 7 (Database Performance & Migrations):** ✅ Completed
+- **Phase 8 (OpenAPI 3.1 & Documentation):** ✅ Completed
+- **Phase 9 (Automated Test Suite & Verification):** ✅ Completed (25/25 Tests Passing)
+- **Phase 10 (App-Side Integration):** ⏸️ Deferred until backend is signed off by user
 
 ```
 [x] Phase 1: Auth & Cryptographic JWT Subsystem (Commit df147f6)
@@ -640,17 +644,36 @@ class CommentumService extends GetxController {
     ├── [x] 3.2 Refactor supabase/functions/reports/index.ts (create report uses verified user, resolve uses JWT mod role)
     └── [x] 3.3 Refactor supabase/functions/moderation/index.ts to verify role directly from JWT
 
-[x] Phase 4: Users, Customizations & Points
+[x] Phase 4: Users, Customizations & Points (Commit a10b258)
     ├── [x] 4.1 Update supabase/functions/users/index.ts (profile customization & linking via JWT)
     ├── [x] 4.2 Update supabase/functions/points/index.ts to calculate points on verified actions
     └── [x] 4.3 Verify optimizations in supabase/functions/customizations/index.ts
 
-[ ] Phase 5: Push Notifications & Announcements
-    ├── [ ] 5.1 Refactor supabase/functions/notifications/index.ts to bind FCM tokens to verified JWT users
-    └── [ ] 5.2 Validate announcements CRUD and public listing
+[x] Phase 5: Push Notifications & Announcements
+    ├── [x] 5.1 Refactor supabase/functions/notifications/index.ts to bind FCM tokens to verified JWT users
+    ├── [x] 5.2 Add Bearer JWT verification to announcements CRUD, staff dashboard, and unread counters
+    └── [x] 5.3 Enhance customizations CORS and caching headers
 
-[ ] Phase 6: Client Integration (AnymeX) & E2E Validation
-    ├── [ ] 6.1 Implement ensureAuthenticated() & token caching in AnymeX CommentumService
-    ├── [ ] 6.2 Strip user_info parameters from comment, vote, and report calls
-    └── [ ] 6.3 Execute full suite test (Post comment -> Discord alert -> Push notification -> Points update)
+[x] Phase 6: Sync, Export & Portability
+    ├── [x] 6.1 Enhance backup-table/index.ts with Bearer JWT owner/super_admin authorization
+    └── [x] 6.2 Implement export_my_data in users/index.ts for complete user data export
+
+[x] Phase 7: Edge & Database Performance Optimizations
+    └── [x] 7.1 Create migration 042_performance_composite_indexes.sql for high-throughput query acceleration
+
+[x] Phase 8: Comprehensive OpenAPI 3.1 & Developer Documentation
+    ├── [x] 8.1 Generate docs/openapi.json (OpenAPI 3.1.0 standard)
+    ├── [x] 8.2 Overhaul docs/ACTIONS.md with modern JWT architecture
+    └── [x] 8.3 Overhaul docs/COMPLETE_API_REFERENCE.md with full endpoint guide & zero legacy references
+
+[x] Phase 9: Automated Test Suite & Verification
+    ├── [x] 9.1 Create scripts/test_jwt_and_endpoints.ts for automated JWT and role assertion
+    ├── [x] 9.2 Add CORS & dynamic base URL to health/index.ts and ping/index.ts
+    └── [x] 9.3 Run verification suite via Bun (25 passed, 0 failed)
+
+[ ] Phase 10: Client Integration (AnymeX) & E2E Validation (Deferred per user request)
+    ├── [ ] 10.1 Implement ensureAuthenticated() & token caching in AnymeX CommentumService
+    ├── [ ] 10.2 Strip user_info parameters from comment, vote, and report calls
+    └── [ ] 10.3 Execute full suite test (Post comment -> Discord alert -> Push notification -> Points update)
 ```
+

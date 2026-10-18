@@ -1,9 +1,10 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { verifyJwt } from '../shared/jwt.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-session-token',
 }
 
 // Complete column order aligned with Commentum v2 database schema
@@ -98,17 +99,24 @@ serve(async (req) => {
       )
     }
 
-    // Authenticate request: accept Bearer token matching BACKUP_TOKEN or SUPABASE_SERVICE_ROLE_KEY
-    const authHeader = req.headers.get('authorization') || ''
+    // Authenticate request: accept Bearer token matching BACKUP_TOKEN or SUPABASE_SERVICE_ROLE_KEY, or valid owner/super_admin JWT
+    const authHeader = req.headers.get('authorization') || req.headers.get('x-session-token') || ''
     const token = authHeader.replace(/^Bearer\s+/i, '').trim()
 
-    const isValidToken =
+    let isValidToken =
       (backupTokenEnv && token === backupTokenEnv) ||
       (serviceRoleKey && token === serviceRoleKey)
 
+    if (!isValidToken && token) {
+      const jwtPayload = await verifyJwt(token)
+      if (jwtPayload && ['owner', 'app_owner', 'super_admin'].includes(jwtPayload.role)) {
+        isValidToken = true
+      }
+    }
+
     if (!isValidToken) {
       return new Response(
-        JSON.stringify({ error: 'Unauthorized: Invalid or missing backup token' }),
+        JSON.stringify({ error: 'Unauthorized: Invalid or missing backup token / admin JWT' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

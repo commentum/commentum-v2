@@ -81,23 +81,42 @@ async function getCryptoKey(secret: string): Promise<CryptoKey> {
   return cachedCryptoKey
 }
 
+export type JwtVerifyResult<T> = {
+  valid: boolean
+  payload?: T
+  error?: string
+} & (T | Record<string, undefined>)
+
 /**
  * Sign a JWT with payload
  * @param payload Object with claims (sub, uid, provider, username, role, etc.)
- * @param secret Optional HMAC secret. If not provided, reads from environment.
+ * @param secretOrExpiresIn Optional HMAC secret string OR lifetime in seconds
  * @param expiresInSeconds Lifetime in seconds (default: 7 days)
- * @returns Encrypted JWT string
+ * @returns Object with token string and expires_at timestamp
  */
 export async function signJwt(
   payload: JwtPayload,
-  secret?: string,
+  secretOrExpiresIn?: string | number,
   expiresInSeconds = 7 * 24 * 60 * 60
 ): Promise<{ token: string; expires_at: number }> {
-  const sec = secret || getJwtSecret()
+  let sec: string
+  let expSec: number
+
+  if (typeof secretOrExpiresIn === 'number') {
+    expSec = secretOrExpiresIn
+    sec = getJwtSecret()
+  } else if (typeof secretOrExpiresIn === 'string') {
+    sec = secretOrExpiresIn
+    expSec = expiresInSeconds
+  } else {
+    sec = getJwtSecret()
+    expSec = expiresInSeconds
+  }
+
   const key = await getCryptoKey(sec)
 
   const now = Math.floor(Date.now() / 1000)
-  const exp = now + expiresInSeconds
+  const exp = now + expSec
 
   const header: JwtHeader = { alg: 'HS256', typ: 'JWT' }
   const fullPayload: JwtPayload = {
@@ -128,15 +147,15 @@ export async function signJwt(
 export async function verifyJwt<T = JwtPayload>(
   token: string,
   secret?: string
-): Promise<{ valid: boolean; payload?: T; error?: string }> {
+): Promise<JwtVerifyResult<T>> {
   try {
     if (!token || typeof token !== 'string') {
-      return { valid: false, error: 'Token is missing or invalid' }
+      return { valid: false, error: 'Token is missing or invalid' } as any
     }
 
     const parts = token.trim().split('.')
     if (parts.length !== 3) {
-      return { valid: false, error: 'Malformed JWT structure' }
+      return { valid: false, error: 'Malformed JWT structure' } as any
     }
 
     const [encodedHeader, encodedPayload, encodedSignature] = parts
@@ -155,7 +174,7 @@ export async function verifyJwt<T = JwtPayload>(
     )
 
     if (!isValidSig) {
-      return { valid: false, error: 'Invalid token signature' }
+      return { valid: false, error: 'Invalid token signature' } as any
     }
 
     // Parse payload
@@ -165,11 +184,14 @@ export async function verifyJwt<T = JwtPayload>(
     // Check expiration
     const now = Math.floor(Date.now() / 1000)
     if (payload.exp && payload.exp < now) {
-      return { valid: false, error: 'Token has expired' }
+      return { valid: false, error: 'Token has expired' } as any
     }
 
-    return { valid: true, payload: payload as T }
+    return Object.assign(
+      { valid: true, payload: payload as T },
+      payload
+    ) as JwtVerifyResult<T>
   } catch (err: any) {
-    return { valid: false, error: err?.message || 'Token verification failed' }
+    return { valid: false, error: err?.message || 'Token verification failed' } as any
   }
 }

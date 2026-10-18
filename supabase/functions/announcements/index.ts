@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyClientToken } from '../shared/clientAuth.ts'
+import { verifyJwt } from '../shared/jwt.ts'
 import { sendDiscordNotificationBlocking } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { renderAnnouncementDashboard } from './dashboard.ts'
@@ -37,6 +38,15 @@ function extractToken(req: Request): string | null {
     return authHeader.substring(7).trim()
   }
   return req.headers.get('x-session-token')
+}
+
+async function getAuthUserId(req?: Request): Promise<{ uid: string; role: string; username: string } | null> {
+  if (!req) return null
+  const token = extractToken(req)
+  if (!token) return null
+  const payload = await verifyJwt(token)
+  if (!payload) return null
+  return { uid: payload.uid, role: payload.role, username: payload.username }
 }
 
 serve(async (req) => {
@@ -114,7 +124,7 @@ serve(async (req) => {
 
     // 4. Unread count route
     if (method === 'GET' && pathSegments[0] === 'unread-count') {
-      return await handleGetUnreadCount(supabase, url)
+      return await handleGetUnreadCount(supabase, url, req)
     }
 
     // 5. Announcements CRUD routes
@@ -122,11 +132,11 @@ serve(async (req) => {
     const action = pathSegments[1] // 'view', 'read', 'publish', 'archive'
 
     if (method === 'GET' && !announcementId) {
-      return await handleListAnnouncements(supabase, url)
+      return await handleListAnnouncements(supabase, url, req)
     }
     
     if (method === 'GET' && announcementId && !action) {
-      return await handleGetAnnouncement(supabase, announcementId, url)
+      return await handleGetAnnouncement(supabase, announcementId, url, req)
     }
     
     if (method === 'POST' && !announcementId) {
@@ -547,9 +557,25 @@ async function handleDeleteStaff(supabase: any, staffId: number, req: Request) {
 // ====================================
 
 async function verifyAdmin(supabase: any, req: Request) {
-  // 1. Session Token (from Authorization header or x-session-token)
+  // 1. Session Token or JWT (from Authorization header or x-session-token)
   const token = extractToken(req)
   if (token) {
+    // A. Verify modern HMAC-SHA256 JWT
+    const jwtPayload = await verifyJwt(token)
+    if (jwtPayload) {
+      const staffRoles = ['owner', 'app_owner', 'super_admin', 'admin', 'moderator']
+      if (staffRoles.includes(jwtPayload.role)) {
+        return {
+          valid: true,
+          userId: jwtPayload.uid,
+          role: jwtPayload.role,
+          username: jwtPayload.username,
+          avatarUrl: jwtPayload.avatar
+        }
+      }
+    }
+
+    // B. Check dashboard database session
     const session = await getSession(supabase, token)
     if (session) {
       return {
@@ -622,6 +648,16 @@ async function verifyAdmin(supabase: any, req: Request) {
   }
 
   if (session_token) {
+    const jwtPayload = await verifyJwt(session_token)
+    if (jwtPayload && ['owner', 'app_owner', 'super_admin', 'admin', 'moderator'].includes(jwtPayload.role)) {
+      return {
+        valid: true,
+        userId: jwtPayload.uid,
+        role: jwtPayload.role,
+        username: jwtPayload.username,
+        avatarUrl: jwtPayload.avatar
+      }
+    }
     const session = await getSession(supabase, session_token)
     if (session) {
       return {
@@ -673,13 +709,14 @@ async function verifyAdmin(supabase: any, req: Request) {
 // PUBLIC ENDPOINTS
 // ====================================
 
-async function handleListAnnouncements(supabase: any, url: URL) {
+async function handleListAnnouncements(supabase: any, url: URL, req?: Request) {
   const appId = url.searchParams.get('app_id') || 'anymex'
   const status = url.searchParams.get('status') || 'published'
   const category = url.searchParams.get('category')
   const page = parseInt(url.searchParams.get('page') || '1')
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '30'), 50)
-  const userId = url.searchParams.get('user_id')
+  const authUser = await getAuthUserId(req)
+  const userId = authUser?.uid || url.searchParams.get('user_id')
   const includeRead = url.searchParams.get('include_read') === 'true'
 
   const validAppIds = ['anymex', 'shonenx', 'animestream']
@@ -769,7 +806,7 @@ async function handleListAnnouncements(supabase: any, url: URL) {
   })
 }
 
-async function handleGetAnnouncement(supabase: any, announcementId: number, url: URL) {
+async function handleGetAnnouncement(supabase: any, announcementId: number, url: URL, req?: Request) {
   const { data: announcement, error } = await supabase
     .from('announcements')
     .select('*')
@@ -786,9 +823,10 @@ async function handleGetAnnouncement(supabase: any, announcementId: number, url:
     .update({ view_count: (announcement.view_count || 0) + 1 })
     .eq('id', announcementId)
 
-  // Check read status if user_id provided
+  // Check read status if user_id or auth token provided
   let isRead = false
-  const userId = url.searchParams.get('user_id')
+  const authUser = await getAuthUserId(req)
+  const userId = authUser?.uid || url.searchParams.get('user_id')
   const appId = url.searchParams.get('app_id')
   
   if (userId && appId) {
@@ -814,12 +852,10 @@ async function handleGetAnnouncement(supabase: any, announcementId: number, url:
 }
 
 async function handleMarkViewed(supabase: any, announcementId: number, req: Request) {
-  const body = await req.json()
-  const { user_id, app_id } = body
-
-  if (!app_id) {
-    return jsonResponse({ error: 'app_id is required' }, 400)
-  }
+  const body = await req.json().catch(() => ({}))
+  const authUser = await getAuthUserId(req)
+  const user_id = authUser?.uid || body.user_id || null
+  const app_id = body.app_id || 'anymex'
 
   const { data: announcement } = await supabase
     .from('announcements')
@@ -835,7 +871,7 @@ async function handleMarkViewed(supabase: any, announcementId: number, req: Requ
     .from('announcement_views')
     .insert({
       announcement_id: announcementId,
-      user_id: user_id || null,
+      user_id,
       app_id
     })
 
@@ -843,11 +879,13 @@ async function handleMarkViewed(supabase: any, announcementId: number, req: Requ
 }
 
 async function handleMarkRead(supabase: any, announcementId: number, req: Request) {
-  const body = await req.json()
-  const { user_id, app_id } = body
+  const body = await req.json().catch(() => ({}))
+  const authUser = await getAuthUserId(req)
+  const user_id = authUser?.uid || body.user_id
+  const app_id = body.app_id || 'anymex'
 
-  if (!user_id || !app_id) {
-    return jsonResponse({ error: 'user_id and app_id are required' }, 400)
+  if (!user_id) {
+    return jsonResponse({ error: 'Authentication or user_id is required' }, 400)
   }
 
   const { data: announcement } = await supabase
@@ -874,9 +912,10 @@ async function handleMarkRead(supabase: any, announcementId: number, req: Reques
   return jsonResponse({ success: true, message: 'Marked as read' })
 }
 
-async function handleGetUnreadCount(supabase: any, url: URL) {
-  const userId = url.searchParams.get('user_id')
-  const appId = url.searchParams.get('app_id')
+async function handleGetUnreadCount(supabase: any, url: URL, req?: Request) {
+  const authUser = await getAuthUserId(req)
+  const userId = authUser?.uid || url.searchParams.get('user_id')
+  const appId = url.searchParams.get('app_id') || 'anymex'
 
   if (!userId || !app_id) {
     return jsonResponse({ error: 'user_id and app_id are required' }, 400)

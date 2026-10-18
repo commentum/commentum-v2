@@ -1,6 +1,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
-const BASE_URL = 'http://anymex.duckdns.org:8000/functions/v1'
+const BASE_URL =
+  Deno.env.get('EDGE_FUNCTION_BASE_URL') ||
+  (Deno.env.get('SUPABASE_URL') ? `${Deno.env.get('SUPABASE_URL')}/functions/v1` : 'http://anymex.duckdns.org:8000/functions/v1')
 
 const ENDPOINTS = [
   {
@@ -8,14 +10,23 @@ const ENDPOINTS = [
     path: '/ping',
     method: 'GET',
     body: null,
-    // Returns 200 always - it's a simple health check
+  },
+  {
+    name: 'auth',
+    path: '/auth',
+    method: 'GET',
+    body: null,
+  },
+  {
+    name: 'notifications',
+    path: '/notifications',
+    method: 'POST',
+    body: { action: '' },
   },
   {
     name: 'comments',
     path: '/comments',
     method: 'POST',
-    // Sending empty action → will hit default case → returns 400 "Invalid action"
-    // If it returns 400 = function is ALIVE. If 500 = crashed.
     body: { action: '' },
   },
   {

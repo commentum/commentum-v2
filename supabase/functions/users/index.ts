@@ -40,7 +40,7 @@ serve(async (req) => {
     const publicActions = [
       'get_user_history', 'get_role', 'search_users_public', 'get_user_info',
       'update_customizations', 'unlock_customization', 'link_account', 'unlink_account', 'get_profile',
-      'get_batch_customizations'
+      'get_batch_customizations', 'export_my_data'
     ]
 
     let moderator_id: string
@@ -184,6 +184,11 @@ serve(async (req) => {
       case 'get_batch_customizations':
         return await handleGetBatchCustomizations(supabase, {
           client_type, target_client_type, user_ids
+        })
+
+      case 'export_my_data':
+        return await handleExportUserData(supabase, {
+          client_type, user_id: moderator_id, verifiedUser
         })
 
       default:
@@ -1585,6 +1590,67 @@ async function handleUnlinkAccount(supabase: any, params: any) {
       success: true,
       message: `Successfully unlinked ${service_to_unlink}`,
       linked_accounts: formatLinkedAccounts(updated),
+    }),
+    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
+async function handleExportUserData(supabase: any, { client_type, user_id, verifiedUser }: any) {
+  const normClientType = client_type === 'mal' ? 'myanimelist' : (client_type || 'anilist');
+
+  // 1. Fetch user profile
+  const { data: userProfile } = await supabase
+    .from('commentum_users')
+    .select('*')
+    .eq('commentum_client_type', normClientType)
+    .eq('commentum_user_id', user_id)
+    .single();
+
+  // 2. Fetch comments created by this user
+  const { data: comments } = await supabase
+    .from('comments')
+    .select('id, media_id, media_type, media_title, content, created_at, updated_at, upvotes, downvotes, tags')
+    .eq('client_type', normClientType)
+    .eq('user_id', user_id)
+    .eq('deleted', false)
+    .order('created_at', { ascending: false });
+
+  // 3. Fetch votes cast by this user
+  const { data: votes } = await supabase
+    .from('votes')
+    .select('comment_id, vote_type, created_at')
+    .eq('client_type', normClientType)
+    .eq('user_id', user_id);
+
+  // 4. Fetch notification preferences
+  const { data: notificationPreferences } = await supabase
+    .from('notification_preferences')
+    .select('*')
+    .eq('client_type', normClientType)
+    .eq('user_id', user_id)
+    .single();
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      exported_at: new Date().toISOString(),
+      user: {
+        id: user_id,
+        client_type: normClientType,
+        username: userProfile?.username || verifiedUser?.username,
+        role: userProfile?.role || 'user',
+        points: userProfile?.points || 0,
+        streak: userProfile?.streak || 0,
+        unlocked_customizations: userProfile?.unlocked_customizations || [],
+        avatar_decoration: userProfile?.avatar_decoration,
+        banner_url: userProfile?.banner_url,
+        nameplate_theme: userProfile?.nameplate_theme,
+        profile_effect_url: userProfile?.profile_effect_url,
+        linked_accounts: userProfile ? formatLinkedAccounts(userProfile) : []
+      },
+      comments: comments || [],
+      votes: votes || [],
+      notification_preferences: notificationPreferences || null
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   );

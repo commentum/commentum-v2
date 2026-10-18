@@ -1,9 +1,17 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { getAuthUser, hasRoleLevel } from '../shared/authMiddleware.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-session-token',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+}
+
+function normalizeClientType(provider?: string, explicit?: string): string {
+  const raw = (explicit || provider || 'anilist').toLowerCase().trim()
+  if (raw === 'mal') return 'myanimelist'
+  return raw
 }
 
 serve(async (req) => {
@@ -17,70 +25,100 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const body = await req.json()
-    const { action } = body
+    // 1. Mandatory JWT Authentication
+    const auth = await getAuthUser(req, supabase, { requireAuth: true })
+    if (!auth.isAuthenticated || !auth.user) {
+      return new Response(
+        JSON.stringify({ error: auth.error || 'Authentication required to access notifications' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // 2. Parse request input (supports both GET query parameters and POST JSON body)
+    let action = ''
+    let params: any = {}
+
+    if (req.method === 'GET') {
+      const url = new URL(req.url)
+      action = url.searchParams.get('action') || 'get_history'
+      url.searchParams.forEach((val, key) => {
+        params[key] = val
+      })
+      if (params.unreadOnly !== undefined) {
+        params.unreadOnly = params.unreadOnly === 'true' || params.unreadOnly === '1'
+      }
+    } else {
+      params = await req.json().catch(() => ({}))
+      action = params.action
+    }
 
     switch (action) {
       case 'register_token':
-        return await handleRegisterToken(supabase, body)
+        return await handleRegisterToken(supabase, auth.user, params)
       case 'unregister_token':
-        return await handleUnregisterToken(supabase, body)
+        return await handleUnregisterToken(supabase, auth.user, params)
       case 'get_preferences':
-        return await handleGetPreferences(supabase, body)
+        return await handleGetPreferences(supabase, auth.user, params)
       case 'update_preferences':
-        return await handleUpdatePreferences(supabase, body)
+        return await handleUpdatePreferences(supabase, auth.user, params)
       case 'get_tokens':
-        return await handleGetTokens(supabase, body)
+        return await handleGetTokens(supabase, auth.user, params)
       case 'get_history':
-        return await handleGetHistory(supabase, body)
+        return await handleGetHistory(supabase, auth.user, params)
       case 'mark_read':
-        return await handleMarkRead(supabase, body)
+        return await handleMarkRead(supabase, auth.user, params)
       case 'mark_all_read':
-        return await handleMarkAllRead(supabase, body)
+        return await handleMarkAllRead(supabase, auth.user, params)
       case 'get_unread_count':
-        return await handleGetUnreadCount(supabase, body)
+        return await handleGetUnreadCount(supabase, auth.user, params)
       default:
         return new Response(
-          JSON.stringify({ error: `Invalid action: ${action}. Must be register_token, unregister_token, get_preferences, update_preferences, get_tokens, get_history, mark_read, mark_all_read, or get_unread_count` }),
+          JSON.stringify({
+            error: `Invalid action: ${action}. Must be register_token, unregister_token, get_preferences, update_preferences, get_tokens, get_history, mark_read, mark_all_read, or get_unread_count`,
+          }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Notifications API error:', error)
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({ error: 'Internal server error', details: error?.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })
 
 // ── REGISTER FCM TOKEN ──
-async function handleRegisterToken(supabase: any, body: any) {
-  const { client_type, user_id, fcm_token, device_info, platform, app_version } = body
+async function handleRegisterToken(supabase: any, user: any, body: any) {
+  const { fcm_token, device_info, platform, app_version } = body
+  const client_type = normalizeClientType(user.provider, body.client_type)
+  const user_id = user.uid
 
-  if (!client_type || !user_id || !fcm_token) {
+  if (!fcm_token) {
     return new Response(
-      JSON.stringify({ error: 'client_type, user_id, and fcm_token are required' }),
+      JSON.stringify({ error: 'fcm_token is required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
   // Upsert: if token exists for this user, reactivate it and update info
-  // If new token, insert it
   const { error } = await supabase
     .from('fcm_tokens')
-    .upsert({
-      client_type,
-      user_id,
-      fcm_token,
-      device_info: device_info || null,
-      platform: platform || 'android',
-      app_version: app_version || null,
-      is_active: true,
-      last_used_at: new Date().toISOString(),
-    }, {
-      onConflict: 'client_type,user_id,fcm_token'
-    })
+    .upsert(
+      {
+        client_type,
+        user_id,
+        fcm_token,
+        device_info: device_info || null,
+        platform: platform || 'android',
+        app_version: app_version || null,
+        is_active: true,
+        last_used_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'client_type,user_id,fcm_token',
+      }
+    )
 
   if (error) {
     console.error('Token registration error:', error)
@@ -97,12 +135,14 @@ async function handleRegisterToken(supabase: any, body: any) {
 }
 
 // ── UNREGISTER FCM TOKEN ──
-async function handleUnregisterToken(supabase: any, body: any) {
-  const { client_type, user_id, fcm_token } = body
+async function handleUnregisterToken(supabase: any, user: any, body: any) {
+  const { fcm_token } = body
+  const client_type = normalizeClientType(user.provider, body.client_type)
+  const user_id = user.uid
 
-  if (!client_type || !user_id || !fcm_token) {
+  if (!fcm_token) {
     return new Response(
-      JSON.stringify({ error: 'client_type, user_id, and fcm_token are required' }),
+      JSON.stringify({ error: 'fcm_token is required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -130,15 +170,9 @@ async function handleUnregisterToken(supabase: any, body: any) {
 }
 
 // ── GET NOTIFICATION PREFERENCES ──
-async function handleGetPreferences(supabase: any, body: any) {
-  const { client_type, user_id } = body
-
-  if (!client_type || !user_id) {
-    return new Response(
-      JSON.stringify({ error: 'client_type and user_id are required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
+async function handleGetPreferences(supabase: any, user: any, body: any) {
+  const client_type = normalizeClientType(user.provider, body.client_type)
+  const user_id = user.uid
 
   const { data: prefs } = await supabase
     .from('notification_preferences')
@@ -147,7 +181,6 @@ async function handleGetPreferences(supabase: any, body: any) {
     .eq('user_id', user_id)
     .single()
 
-  // Return defaults if no preferences exist yet
   const defaultPrefs = {
     notify_on_reply: true,
     notify_on_vote: true,
@@ -176,19 +209,21 @@ async function handleGetPreferences(supabase: any, body: any) {
         notify_on_recent_comment: prefs.notify_on_recent_comment ?? true,
         notify_on_comment_delete: prefs.notify_on_comment_delete ?? false,
         notify_on_mod_action: prefs.notify_on_mod_action ?? true,
-      }
+      },
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 // ── UPDATE NOTIFICATION PREFERENCES ──
-async function handleUpdatePreferences(supabase: any, body: any) {
-  const { client_type, user_id, preferences } = body
+async function handleUpdatePreferences(supabase: any, user: any, body: any) {
+  const client_type = normalizeClientType(user.provider, body.client_type)
+  const user_id = user.uid
+  const preferences = body.preferences
 
-  if (!client_type || !user_id || !preferences) {
+  if (!preferences || typeof preferences !== 'object') {
     return new Response(
-      JSON.stringify({ error: 'client_type, user_id, and preferences are required' }),
+      JSON.stringify({ error: 'preferences object is required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -200,7 +235,7 @@ async function handleUpdatePreferences(supabase: any, body: any) {
     'notify_on_announcement',
     'notify_on_recent_comment',
     'notify_on_comment_delete',
-    'notify_on_mod_action'
+    'notify_on_mod_action',
   ]
   const updates: any = { updated_at: new Date().toISOString() }
 
@@ -212,13 +247,16 @@ async function handleUpdatePreferences(supabase: any, body: any) {
 
   const { error } = await supabase
     .from('notification_preferences')
-    .upsert({
-      client_type,
-      user_id,
-      ...updates,
-    }, {
-      onConflict: 'client_type,user_id'
-    })
+    .upsert(
+      {
+        client_type,
+        user_id,
+        ...updates,
+      },
+      {
+        onConflict: 'client_type,user_id',
+      }
+    )
 
   if (error) {
     console.error('Preference update error:', error)
@@ -235,21 +273,29 @@ async function handleUpdatePreferences(supabase: any, body: any) {
 }
 
 // ── GET REGISTERED TOKENS (for debugging / admin) ──
-async function handleGetTokens(supabase: any, body: any) {
-  const { client_type, user_id } = body
+async function handleGetTokens(supabase: any, user: any, body: any) {
+  // Only allow querying another user's tokens if user is moderator+
+  let targetUserId = user.uid
+  let client_type = normalizeClientType(user.provider, body.client_type)
 
-  if (!client_type || !user_id) {
-    return new Response(
-      JSON.stringify({ error: 'client_type and user_id are required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  if (body.user_id && body.user_id !== user.uid) {
+    if (!hasRoleLevel(user.role, 'moderator')) {
+      return new Response(
+        JSON.stringify({ error: 'Moderator permission required to view other user tokens' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+    targetUserId = body.user_id
+    if (body.client_type) {
+      client_type = normalizeClientType(undefined, body.client_type)
+    }
   }
 
   const { data: tokens, error } = await supabase
     .from('fcm_tokens')
     .select('id, fcm_token, platform, device_info, app_version, is_active, created_at, last_used_at')
     .eq('client_type', client_type)
-    .eq('user_id', user_id)
+    .eq('user_id', targetUserId)
     .order('created_at', { ascending: false })
 
   if (error) {
@@ -266,15 +312,10 @@ async function handleGetTokens(supabase: any, body: any) {
 }
 
 // ── GET NOTIFICATION HISTORY ──
-async function handleGetHistory(supabase: any, body: any) {
-  const { client_type, user_id, page = 1, limit = 30, type, unreadOnly } = body
-
-  if (!client_type || !user_id) {
-    return new Response(
-      JSON.stringify({ error: 'client_type and user_id are required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
+async function handleGetHistory(supabase: any, user: any, body: any) {
+  const client_type = normalizeClientType(user.provider, body.client_type)
+  const user_id = user.uid
+  const { page = 1, limit = 30, type, unreadOnly } = body
 
   const safeLimit = Math.min(Math.max(parseInt(limit) || 30, 1), 100)
   const safePage = Math.max(parseInt(page) || 1, 1)
@@ -291,7 +332,7 @@ async function handleGetHistory(supabase: any, body: any) {
   } else if (type) {
     query = query.eq('client_type', client_type).like('type', `${type}%`)
   } else {
-    // 'all' notifications: include both user's client_type and anymex app announcements
+    // Include both user's client_type and broadcast app announcements
     query = query.or(`client_type.eq.${client_type},client_type.eq.anymex`)
   }
 
@@ -321,7 +362,13 @@ async function handleGetHistory(supabase: any, body: any) {
   )
 
   if (announcementNotifs.length > 0) {
-    const annIds = [...new Set(announcementNotifs.map((n: any) => parseInt(n.metadata.announcement_id)).filter(Boolean))]
+    const annIds = [
+      ...new Set(
+        announcementNotifs
+          .map((n: any) => parseInt(n.metadata.announcement_id))
+          .filter(Boolean)
+      ),
+    ]
     if (annIds.length > 0) {
       const { data: existingAnns } = await supabase
         .from('announcements')
@@ -332,7 +379,6 @@ async function handleGetHistory(supabase: any, body: any) {
       const orphanedIds = annIds.filter((id: number) => !existingIdSet.has(String(id)))
 
       if (orphanedIds.length > 0) {
-        // Clean up orphaned records from notifications in the background
         for (const orphanId of orphanedIds) {
           supabase
             .from('notifications')
@@ -343,7 +389,9 @@ async function handleGetHistory(supabase: any, body: any) {
         }
 
         filteredNotifications = filteredNotifications.filter(
-          (n: any) => n.type !== 'announcement_published' || existingIdSet.has(String(n.metadata?.announcement_id))
+          (n: any) =>
+            n.type !== 'announcement_published' ||
+            existingIdSet.has(String(n.metadata?.announcement_id))
         )
       }
     }
@@ -376,20 +424,21 @@ async function handleGetHistory(supabase: any, body: any) {
         page: safePage,
         limit: safeLimit,
         total: count || 0,
-        total_pages: Math.ceil((count || 0) / safeLimit)
-      }
+        total_pages: Math.ceil((count || 0) / safeLimit),
+      },
     }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
 
 // ── MARK SINGLE NOTIFICATION AS READ ──
-async function handleMarkRead(supabase: any, body: any) {
-  const { client_type, user_id, notification_id } = body
+async function handleMarkRead(supabase: any, user: any, body: any) {
+  const user_id = user.uid
+  const notification_id = body.notification_id
 
-  if (!user_id || !notification_id) {
+  if (!notification_id) {
     return new Response(
-      JSON.stringify({ error: 'user_id and notification_id are required' }),
+      JSON.stringify({ error: 'notification_id is required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -398,7 +447,7 @@ async function handleMarkRead(supabase: any, body: any) {
     .from('notifications')
     .update({
       is_read: true,
-      read_at: new Date().toISOString()
+      read_at: new Date().toISOString(),
     })
     .eq('id', notification_id)
     .eq('user_id', user_id)
@@ -418,21 +467,16 @@ async function handleMarkRead(supabase: any, body: any) {
 }
 
 // ── MARK ALL NOTIFICATIONS AS READ ──
-async function handleMarkAllRead(supabase: any, body: any) {
-  const { client_type, user_id, type } = body
-
-  if (!client_type || !user_id) {
-    return new Response(
-      JSON.stringify({ error: 'client_type and user_id are required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
+async function handleMarkAllRead(supabase: any, user: any, body: any) {
+  const client_type = normalizeClientType(user.provider, body.client_type)
+  const user_id = user.uid
+  const type = body.type
 
   let query = supabase
     .from('notifications')
     .update({
       is_read: true,
-      read_at: new Date().toISOString()
+      read_at: new Date().toISOString(),
     })
     .eq('user_id', user_id)
     .eq('is_read', false)
@@ -462,15 +506,9 @@ async function handleMarkAllRead(supabase: any, body: any) {
 }
 
 // ── GET UNREAD COUNT ──
-async function handleGetUnreadCount(supabase: any, body: any) {
-  const { client_type, user_id } = body
-
-  if (!client_type || !user_id) {
-    return new Response(
-      JSON.stringify({ error: 'client_type and user_id are required' }),
-      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
-  }
+async function handleGetUnreadCount(supabase: any, user: any, body: any) {
+  const client_type = normalizeClientType(user.provider, body.client_type)
+  const user_id = user.uid
 
   const { count, error } = await supabase
     .from('notifications')

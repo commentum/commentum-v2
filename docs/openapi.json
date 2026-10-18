@@ -1,0 +1,500 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Commentum v2 Edge API",
+    "version": "2.0.0",
+    "description": "High-performance community commenting, social gamification, and notification platform for AnymeX. Powered by Supabase Edge Functions with HMAC-SHA256 JWT session authentication.",
+    "contact": {
+      "name": "AnymeX Development Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{projectRef}.supabase.co/functions/v1",
+      "description": "Supabase Edge Functions Cluster",
+      "variables": {
+        "projectRef": {
+          "default": "your-project-ref",
+          "description": "Supabase project reference ID"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "HMAC-SHA256 session token obtained from POST /auth/login. Also accepted in x-session-token header."
+      }
+    },
+    "schemas": {
+      "AuthLoginRequest": {
+        "type": "object",
+        "required": ["provider", "token"],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["anilist", "myanimelist", "mal", "simkl"],
+            "description": "Third-party OAuth provider"
+          },
+          "token": {
+            "type": "string",
+            "description": "Third-party OAuth access token from the provider"
+          }
+        }
+      },
+      "AuthLoginResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "session_token": { "type": "string" },
+          "token_type": { "type": "string", "example": "Bearer" },
+          "expires_in": { "type": "integer", "example": 604800 },
+          "user": { "$ref": "#/components/schemas/UserProfile" }
+        }
+      },
+      "UserProfile": {
+        "type": "object",
+        "properties": {
+          "uid": { "type": "string" },
+          "username": { "type": "string" },
+          "provider": { "type": "string" },
+          "role": {
+            "type": "string",
+            "enum": ["user", "moderator", "admin", "super_admin", "app_owner", "owner"]
+          },
+          "avatar": { "type": "string", "nullable": true },
+          "avatar_decoration": { "type": "string", "nullable": true },
+          "banner_url": { "type": "string", "nullable": true },
+          "nameplate_theme": { "type": "string", "nullable": true },
+          "profile_effect_url": { "type": "string", "nullable": true },
+          "points": { "type": "integer" },
+          "streak": { "type": "integer" },
+          "longest_streak": { "type": "integer" },
+          "unlocked_customizations": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "CommentItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "client_type": { "type": "string" },
+          "user_id": { "type": "string" },
+          "username": { "type": "string" },
+          "user_avatar": { "type": "string", "nullable": true },
+          "user_role": { "type": "string" },
+          "avatar_decoration": { "type": "string", "nullable": true },
+          "banner_url": { "type": "string", "nullable": true },
+          "nameplate_theme": { "type": "string", "nullable": true },
+          "media_id": { "type": "string" },
+          "media_type": { "type": "string" },
+          "media_title": { "type": "string" },
+          "content": { "type": "string" },
+          "parent_id": { "type": "integer", "nullable": true },
+          "upvotes": { "type": "integer" },
+          "downvotes": { "type": "integer" },
+          "vote_score": { "type": "integer" },
+          "pinned": { "type": "boolean" },
+          "locked": { "type": "boolean" },
+          "user_vote": { "type": "integer", "enum": [1, -1, 0] },
+          "user_vote_type": { "type": "string", "enum": ["upvote", "downvote", "none"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "replies": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CommentItem" }
+          }
+        }
+      },
+      "VoteRequest": {
+        "type": "object",
+        "required": ["comment_id", "vote_type"],
+        "properties": {
+          "comment_id": { "type": "integer" },
+          "vote_type": {
+            "oneOf": [
+              { "type": "integer", "enum": [1, -1, 0] },
+              { "type": "string", "enum": ["upvote", "downvote", "remove"] }
+            ]
+          }
+        }
+      },
+      "VoteResponse": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "action": { "type": "string" },
+          "vote_type": { "type": "string" },
+          "vote_score": { "type": "integer" },
+          "upvotes": { "type": "integer" },
+          "downvotes": { "type": "integer" },
+          "user_vote": { "type": "integer" }
+        }
+      },
+      "NotificationItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "body": { "type": "string" },
+          "is_read": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "metadata": { "type": "object" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string" },
+          "status": { "type": "integer" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "summary": "Exchange third-party OAuth token for JWT session token",
+        "operationId": "authLogin",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AuthLoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login successful, session token issued",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthLoginResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid third-party credentials",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "summary": "Get authenticated user profile and session status",
+        "operationId": "authMe",
+        "responses": {
+          "200": {
+            "description": "Session active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "authenticated": { "type": "boolean" },
+                    "user": { "$ref": "#/components/schemas/UserProfile" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized or session expired"
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "summary": "Refresh unexpired session token",
+        "operationId": "authRefresh",
+        "responses": {
+          "200": {
+            "description": "Session refreshed"
+          }
+        }
+      }
+    },
+    "/media": {
+      "get": {
+        "summary": "Get threaded comments for media with user vote injection",
+        "operationId": "getMediaComments",
+        "parameters": [
+          {
+            "name": "media_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "client_type",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 30 }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["best", "newest", "oldest"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comment thread list with replies and user vote state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "media_id": { "type": "string" },
+                    "comments": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CommentItem" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required to read comments"
+          }
+        }
+      }
+    },
+    "/comments": {
+      "post": {
+        "summary": "Comment CRUD (create, edit, delete)",
+        "operationId": "commentAction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["create", "edit", "delete"]
+                  },
+                  "media_id": { "type": "string" },
+                  "media_type": { "type": "string" },
+                  "media_title": { "type": "string" },
+                  "content": { "type": "string" },
+                  "parent_id": { "type": "integer", "nullable": true },
+                  "comment_id": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment operation successful"
+          },
+          "401": {
+            "description": "Authentication required"
+          }
+        }
+      }
+    },
+    "/votes": {
+      "post": {
+        "summary": "Cast, change, or remove vote on comment",
+        "operationId": "castVote",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/VoteRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vote recorded",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/VoteResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports": {
+      "post": {
+        "summary": "Report comment or manage reports queue (mod+)",
+        "operationId": "reportAction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["report", "resolve", "get_queue"]
+                  },
+                  "comment_id": { "type": "integer" },
+                  "reason": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Report action completed" }
+        }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "summary": "Fetch notification history or unread count",
+        "operationId": "getNotifications",
+        "parameters": [
+          { "name": "action", "in": "query", "schema": { "type": "string" } },
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Notifications response" }
+        }
+      },
+      "post": {
+        "summary": "Manage FCM tokens and notifications (register, mark read)",
+        "operationId": "notificationAction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["register_token", "unregister_token", "mark_read", "mark_all_read", "get_preferences", "update_preferences"]
+                  },
+                  "fcm_token": { "type": "string" },
+                  "notification_id": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Operation successful" }
+        }
+      }
+    },
+    "/points": {
+      "get": {
+        "summary": "Get user points, streak, and leaderboard",
+        "operationId": "getPoints",
+        "parameters": [
+          { "name": "action", "in": "query", "schema": { "type": "string", "enum": ["get_points", "get_leaderboard"] } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Points data" }
+        }
+      }
+    },
+    "/users": {
+      "post": {
+        "summary": "User management, cosmetics shop, profile updates, and data export",
+        "operationId": "userAction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": ["get_profile", "update_customizations", "unlock_customization", "link_account", "unlink_account", "export_my_data"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "User operation completed" }
+        }
+      }
+    },
+    "/ping": {
+      "get": {
+        "summary": "Lightweight health heartbeat",
+        "operationId": "ping",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Pong",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "message": { "type": "string", "example": "pong" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Comprehensive edge functions and cluster health check",
+        "operationId": "healthCheck",
+        "security": [],
+        "responses": {
+          "200": { "description": "All services healthy" },
+          "207": { "description": "One or more edge functions degraded" }
+        }
+      }
+    }
+  }
+}
