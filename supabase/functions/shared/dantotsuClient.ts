@@ -449,6 +449,92 @@ export async function danFetchReplies(
   }
 }
 
+/**
+ * Reconcile already-mapped comments against the Dantotsu rows we just
+ * fetched: picks up edits, deletions and vote changes that happened on the
+ * Dantotsu side after the initial sync. Count-level vote sync only —
+ * Dantotsu does not expose who voted, so per-user vote rows stay untouched.
+ * Rows already deleted on our side are never resurrected.
+ */
+async function reconcileMappedComments(
+  db: any,
+  danRows: any[],
+  idMap: Map<number, number>
+): Promise<void> {
+  const pairs: { commentumId: number; dan: any }[] = []
+  for (const row of danRows || []) {
+    if (!row?.comment_id) continue
+    const commentumId = idMap.get(row.comment_id)
+    if (commentumId) pairs.push({ commentumId, dan: row })
+  }
+  if (pairs.length === 0) return
+
+  const commentumIds = [...new Set(pairs.map(p => p.commentumId))]
+  const { data: ourRows, error: fetchErr } = await db
+    .from('comments')
+    .select('id, content, deleted, edited, edit_count, edit_history, upvotes, downvotes')
+    .in('id', commentumIds)
+  if (fetchErr) {
+    console.warn('[DantotsuSync] Reconcile fetch failed:', fetchErr.message)
+    return
+  }
+
+  const ourMap = new Map<number, any>()
+  for (const row of ourRows || []) ourMap.set(row.id, row)
+
+  const now = new Date().toISOString()
+  let updated = 0
+
+  for (const p of pairs) {
+    const ours = ourMap.get(p.commentumId)
+    if (!ours || ours.deleted) continue
+
+    const update: Record<string, any> = {}
+
+    if (p.dan.deleted) {
+      update.deleted = true
+      update.deleted_at = now
+      update.deleted_by = 'dantotsu-sync'
+    } else {
+      const danContent = typeof p.dan.content === 'string' ? p.dan.content.trim() : ''
+      const ourContent = typeof ours.content === 'string' ? ours.content.trim() : ''
+      if (danContent && danContent !== ourContent) {
+        const newContent = p.dan.content.length > 10000 ? p.dan.content.slice(0, 10000) : p.dan.content
+        let history: any[] = []
+        try { history = ours.edit_history ? JSON.parse(ours.edit_history) : [] } catch (_) { history = [] }
+        if (!Array.isArray(history)) history = []
+        history.push({ oldContent: ours.content, newContent, editedAt: now, editedBy: 'dantotsu-sync' })
+        update.content = newContent
+        update.edited = true
+        update.edited_at = now
+        update.edit_count = (ours.edit_count || 0) + 1
+        update.edit_history = JSON.stringify(history)
+      }
+
+      const danUp = p.dan.upvotes || 0
+      const danDown = p.dan.downvotes || 0
+      if (danUp !== (ours.upvotes || 0) || danDown !== (ours.downvotes || 0)) {
+        update.upvotes = danUp
+        update.downvotes = danDown
+        update.vote_score = danUp - danDown
+      }
+    }
+
+    if (Object.keys(update).length === 0) continue
+
+    const { error } = await db.from('comments').update(update).eq('id', p.commentumId)
+    if (error) {
+      console.warn(`[DantotsuSync] Reconcile update failed for comment ${p.commentumId}:`, error.message)
+    } else {
+      updated++
+    }
+  }
+
+  if (updated > 0) {
+    console.log(`[DantotsuSync] Reconciled ${updated} mapped comment(s) from Dantotsu side`)
+  }
+}
+
 // Media sync rate limiter: avoids spamming Dantotsu on every single page load of the same anime
 const mediaSyncCooldown = new Map<string, number>()
 
@@ -541,6 +627,9 @@ export async function syncMediaFromDantotsu(
 
       const unmapped = danComments.filter((c: any) => !mappedSet.has(c.comment_id))
 
+      // Pick up Dantotsu-side edits/deletes/votes on comments we already have
+      await reconcileMappedComments(supabase, danComments, idMap)
+
       // Ingest unmapped top-level comments
       for (const c of unmapped) {
         const isDel = !!c.deleted
@@ -605,7 +694,7 @@ export async function syncMediaFromDantotsu(
             upvotes: c.upvotes || 0,
             downvotes: c.downvotes || 0,
             vote_score: (c.upvotes || 0) - (c.downvotes || 0),
-            tags: c.tag ? JSON.stringify(['spoiler', `episode:${c.tag}`]) : null,
+            tags: c.tag ? JSON.stringify([`episode:${c.tag}`]) : null,
             created_at: c.timestamp || null,
             updated_at: c.timestamp || null,
           })
@@ -656,6 +745,9 @@ export async function syncMediaFromDantotsu(
           }
         }
 
+        // Same reconcile for replies we already have
+        await reconcileMappedComments(supabase, replies, mappedReplies)
+
         for (const r of replies) {
           let replyComId = mappedReplies.get(r.comment_id)
 
@@ -696,7 +788,7 @@ export async function syncMediaFromDantotsu(
                 upvotes: r.upvotes || 0,
                 downvotes: r.downvotes || 0,
                 vote_score: (r.upvotes || 0) - (r.downvotes || 0),
-                tags: r.tag ? JSON.stringify(['spoiler', `episode:${r.tag}`]) : null,
+                tags: r.tag ? JSON.stringify([`episode:${r.tag}`]) : null,
                 created_at: r.timestamp || null,
                 updated_at: r.timestamp || null,
               })
