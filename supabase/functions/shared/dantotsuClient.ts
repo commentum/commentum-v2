@@ -459,13 +459,14 @@ export async function danFetchReplies(
 async function reconcileMappedComments(
   db: any,
   danRows: any[],
-  idMap: Map<number, number>
+  idMap: Map<number, number>,
+  originMap?: Map<number, string>
 ): Promise<void> {
-  const pairs: { commentumId: number; dan: any }[] = []
+  const pairs: { danId: number; commentumId: number; dan: any }[] = []
   for (const row of danRows || []) {
     if (!row?.comment_id) continue
     const commentumId = idMap.get(row.comment_id)
-    if (commentumId) pairs.push({ commentumId, dan: row })
+    if (commentumId) pairs.push({ danId: row.comment_id, commentumId, dan: row })
   }
   if (pairs.length === 0) return
 
@@ -496,10 +497,16 @@ async function reconcileMappedComments(
       update.deleted_at = now
       update.deleted_by = 'dantotsu-sync'
     } else {
-      const danContent = typeof p.dan.content === 'string' ? p.dan.content.trim() : ''
+      let danContent = typeof p.dan.content === 'string' ? p.dan.content.trim() : ''
+      // Comments born on our side are pushed to Dantotsu wrapped in ||...||
+      // when spoiler-tagged — unwrap before diffing so the wrap itself
+      // doesn't register as a Dantotsu-side edit.
+      if (originMap?.get(p.danId) === 'anymex' && /^\|\|[\s\S]*\|\|$/.test(danContent)) {
+        danContent = danContent.slice(2, -2).trim()
+      }
       const ourContent = typeof ours.content === 'string' ? ours.content.trim() : ''
       if (danContent && danContent !== ourContent) {
-        const newContent = p.dan.content.length > 10000 ? p.dan.content.slice(0, 10000) : p.dan.content
+        const newContent = danContent.length > 10000 ? danContent.slice(0, 10000) : danContent
         let history: any[] = []
         try { history = ours.edit_history ? JSON.parse(ours.edit_history) : [] } catch (_) { history = [] }
         if (!Array.isArray(history)) history = []
@@ -613,22 +620,24 @@ export async function syncMediaFromDantotsu(
       // Find which are already mapped
       const { data: existingMappings } = await supabase
         .from('dantotsu_id_mappings')
-        .select('dantotsu_comment_id, commentum_id')
+        .select('dantotsu_comment_id, commentum_id, origin')
         .in('dantotsu_comment_id', danIds)
 
       const mappedSet = new Set<number>()
       const idMap = new Map<number, number>()
+      const originMap = new Map<number, string>()
       if (existingMappings) {
         for (const m of existingMappings) {
           mappedSet.add(m.dantotsu_comment_id)
           idMap.set(m.dantotsu_comment_id, m.commentum_id)
+          originMap.set(m.dantotsu_comment_id, m.origin || 'dantotsu')
         }
       }
 
       const unmapped = danComments.filter((c: any) => !mappedSet.has(c.comment_id))
 
       // Pick up Dantotsu-side edits/deletes/votes on comments we already have
-      await reconcileMappedComments(supabase, danComments, idMap)
+      await reconcileMappedComments(supabase, danComments, idMap, originMap)
 
       // Ingest unmapped top-level comments
       for (const c of unmapped) {
@@ -734,19 +743,21 @@ export async function syncMediaFromDantotsu(
         const replyIds = replies.map((r: any) => r.comment_id).filter(Boolean)
         const { data: existingReplies } = await supabase
           .from('dantotsu_id_mappings')
-          .select('dantotsu_comment_id, commentum_id')
+          .select('dantotsu_comment_id, commentum_id, origin')
           .in('dantotsu_comment_id', replyIds)
 
         const mappedReplies = new Map<number, number>()
+        const originReplies = new Map<number, string>()
         if (existingReplies) {
           for (const er of existingReplies) {
             mappedReplies.set(er.dantotsu_comment_id, er.commentum_id)
             idMap.set(er.dantotsu_comment_id, er.commentum_id)
+            originReplies.set(er.dantotsu_comment_id, er.origin || 'dantotsu')
           }
         }
 
         // Same reconcile for replies we already have
-        await reconcileMappedComments(supabase, replies, mappedReplies)
+        await reconcileMappedComments(supabase, replies, mappedReplies, originReplies)
 
         for (const r of replies) {
           let replyComId = mappedReplies.get(r.comment_id)
