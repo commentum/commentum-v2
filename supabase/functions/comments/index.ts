@@ -767,11 +767,17 @@ async function handleCreateComment(supabase: any, params: any) {
           }
         }
 
+        // Dantotsu's tag is just the episode number — only ep/chap tags map
+        // across; 'Spoiler' / 'General' / anything else stays null there.
         let parsedTag: number | null = null
         if (typeof tag === 'number') parsedTag = tag
         else if (typeof tag === 'string') {
-          const n = parseInt(tag, 10)
-          if (!isNaN(n)) parsedTag = n
+          const m = tag.trim().match(/^(?:episode|chapter):(\d+)$/i)
+          if (m) parsedTag = parseInt(m[1], 10)
+          else {
+            const n = parseInt(tag, 10)
+            if (!isNaN(n)) parsedTag = n
+          }
         }
 
         let targetMediaId: number | null = null
@@ -787,11 +793,17 @@ async function handleCreateComment(supabase: any, params: any) {
           return
         }
 
+        // Dantotsu marks spoilers with ||text|| (their clients render it as
+        // tap-to-reveal) — wrap so our spoiler-tagged comments stay gated there.
+        const danContent = typeof tag === 'string' && tag.trim().toLowerCase() === 'spoiler'
+          ? `||${content}||`
+          : content
+
         const danCommentId = await danPostComment({
           authToken: auth.authToken,
           userId: auth.userId,
           mediaId: targetMediaId,
-          content,
+          content: danContent,
           tag: parsedTag,
           parentCommentId: danParentId,
         })
@@ -957,19 +969,27 @@ async function handleEditComment(supabase: any, params: any) {
         .eq('commentum_id', comment_id)
         .maybeSingle()
 
-      if (mapping?.dantotsu_comment_id) {
-        const danToken = anilistToken || token
-        let auth = danToken ? await danAuthenticate(danToken, supabase) : null
-        if (!auth) auth = await getDanModAuth(supabase)
-        if (auth) {
-          const success = await danEditComment({
-            authToken: auth.authToken,
-            danCommentId: mapping.dantotsu_comment_id,
-            content,
-          })
-          console.log(`[DantotsuSync] Edited comment ${comment_id} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+        if (mapping?.dantotsu_comment_id) {
+          const danToken = anilistToken || token
+          let auth = danToken ? await danAuthenticate(danToken, supabase) : null
+          if (!auth) auth = await getDanModAuth(supabase)
+          if (auth) {
+            // Keep the ||spoiler|| wrap on Dantotsu when editing a spoiler comment
+            let danContent = content
+            try {
+              const storedTags = comment.tags ? JSON.parse(comment.tags) : []
+              if (Array.isArray(storedTags) && storedTags.some((t: any) => String(t).toLowerCase() === 'spoiler')) {
+                danContent = `||${content}||`
+              }
+            } catch (_) { /* keep raw content */ }
+            const success = await danEditComment({
+              authToken: auth.authToken,
+              danCommentId: mapping.dantotsu_comment_id,
+              content: danContent,
+            })
+            console.log(`[DantotsuSync] Edited comment ${comment_id} on Dantotsu (${mapping.dantotsu_comment_id}): ${success}`)
+          }
         }
-      }
     } catch (err) {
       console.error('[DantotsuSync] Error syncing edit to Dantotsu:', err)
     }
