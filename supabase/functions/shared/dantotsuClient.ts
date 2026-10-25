@@ -473,7 +473,7 @@ async function reconcileMappedComments(
   const commentumIds = [...new Set(pairs.map(p => p.commentumId))]
   const { data: ourRows, error: fetchErr } = await db
     .from('comments')
-    .select('id, content, deleted, edited, edit_count, edit_history, upvotes, downvotes')
+    .select('id, content, deleted, edited, edit_count, edit_history, upvotes, downvotes, tag')
     .in('id', commentumIds)
   if (fetchErr) {
     console.warn('[DantotsuSync] Reconcile fetch failed:', fetchErr.message)
@@ -524,6 +524,14 @@ async function reconcileMappedComments(
         update.upvotes = danUp
         update.downvotes = danDown
         update.vote_score = danUp - danDown
+      }
+
+      // Episode/chapter tag: keep in sync with Dantotsu's integer
+      const danTag = p.dan.tag == null
+        ? null
+        : (typeof p.dan.tag === 'number' ? p.dan.tag : parseInt(String(p.dan.tag), 10) || null)
+      if ((danTag ?? null) !== (ours.tag ?? null)) {
+        update.tag = danTag
       }
     }
 
@@ -703,7 +711,8 @@ export async function syncMediaFromDantotsu(
             upvotes: c.upvotes || 0,
             downvotes: c.downvotes || 0,
             vote_score: (c.upvotes || 0) - (c.downvotes || 0),
-            tags: c.tag ? JSON.stringify([`episode:${c.tag}`]) : null,
+            tag: c.tag || null,
+            labels: null,
             created_at: c.timestamp || null,
             updated_at: c.timestamp || null,
           })
@@ -799,7 +808,8 @@ export async function syncMediaFromDantotsu(
                 upvotes: r.upvotes || 0,
                 downvotes: r.downvotes || 0,
                 vote_score: (r.upvotes || 0) - (r.downvotes || 0),
-                tags: r.tag ? JSON.stringify([`episode:${r.tag}`]) : null,
+                tag: r.tag || null,
+                labels: null,
                 created_at: r.timestamp || null,
                 updated_at: r.timestamp || null,
               })

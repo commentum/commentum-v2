@@ -103,8 +103,9 @@ CREATE TABLE comments (
     reports TEXT, -- JSON array
     report_status TEXT DEFAULT 'none' CHECK (report_status IN ('none', 'pending', 'reviewed', 'resolved', 'dismissed')),
     
-    -- Content warnings
-    tags TEXT, -- JSON array
+    -- Tagging
+    tag INTEGER, -- Episode/chapter number (Dantotsu-compatible), nullable
+    labels TEXT, -- JSON array of client labels (spoiler, general, theory, ...)
     tagged_by TEXT,
     
     -- User status

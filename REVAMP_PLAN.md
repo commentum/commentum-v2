@@ -216,6 +216,7 @@ Retrieves threaded discussions for anime, manga, and light novels.
         "id": 1420,
         "content": "Peak fiction!",
         "tag": 12,
+        "labels": ["Theory"],
         "parent_id": null,
         "created_at": "2026-10-17T12:00:00Z",
         "upvotes": 42,
@@ -585,10 +586,11 @@ class CommentumService extends GetxController {
     required String mediaTitle,
     required String content,
     int? tag,
+    List<String>? labels,
     int? parentId,
   }) async {
     await ensureAuthenticated();
-    
+
     final response = await http.post(
       Uri.parse('$baseUrl/comments'),
       headers: authHeaders,
@@ -598,6 +600,7 @@ class CommentumService extends GetxController {
         'media_title': mediaTitle,
         'content': content,
         'tag': tag,
+        'labels': labels,
         'parent_id': parentId,
       }),
     );

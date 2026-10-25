@@ -144,10 +144,13 @@ Content-Type: application/json
   "media_title": "Attack on Titan",
   "content": "The animation in this episode is breathtaking!",
   "parent_id": null,
-  "tags": ["spoiler"]
+  "tag": 5,
+  "labels": ["spoiler"]
 }
 ```
 *Note: To create a reply, provide the parent comment ID in `parent_id`.*
+
+*`tag` is the episode/chapter number (integer, nullable) and maps 1:1 to Dantotsu's comment tag. `labels` are client-side labels (e.g. `spoiler`) — a `spoiler` label renders the comment blurred in clients and sends it to Dantotsu wrapped in `||...||`.*
 
 #### Successful Response (`200 OK`)
 ```json

@@ -66,6 +66,7 @@ serve(async (req) => {
     const parent_id = body.parent_id
     const token = body.token
     const tag = body.tag
+    const labels = body.labels
     let user_info = body.user_info
     let media_info = body.media_info
     const access_token = body.access_token
@@ -171,24 +172,19 @@ serve(async (req) => {
       )
     }
 
-    if (tag !== undefined) {
-      if (typeof tag !== 'string' && typeof tag !== 'number') {
+    if (tag !== undefined && tag !== null) {
+      if (typeof tag !== 'number' || !Number.isInteger(tag) || tag < 0) {
         return new Response(
-          JSON.stringify({ error: 'Tag must be a string or number (episode identifier)' }),
+          JSON.stringify({ error: 'tag must be a non-negative integer (episode/chapter number)' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      
-      if (typeof tag === 'number' && tag < 0) {
+    }
+
+    if (labels !== undefined && labels !== null) {
+      if (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string' || !l.trim())) {
         return new Response(
-          JSON.stringify({ error: 'Tag number must be non-negative' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      
-      if (typeof tag === 'string' && tag.trim().length === 0) {
-        return new Response(
-          JSON.stringify({ error: 'Tag string cannot be empty' }),
+          JSON.stringify({ error: 'labels must be an array of non-empty strings' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
@@ -389,6 +385,7 @@ serve(async (req) => {
           content,
           parent_id,
           tag,
+          labels,
           userInfo,
           mediaInfo,
           userRole,
@@ -453,7 +450,7 @@ serve(async (req) => {
 })
 
 async function handleCreateComment(supabase: any, params: any) {
-  const { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req, configs, token, anilistToken } = params
+  const { client_type, user_id, media_id, content, parent_id, tag, labels, userInfo, mediaInfo, userRole, req, configs, token, anilistToken } = params
 
   if (parent_id) {
     const { data: parentComment } = await supabase
@@ -521,7 +518,8 @@ async function handleCreateComment(supabase: any, params: any) {
       media_id: mediaInfo.media_id,
       content,
       parent_id,
-      tags: tag !== undefined ? JSON.stringify([tag]) : null,
+      tag: typeof tag === 'number' ? tag : null,
+      labels: Array.isArray(labels) && labels.length ? JSON.stringify(labels.map((l: string) => l.trim())) : null,
       username: userInfo.username,
       user_avatar: userInfo.avatar,
       avatar_decoration: userInfo.avatar_decoration || null,
@@ -538,12 +536,15 @@ async function handleCreateComment(supabase: any, params: any) {
       id, client_type, user_id, media_id, content, username, user_avatar, avatar_decoration, banner_url, user_role,
       media_type, media_title, media_year, media_poster, parent_id, created_at, updated_at,
       deleted, pinned, locked, edited, edit_count, upvotes, downvotes, vote_score,
-      reported, report_count, tags,
+      reported, report_count, tag, labels,
       translated_content, original_language, translated_at
     `)
     .single()
 
   if (error) throw error
+
+  // Shape labels for the client (stored as JSON text in the DB)
+  comment.labels = comment.labels ? JSON.parse(comment.labels) : []
 
   // Wait for translation result and save to DB (non-blocking for the user, but we do it before response)
   const translation = await translationPromise
@@ -767,18 +768,8 @@ async function handleCreateComment(supabase: any, params: any) {
           }
         }
 
-        // Dantotsu's tag is just the episode number — only ep/chap tags map
-        // across; 'Spoiler' / 'General' / anything else stays null there.
-        let parsedTag: number | null = null
-        if (typeof tag === 'number') parsedTag = tag
-        else if (typeof tag === 'string') {
-          const m = tag.trim().match(/^(?:episode|chapter):(\d+)$/i)
-          if (m) parsedTag = parseInt(m[1], 10)
-          else {
-            const n = parseInt(tag, 10)
-            if (!isNaN(n)) parsedTag = n
-          }
-        }
+        // Dantotsu's tag is just the episode number — pass our integer through
+        const parsedTag = typeof tag === 'number' ? tag : null
 
         let targetMediaId: number | null = null
         if (client_type === 'anilist') {
@@ -794,10 +785,9 @@ async function handleCreateComment(supabase: any, params: any) {
         }
 
         // Dantotsu marks spoilers with ||text|| (their clients render it as
-        // tap-to-reveal) — wrap so our spoiler-tagged comments stay gated there.
-        const danContent = typeof tag === 'string' && tag.trim().toLowerCase() === 'spoiler'
-          ? `||${content}||`
-          : content
+        // tap-to-reveal) — wrap so spoiler-labelled comments stay gated there.
+        const isSpoiler = Array.isArray(labels) && labels.some((l: string) => l.trim().toLowerCase() === 'spoiler')
+        const danContent = isSpoiler ? `||${content}||` : content
 
         const danCommentId = await danPostComment({
           authToken: auth.authToken,
@@ -977,8 +967,8 @@ async function handleEditComment(supabase: any, params: any) {
             // Keep the ||spoiler|| wrap on Dantotsu when editing a spoiler comment
             let danContent = content
             try {
-              const storedTags = comment.tags ? JSON.parse(comment.tags) : []
-              if (Array.isArray(storedTags) && storedTags.some((t: any) => String(t).toLowerCase() === 'spoiler')) {
+              const storedLabels = comment.labels ? JSON.parse(comment.labels) : []
+              if (Array.isArray(storedLabels) && storedLabels.some((t: any) => String(t).toLowerCase() === 'spoiler')) {
                 danContent = `||${content}||`
               }
             } catch (_) { /* keep raw content */ }
@@ -999,6 +989,9 @@ async function handleEditComment(supabase: any, params: any) {
     // @ts-ignore
     EdgeRuntime.waitUntil(danEditPromise)
   }
+
+  // Shape labels for the client (stored as JSON text in the DB)
+  try { updatedComment.labels = updatedComment.labels ? JSON.parse(updatedComment.labels) : [] } catch (_) {}
 
   return new Response(
     JSON.stringify({ success: true, comment: stripSensitiveFields(updatedComment) }),

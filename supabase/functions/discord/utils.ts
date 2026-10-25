@@ -98,8 +98,7 @@ export function createEmbedResponse(title: string, description: string, fields: 
 export function createCommentEmbed(comment: any, showFullContent: boolean = false, isMod: boolean = false): Response {
   const reports = JSON.parse(comment.reports || '[]')
   const userVotes = JSON.parse(comment.user_votes || '{}')
-  const tags = JSON.parse(comment.tags || '[]')
-  
+
   const fields = [
     {
       name: 'Author',

@@ -951,7 +951,7 @@ async function handleGetUserHistory(supabase: any, params: any) {
       .single(),
     supabase
       .from('comments')
-      .select('id, content, created_at, updated_at, deleted, pinned, locked, upvotes, downvotes, report_count, moderated, moderation_reason, media_id, media_title, media_type, tags')
+      .select('id, content, created_at, updated_at, deleted, pinned, locked, upvotes, downvotes, report_count, moderated, moderation_reason, media_id, media_title, media_type, tag, labels')
       .eq('user_id', target_user_id)
       .eq('client_type', target_client_type)
       .order('created_at', { ascending: false })
@@ -980,7 +980,8 @@ async function handleGetUserHistory(supabase: any, params: any) {
     deleted: c.deleted,
     media_title: c.media_title,
     media_type: c.media_type,
-    tags: c.tags,
+    tag: c.tag ?? null,
+    labels: c.labels ? JSON.parse(c.labels) : [],
     ...(isMod ? {
       pinned: c.pinned,
       locked: c.locked,
@@ -1609,7 +1610,7 @@ async function handleExportUserData(supabase: any, { client_type, user_id, verif
   // 2. Fetch comments created by this user
   const { data: comments } = await supabase
     .from('comments')
-    .select('id, media_id, media_type, media_title, content, created_at, updated_at, upvotes, downvotes, tags')
+    .select('id, media_id, media_type, media_title, content, created_at, updated_at, upvotes, downvotes, tag, labels')
     .eq('client_type', normClientType)
     .eq('user_id', user_id)
     .eq('deleted', false)

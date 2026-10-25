@@ -395,7 +395,8 @@ function buildNestedStructure(comments: any[]) {
       // Parse JSON fields
       user_votes: comment.user_votes ? JSON.parse(comment.user_votes) : {},
       reports: comment.reports ? JSON.parse(comment.reports) : [],
-      tags: comment.tags ? JSON.parse(comment.tags) : []
+      tag: comment.tag ?? null,
+      labels: comment.labels ? JSON.parse(comment.labels) : []
     }
   })
   

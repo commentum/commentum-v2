@@ -100,6 +100,8 @@
           "media_type": { "type": "string" },
           "media_title": { "type": "string" },
           "content": { "type": "string" },
+          "tag": { "type": "integer", "nullable": true, "description": "Episode/chapter number (Dantotsu-compatible)" },
+          "labels": { "type": "array", "items": { "type": "string" }, "description": "Client labels, e.g. spoiler" },
           "parent_id": { "type": "integer", "nullable": true },
           "upvotes": { "type": "integer" },
           "downvotes": { "type": "integer" },
@@ -314,6 +316,8 @@
                   "media_type": { "type": "string" },
                   "media_title": { "type": "string" },
                   "content": { "type": "string" },
+                  "tag": { "type": "integer", "nullable": true, "description": "Episode/chapter number (Dantotsu-compatible)" },
+                  "labels": { "type": "array", "items": { "type": "string" }, "description": "Client labels, e.g. spoiler" },
                   "parent_id": { "type": "integer", "nullable": true },
                   "comment_id": { "type": "integer" }
                 }
