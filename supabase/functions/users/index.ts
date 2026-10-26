@@ -1383,34 +1383,31 @@ async function handleUnlockCustomization(supabase: any, params: any) {
     });
   }
 
-  // Check user points from user_points table
-  const { data: userPointsRow } = await supabase
-    .from('user_points')
-    .select('total_points')
-    .eq('user_id', moderator_id)
-    .eq('client_type', normClient)
-    .single();
+  // Spend points through the atomic SQL helper. spend_user_points()
+  // refreshes the cached balance first, then deducts inside a guarded
+  // UPDATE that records the purchase in user_points.points_spent.
+  // points_spent survives every activity recalculation (refresh_user_points
+  // never touches it), so spent points can no longer "come back" after the
+  // next comment or vote, and the same balance cannot be double-spent.
+  const { data: spendResult, error: spendError } = await supabase
+    .rpc('spend_user_points', {
+      p_client_type: normClient,
+      p_user_id: moderator_id,
+      p_amount: pointsRequired
+    });
 
-  const currentPoints = Number(userPointsRow?.total_points || 0);
-
-  if (currentPoints < pointsRequired) {
+  if (spendError || !spendResult?.success) {
     return new Response(JSON.stringify({
-      error: 'Insufficient points',
+      error: spendError ? 'Failed to spend points' : 'Insufficient points',
       required_points: pointsRequired,
-      current_points: currentPoints
+      current_points: Number(spendResult?.remaining_points ?? 0)
     }), {
-      status: 400,
+      status: spendError ? 500 : 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
 
-  // Deduct points from user_points and record unlock in inventory
-  const newPoints = currentPoints - pointsRequired;
-  await supabase
-    .from('user_points')
-    .update({ total_points: newPoints, updated_at: new Date().toISOString() })
-    .eq('user_id', moderator_id)
-    .eq('client_type', normClient);
+  const remainingPoints = Number(spendResult.remaining_points ?? 0);
 
   const updatedUnlocked = [...unlocked, customization_id];
   await supabase
@@ -1423,7 +1420,7 @@ async function handleUnlockCustomization(supabase: any, params: any) {
     message: `Successfully unlocked ${item?.title || customization_id}!`,
     customization_id,
     points_spent: pointsRequired,
-    remaining_points: newPoints
+    remaining_points: remainingPoints
   }), {
     status: 200,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' }
