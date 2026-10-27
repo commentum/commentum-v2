@@ -5,6 +5,7 @@ import { resolveUserBadges } from '../shared/badges.ts'
 import { getConfig } from '../shared/configCache.ts'
 import { syncMediaFromDantotsu } from '../shared/dantotsuClient.ts'
 import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
+import { resolveMediaById, isUnknownMediaTitle } from '../shared/mediaResolver.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -304,20 +305,17 @@ serve(async (req) => {
       mediaPoster: firstNonDeleted.media_poster
     } : null
 
-    // Fallback: If mediaTitle is 'Unknown Media' or missing, check dantotsu_media_cache
-    if (mediaInfo && (!mediaInfo.mediaTitle || mediaInfo.mediaTitle === 'Unknown Media' || mediaInfo.mediaTitle === 'Unknown')) {
+    // Fallback: If mediaTitle is 'Unknown Media' or missing, resolve from
+    // dantotsu_media_cache, falling back to a live AniList fetch (cached)
+    if (mediaInfo && isUnknownMediaTitle(mediaInfo.mediaTitle)) {
       const midNum = parseInt(media_id)
       if (!isNaN(midNum)) {
-        const { data: cached } = await supabase
-          .from('dantotsu_media_cache')
-          .select('media_type, media_title, media_year, media_poster')
-          .eq('media_id', midNum)
-          .maybeSingle()
-        if (cached && cached.media_title && cached.media_title !== 'Unknown Media') {
-          mediaInfo.mediaTitle = cached.media_title
-          mediaInfo.mediaType = cached.media_type || mediaInfo.mediaType
-          mediaInfo.mediaYear = cached.media_year || mediaInfo.mediaYear
-          mediaInfo.mediaPoster = cached.media_poster || mediaInfo.mediaPoster
+        const resolved = await resolveMediaById(supabase, midNum, mediaInfo.mediaType)
+        if (resolved) {
+          mediaInfo.mediaTitle = resolved.media_title
+          mediaInfo.mediaType = resolved.media_type || mediaInfo.mediaType
+          mediaInfo.mediaYear = resolved.media_year || mediaInfo.mediaYear
+          mediaInfo.mediaPoster = resolved.media_poster || mediaInfo.mediaPoster
         }
       }
     }
