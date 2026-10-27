@@ -8,6 +8,7 @@ import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { parseMentions } from '../shared/mentionUtils.ts'
 import { getConfig, getConfigs, getUserRoleFromConfig } from '../shared/configCache.ts'
 import { translateText, getLanguageName } from '../shared/translate.ts'
+import { resolveMediaById, isUnknownMediaTitle } from '../shared/mediaResolver.ts'
 import {
   danAuthenticate,
   getDanModAuth,
@@ -450,7 +451,24 @@ serve(async (req) => {
 })
 
 async function handleCreateComment(supabase: any, params: any) {
-  const { client_type, user_id, media_id, content, parent_id, tag, labels, userInfo, mediaInfo, userRole, req, configs, token, anilistToken } = params
+  let { client_type, user_id, media_id, content, parent_id, tag, labels, userInfo, mediaInfo, userRole, req, configs, token, anilistToken } = params
+
+  // Never persist 'Unknown Media' when the media id can resolve the title:
+  // check the media cache, then AniList (cached for future comments).
+  if (mediaInfo && isUnknownMediaTitle(mediaInfo.title)) {
+    const midNum = parseInt(String(mediaInfo.media_id), 10)
+    if (!isNaN(midNum)) {
+      const resolved = await resolveMediaById(supabase, midNum, mediaInfo.type)
+      if (resolved) {
+        mediaInfo = {
+          ...mediaInfo,
+          title: resolved.media_title,
+          year: mediaInfo.year ?? resolved.media_year,
+          poster: mediaInfo.poster ?? resolved.media_poster,
+        }
+      }
+    }
+  }
 
   if (parent_id) {
     const { data: parentComment } = await supabase

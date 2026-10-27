@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
+import { resolveMediaById, isUnknownMediaTitle } from './mediaResolver.ts'
 
 const DANTOTSU_API = 'https://api.dantotsu.app'
 const APP_AUTH_KEY = '6*45Qp%W2RS@t38jkXoSKY588Ynj%n'
@@ -599,15 +600,37 @@ export async function syncMediaFromDantotsu(
       return
     }
 
-    // Get media title from cache if available
+    // Get media title from cache if available; on a cache miss resolve from
+    // AniList (and backfill the cache) so ingested comments never persist
+    // 'Unknown Media' when the id alone can tell us the title.
     const { data: cachedMedia } = await supabase
       .from('dantotsu_media_cache')
       .select('media_title, media_type, media_year, media_poster')
       .eq('media_id', mediaId)
       .maybeSingle()
 
-    const mediaTitle = cachedMedia?.media_title || 'Unknown Media'
-    const mediaType = cachedMedia?.media_type || 'anime'
+    let mediaMeta = cachedMedia && !isUnknownMediaTitle(cachedMedia.media_title) ? cachedMedia : null
+    if (!mediaMeta) {
+      mediaMeta = await resolveMediaById(supabase, mediaId, cachedMedia?.media_type)
+      if (mediaMeta) {
+        // Heal rows this media previously ingested with the Unknown placeholder
+        supabase
+          .from('comments')
+          .update({
+            media_type: mediaMeta.media_type,
+            media_title: mediaMeta.media_title,
+            media_year: mediaMeta.media_year,
+            media_poster: mediaMeta.media_poster,
+          }, { count: 'exact' })
+          .eq('media_id', String(mediaId))
+          .eq('media_title', 'Unknown Media')
+          .then((r: any) => {
+            if (r?.count) console.log(`[DantotsuSync] Healed ${r.count} Unknown Media comment(s) for media ${mediaId}`)
+          })
+      }
+    }
+    const mediaTitle = mediaMeta?.media_title || cachedMedia?.media_title || 'Unknown Media'
+    const mediaType = mediaMeta?.media_type || cachedMedia?.media_type || 'anime'
 
     // We fetch starting from requestedPage up to totalPages (capped at 3 pages per request for performance)
     let currentPage = requestedPage
@@ -703,8 +726,8 @@ export async function syncMediaFromDantotsu(
             user_role: (c.is_admin || c.is_mod) ? 'moderator' : 'user',
             media_type: mediaType,
             media_title: mediaTitle,
-            media_year: cachedMedia?.media_year || null,
-            media_poster: cachedMedia?.media_poster || null,
+            media_year: mediaMeta?.media_year || null,
+            media_poster: mediaMeta?.media_poster || null,
             parent_id: pid,
             deleted: isDel,
             deleted_at: isDel ? c.timestamp || null : null,
@@ -800,8 +823,8 @@ export async function syncMediaFromDantotsu(
                 user_role: (r.is_admin || r.is_mod) ? 'moderator' : 'user',
                 media_type: mediaType,
                 media_title: mediaTitle,
-                media_year: cachedMedia?.media_year || null,
-                media_poster: cachedMedia?.media_poster || null,
+                media_year: mediaMeta?.media_year || null,
+                media_poster: mediaMeta?.media_poster || null,
                 parent_id: item.comParentId,
                 deleted: isReplyDel,
                 deleted_at: isReplyDel ? r.timestamp || null : null,
