@@ -56,9 +56,17 @@ serve(async (req) => {
       case 'refresh_all':
         return await handleRefreshAll(supabase, { client_type: target_client_type })
 
+      case 'claim_ad_points':
+        return await handleClaimAdPoints(supabase, {
+          client_type: body.client_type,
+          user_id: body.user_id || body.user_info?.user_id,
+          ad_id: body.ad_id || body.refer_id,
+          points: body.points
+        })
+
       default:
         return new Response(
-          JSON.stringify({ error: 'Invalid action. Must be get_user_points, get_leaderboard, get_points_config, get_batch_user_points, refresh_user, or refresh_all' }),
+          JSON.stringify({ error: 'Invalid action. Must be get_user_points, get_leaderboard, get_points_config, get_batch_user_points, refresh_user, refresh_all, or claim_ad_points' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }
@@ -417,5 +425,49 @@ async function handleRefreshAll(supabase: any, params: any) {
   return new Response(
     JSON.stringify({ success: true, refreshed_count: data }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+/**
+ * claim_ad_points
+ * Open action to reward points for watching an ad.
+ * Validates ad_id (refer_id) to prevent duplicate claims across linked accounts.
+ */
+async function handleClaimAdPoints(supabase: any, params: any) {
+  const { client_type, user_id, ad_id, points } = params
+
+  if (!client_type || !user_id) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'client_type and user_id are required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  if (!ad_id || typeof ad_id !== 'string' || ad_id.trim() === '') {
+    return new Response(
+      JSON.stringify({ success: false, error: 'ad_id_required', message: 'ad_id (or refer_id) is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const { data, error } = await supabase.rpc('claim_ad_points', {
+    p_client_type: client_type,
+    p_user_id: String(user_id),
+    p_ad_id: ad_id.trim(),
+    p_points: points && typeof points === 'number' && points > 0 ? points : null
+  })
+
+  if (error) {
+    console.error('claim_ad_points RPC error:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: 'Failed to claim ad points' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const statusCode = data?.success === true ? 200 : 400
+  return new Response(
+    JSON.stringify(data),
+    { status: statusCode, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }
