@@ -61,7 +61,7 @@ serve(async (req) => {
           client_type: body.client_type,
           user_id: body.user_id || body.user_info?.user_id,
           ad_id: body.ad_id || body.refer_id,
-          points: body.points
+          points: body.points ?? body.points_reward ?? body.reward_points
         })
 
       default:
@@ -450,11 +450,15 @@ async function handleClaimAdPoints(supabase: any, params: any) {
     )
   }
 
+  const parsedPoints = points !== undefined && points !== null && !isNaN(Number(points)) && Number(points) > 0
+    ? Math.floor(Number(points))
+    : null
+
   const { data, error } = await supabase.rpc('claim_ad_points', {
     p_client_type: client_type,
     p_user_id: String(user_id),
     p_ad_id: ad_id.trim(),
-    p_points: points && typeof points === 'number' && points > 0 ? points : null
+    p_points: parsedPoints
   })
 
   if (error) {
