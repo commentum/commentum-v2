@@ -162,7 +162,7 @@ async function handleGetUserPoints(supabase: any, params: any) {
   if (error) {
     console.error('get_user_points RPC error:', error)
     return new Response(
-      JSON.stringify({ error: 'Failed to calculate points' }),
+      JSON.stringify({ error: 'Failed to calculate points', details: error.message || error }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -460,7 +460,7 @@ async function handleClaimAdPoints(supabase: any, params: any) {
   if (error) {
     console.error('claim_ad_points RPC error:', error)
     return new Response(
-      JSON.stringify({ success: false, error: 'Failed to claim ad points' }),
+      JSON.stringify({ success: false, error: 'Failed to claim ad points', details: error.message || error }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
