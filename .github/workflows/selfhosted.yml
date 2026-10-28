@@ -32,7 +32,7 @@ jobs:
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           source: "supabase/functions/*"
-          target: "/root/supabase/docker/volumes/functions/"
+          target: "/root/commentum/functions/"
           strip_components: 2
 
       # Restart edge functions container
@@ -44,7 +44,8 @@ jobs:
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /root/supabase/docker
+            set -eo pipefail
+            cd /root/commentum
             docker compose restart functions
             echo "✅ Edge functions restarted"
 
@@ -61,7 +62,7 @@ jobs:
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           source: "supabase/migrations"
-          target: "/root/supabase/docker/volumes/db/"
+          target: "/root/commentum/"
           strip_components: 1
 
       # Run DB migrations
@@ -78,13 +79,16 @@ jobs:
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /root/supabase/docker
-            MDIR=/root/supabase/docker/volumes/db/migrations
+            set -eo pipefail
+            cd /root/commentum
+            docker compose ps -q db | grep -q . || { echo "❌ db container not found in $(pwd)"; exit 1; }
+            MDIR=/root/commentum/migrations
             # Run as supabase_admin (superuser + function owner).
             # -U postgres fails every CREATE OR REPLACE FUNCTION with
             # "must be owner" while still printing success.
             PSQL="docker compose exec -T db psql -U supabase_admin -d postgres -t -A"
             TRACKING_EXISTS=$($PSQL -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations';")
+            case "$TRACKING_EXISTS" in 0|1) ;; *) echo "❌ tracking check failed (got '$TRACKING_EXISTS')"; exit 1;; esac
             if [ "$TRACKING_EXISTS" = "0" ]; then
               echo "🆕 Creating schema_migrations tracking table"
               $PSQL -c "CREATE TABLE public.schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW());"
@@ -103,13 +107,18 @@ jobs:
                 done
               fi
             fi
+            ROWS=$($PSQL -c "SELECT count(*) FROM public.schema_migrations;")
+            if [ "$ROWS" = "0" ]; then
+              echo "❌ schema_migrations is empty — refusing to run, this would re-run destructive migrations"; exit 1
+            fi
             for f in $MDIR/*.sql; do
               [ -f "$f" ] || continue
               BASE=$(basename "$f")
               APPLIED=$($PSQL -c "SELECT count(*) FROM public.schema_migrations WHERE filename='$BASE';")
+              case "$APPLIED" in 0|1) ;; *) echo "❌ check failed for $BASE (got '$APPLIED')"; exit 1;; esac
               if [ "$APPLIED" = "0" ]; then
                 echo "▶️ Running: $BASE"
-                cat "$f" | docker compose exec -T db psql -U supabase_admin -d postgres
+                cat "$f" | docker compose exec -T db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1
                 $PSQL -c "INSERT INTO public.schema_migrations (filename) VALUES ('$BASE') ON CONFLICT (filename) DO NOTHING;"
               else
                 echo "⏭️ Skipped (already applied): $BASE"
@@ -125,6 +134,7 @@ jobs:
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /root/supabase/docker
+            set -eo pipefail
+            cd /root/commentum
             docker compose ps
             echo "✅ Deploy complete"

@@ -48,7 +48,7 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             gunzip -f /tmp/media_mappings_seed.sql.gz
-            cd /root/supabase/docker
+            cd /root/commentum
             docker compose exec -T db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 < /tmp/media_mappings_seed.sql
             if [ $? -eq 0 ]; then
               echo "✅ media_id_map refreshed"
