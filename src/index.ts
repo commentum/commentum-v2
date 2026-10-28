@@ -14,6 +14,7 @@ import { pointsRoutes } from "./routes/points";
 import { customizationsRoutes } from "./routes/customizations";
 import { usersRoutes } from "./routes/users";
 import { announcementsRoutes } from "./routes/announcements";
+import { discordRoutes } from "./routes/discord";
 
 const app = new Hono<AppContext>();
 
@@ -74,6 +75,7 @@ app.route("/points", pointsRoutes);
 app.route("/customizations", customizationsRoutes);
 app.route("/users", usersRoutes);
 app.route("/announcements", announcementsRoutes);
+app.route("/discord", discordRoutes);
 
 // Global 404 Handler
 app.notFound((c) => {

@@ -1,9 +1,10 @@
 import { Hono } from "hono";
-import { AppContext } from "../types/env";
-import { optionalAuth, requireAuth } from "../middleware/auth";
-import { createDb } from "../db";
-import { comments, mediaIdMap, commentumUsers } from "../db/schema";
+import { AppContext } from "../types/env.js";
+import { optionalAuth } from "../middleware/auth.js";
+import { createDb } from "../db/index.js";
+import { comments, mediaIdMap } from "../db/schema.js";
 import { eq, and, desc, asc, or, inArray, isNull } from "drizzle-orm";
+import { getOrResolveMedia } from "../shared/mediaMapping.js";
 
 export const mediaRoutes = new Hono<AppContext>();
 
@@ -16,8 +17,8 @@ mediaRoutes.get("/", optionalAuth, async (c) => {
     const mediaId = c.req.query("media_id");
     const clientType = c.req.query("client_type") || "anilist";
     const mediaType = c.req.query("media_type") || c.req.query("type") || "anime";
-    const episode = c.req.query("episode");
-    const chapter = c.req.query("chapter");
+    const tagParam = c.req.query("tag");
+    const tag = tagParam !== undefined && tagParam !== "" ? parseInt(tagParam, 10) : undefined;
     const sort = c.req.query("sort") || "newest";
     const page = parseInt(c.req.query("page") || "1", 10);
     const limit = Math.min(parseInt(c.req.query("limit") || "30", 10), 100);
@@ -31,6 +32,9 @@ mediaRoutes.get("/", optionalAuth, async (c) => {
     const db = createDb(c.env.DB);
     const currentUser = c.get("user");
     const currentUserId = currentUser?.uid;
+
+    // 0. Auto-resolve media metadata and cross-client IDs if not yet in media table
+    const mediaInfo = await getOrResolveMedia(c.env.DB, clientType, mediaId, mediaType);
 
     // 1. Cross-client mapping lookup (unless merge=false)
     let targetPairs: { clientType: string; mediaId: string }[] = [{ clientType, mediaId }];
@@ -60,13 +64,10 @@ mediaRoutes.get("/", optionalAuth, async (c) => {
     );
     const mediaOrClause = matchConditions.length === 1 ? matchConditions[0] : or(...matchConditions);
 
-    // 3. Optional episode/chapter filters
+    // 3. Optional tag (episode/chapter) filter
     const extraFilters = [eq(comments.deleted, false), isNull(comments.parentId)];
-    if (episode) {
-      extraFilters.push(eq(comments.episode, episode));
-    }
-    if (chapter) {
-      extraFilters.push(eq(comments.chapter, chapter));
+    if (tag !== undefined && !isNaN(tag)) {
+      extraFilters.push(eq(comments.tag, tag));
     }
 
     // 4. Fetch top-level comments
@@ -147,10 +148,7 @@ mediaRoutes.get("/", optionalAuth, async (c) => {
         avatar_decoration: com.avatarDecoration,
         banner_url: com.bannerUrl,
         media_id: com.mediaId,
-        media_type: com.mediaType,
-        media_title: com.mediaTitle,
-        episode: com.episode,
-        chapter: com.chapter,
+        tag: com.tag,
         content: com.content,
         created_at: com.createdAt,
         updated_at: com.updatedAt,
@@ -161,7 +159,6 @@ mediaRoutes.get("/", optionalAuth, async (c) => {
         vote_score: com.voteScore,
         user_vote: userVote,
         tags: JSON.parse(com.tags || "[]"),
-        tag: com.tag,
         is_edited: com.edited,
         replies_count: commentReplies.length,
         replies: commentReplies,
@@ -174,6 +171,16 @@ mediaRoutes.get("/", optionalAuth, async (c) => {
       success: true,
       media_id: mediaId,
       client_type: clientType,
+      media: {
+        title: mediaInfo.title,
+        type: mediaInfo.type,
+        year: mediaInfo.year,
+        poster: mediaInfo.poster,
+        map_key: mediaInfo.mapKey,
+        anilist_id: mediaInfo.anilistId,
+        mal_id: mediaInfo.malId,
+        simkl_id: mediaInfo.simklId,
+      },
       page,
       limit,
       total_count: formattedComments.length,

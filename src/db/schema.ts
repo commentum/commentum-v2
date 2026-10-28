@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // ==========================================
@@ -16,13 +16,6 @@ export const comments = sqliteTable("comments", {
   userRole: text("user_role").notNull().default("user"), // user, moderator, admin, super_admin, owner, app_owner
   avatarDecoration: text("avatar_decoration"),
   bannerUrl: text("banner_url"),
-
-  mediaType: text("media_type").notNull().default("anime"), // anime, manga, novel
-  mediaTitle: text("media_title").notNull().default(""),
-  mediaYear: integer("media_year"),
-  mediaPoster: text("media_poster"),
-  episode: text("episode"),
-  chapter: text("chapter"),
 
   parentId: integer("parent_id"),
 
@@ -77,7 +70,7 @@ export const comments = sqliteTable("comments", {
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => [
   index("idx_comments_client_user").on(table.clientType, table.userId),
-  index("idx_comments_media").on(table.mediaId, table.mediaType),
+  index("idx_comments_media").on(table.mediaId),
   index("idx_comments_parent").on(table.parentId),
   index("idx_comments_created").on(table.createdAt),
   index("idx_comments_deleted").on(table.deleted),
@@ -97,6 +90,43 @@ export const config = sqliteTable("config", {
   value: text("value").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
 });
+
+// ==========================================
+// 2B. MEDIA METADATA TABLE (Normalized)
+// ==========================================
+export const media = sqliteTable("media", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  mediaId: text("media_id").notNull(),           // Raw provider ID
+  clientType: text("client_type").notNull().default("anilist"), // anilist, mal, simkl
+  mapKey: text("map_key"),                       // Cross-platform key, e.g. "anime:mal:21"
+  title: text("title").notNull(),
+  type: text("type").notNull().default("anime"),  // anime, manga, novel, movie, tv
+  year: integer("year"),
+  poster: text("poster"),
+  anilistId: text("anilist_id"),
+  malId: text("mal_id"),
+  simklId: text("simkl_id"),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => [
+  uniqueIndex("idx_media_client_id").on(table.clientType, table.mediaId),
+  index("idx_media_map_key").on(table.mapKey),
+  index("idx_media_title").on(table.title),
+]);
+
+// ==========================================
+// 2C. MEDIA ID MAP TABLE (034)
+// ==========================================
+export const mediaIdMap = sqliteTable("media_id_map", {
+  clientType: text("client_type").notNull(),     // anilist | mal | simkl
+  mediaId: text("media_id").notNull(),
+  mapKey: text("map_key").notNull(),             // e.g. "anime:mal:21"
+  mediaType: text("media_type").notNull().default("anime"),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => [
+  primaryKey({ columns: [table.clientType, table.mediaId] }),
+  index("idx_media_id_map_key").on(table.mapKey),
+]);
 
 // ==========================================
 // 3. DISCORD USERS TABLE (002)
@@ -500,20 +530,6 @@ export const dashboardSessions = sqliteTable("dashboard_sessions", {
   index("idx_dashboard_sessions_token").on(table.token),
   index("idx_dashboard_sessions_user").on(table.userId),
   index("idx_dashboard_sessions_expires").on(table.expiresAt),
-]);
-
-// ==========================================
-// 20. MEDIA ID MAP (034 - Cross-client merging)
-// ==========================================
-export const mediaIdMap = sqliteTable("media_id_map", {
-  clientType: text("client_type").notNull(), // anilist, mal, simkl
-  mediaId: text("media_id").notNull(),
-  mapKey: text("map_key").notNull(),         // e.g. 'anime:mal:21'
-  mediaType: text("media_type").notNull().default("anime"), // anime, manga
-  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
-}, (table) => [
-  uniqueIndex("idx_media_id_map_primary").on(table.clientType, table.mediaId),
-  index("idx_media_id_map_key").on(table.mapKey),
 ]);
 
 // ==========================================

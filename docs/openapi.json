@@ -101,10 +101,7 @@
           "avatar_decoration": { "type": "string", "nullable": true },
           "banner_url": { "type": "string", "nullable": true },
           "media_id": { "type": "string" },
-          "media_type": { "type": "string" },
-          "media_title": { "type": "string" },
-          "episode": { "type": "string", "nullable": true },
-          "chapter": { "type": "string", "nullable": true },
+          "tag": { "type": "integer", "nullable": true, "description": "Episode or chapter number" },
           "content": { "type": "string" },
           "parent_id": { "type": "integer", "nullable": true },
           "pinned": { "type": "boolean" },
@@ -113,8 +110,7 @@
           "downvotes": { "type": "integer" },
           "vote_score": { "type": "integer" },
           "user_vote": { "type": "integer", "enum": [-1, 0, 1] },
-          "tags": { "type": "array", "items": { "type": "string" } },
-          "tag": { "type": "integer", "nullable": true },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Content warning labels e.g. spoiler" },
           "is_edited": { "type": "boolean" },
           "replies_count": { "type": "integer" },
           "replies": {
@@ -220,8 +216,7 @@
           { "name": "media_id", "in": "query", "required": true, "schema": { "type": "string" } },
           { "name": "client_type", "in": "query", "required": false, "schema": { "type": "string", "default": "anilist" } },
           { "name": "media_type", "in": "query", "required": false, "schema": { "type": "string", "default": "anime" } },
-          { "name": "episode", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "chapter", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "tag", "in": "query", "required": false, "description": "Specific episode or chapter number (e.g. 12)", "schema": { "type": "integer" } },
           { "name": "sort", "in": "query", "required": false, "schema": { "type": "string", "enum": ["newest", "oldest", "best"], "default": "newest" } },
           { "name": "page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 } },
           { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "default": 30 } },
@@ -237,6 +232,16 @@
                   "properties": {
                     "success": { "type": "boolean" },
                     "media_id": { "type": "string" },
+                    "media": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "title": { "type": "string" },
+                        "type": { "type": "string" },
+                        "year": { "type": "integer", "nullable": true },
+                        "poster": { "type": "string", "nullable": true }
+                      }
+                    },
                     "page": { "type": "integer" },
                     "limit": { "type": "integer" },
                     "total_count": { "type": "integer" },
@@ -267,11 +272,8 @@
                   "media_id": { "type": "string" },
                   "content": { "type": "string" },
                   "parent_id": { "type": "integer", "nullable": true },
-                  "comment_id": { "type": "integer" },
-                  "episode": { "type": "string" },
-                  "chapter": { "type": "string" },
-                  "tags": { "type": "array", "items": { "type": "string" } },
-                  "tag": { "type": "integer" }
+                  "tag": { "type": "integer", "description": "Episode or chapter number (e.g. 12)" },
+                  "tags": { "type": "array", "items": { "type": "string" }, "description": "Labels such as spoiler or nsfw" }
                 }
               }
             }
@@ -541,6 +543,17 @@
           }
         },
         "responses": { "200": { "description": "Announcement created" } }
+      }
+    },
+    "/discord": {
+      "post": {
+        "summary": "Discord Bot Interactions Endpoint (Slash commands, auto-complete, modals, buttons)",
+        "description": "Receives signed interactions from Discord Gateway with Ed25519 signature verification via DISCORD_PUBLIC_KEY. Handles all 24 slash commands (/help, /stats, /search, /register, /config, etc.), auto-complete choices, modals, and Components V2 action buttons (mod_delete, mod_warn, mod_mute, mod_ban, report_approve, report_dismiss).",
+        "security": [],
+        "responses": {
+          "200": { "description": "Discord interaction response (Type 1 Pong, Type 4 Channel Message, Type 8 Autocomplete, Type 9 Modal)" },
+          "401": { "description": "Invalid Discord signature" }
+        }
       }
     },
     "/health": {

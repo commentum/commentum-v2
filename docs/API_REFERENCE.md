@@ -74,8 +74,7 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
   | `media_id` | string | **Yes** | AniList / MAL / Simkl media ID |
   | `client_type` | string | No | Source platform (`anilist`, `mal`, `simkl`) |
   | `media_type` | string | No | `anime` (default), `manga`, `novel` |
-  | `episode` | string | No | Specific episode discussions |
-  | `chapter` | string | No | Specific manga/novel chapter |
+  | `tag` | integer | No | Specific episode or chapter number (e.g. `12`) |
   | `sort` | string | No | `newest` (default), `best`, `oldest` |
   | `page` | integer | No | Page number (default: 1) |
   | `limit` | integer | No | Items per page (default: 30, max: 100) |
@@ -85,6 +84,14 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
   {
     "success": true,
     "media_id": "21",
+    "client_type": "anilist",
+    "media": {
+      "id": "21",
+      "title": "One Piece",
+      "type": "anime",
+      "year": 1999,
+      "poster": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/nx21-tXMK32w8nlMw.jpg"
+    },
     "total_count": 25,
     "comments": [
       {
@@ -94,6 +101,8 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
         "username": "Sheby",
         "user_role": "owner",
         "avatar_decoration": "https://cdn.discordapp.com/...",
+        "tag": 1100,
+        "tags": ["spoiler"],
         "pinned": true,
         "vote_score": 142,
         "user_vote": 1,
@@ -117,10 +126,10 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
     "action": "create",
     "media_id": "21",
     "media_type": "anime",
-    "media_title": "One Piece",
     "content": "This arc is peak fiction!",
-    "episode": "1100",
-    "parent_id": null // null for top-level, or parent comment ID for replies
+    "tag": 1100,
+    "tags": ["spoiler"],
+    "parent_id": null
   }
   ```
 
@@ -305,3 +314,40 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
 
 - `GET /announcements?app_id=anymex`: Public feed of broadcasts with read status.
 - `POST /announcements`: Admin creation and publishing of announcements.
+
+---
+
+## 🤖 11. Discord Bot System & Gateway Interactions
+
+Commentum v2 features a standalone Discord Bot integration targeting configured channels in `server_configs` via Discord Bot API and Components V2.
+
+### 11.1. Gateway Interactions Endpoint
+- **Method:** `POST /discord`
+- **Security:** Ed25519 signature verified via `X-Signature-Ed25519` and `X-Signature-Timestamp` against `DISCORD_PUBLIC_KEY`.
+- **Supported Interactions:**
+  - `Type 1 (PING)`: Automatic `PONG` response.
+  - `Type 2 (APPLICATION_COMMAND)`: Handles all 24 slash commands:
+    * `/help`: Detailed command list and permission requirements.
+    * `/stats`: Live system analytics, user counts, and active discussions.
+    * `/comment <id>`: Fetches full comment thread and enriched media info.
+    * `/user <username|id>`: Displays user points, warnings, roles, and status.
+    * `/search_comments <query>`: Text search across all comments.
+    * `/queue`: Staff pending moderation review queue.
+    * `/recent`: Recent comments across media titles.
+    * `/register`: Registers user's Discord account and auto-assigns server role.
+    * `/add`: Admin command to configure guild channels (`channel_id`, `updates_channel_id`, `moderation_channel_id`, `role_id`).
+    * `/warn`, `/mute`, `/unmute`, `/ban`, `/unban`: Staff moderation commands.
+    * `/config`: Displays or updates system toggles and auto thresholds.
+    * `/broadcast`: Sends rich announcement to configured Discord channels.
+  - `Type 3 (MESSAGE_COMPONENT)`: Interactive Discord Components V2 action buttons:
+    * `mod_delete:<id>:<user_id>`: Deletes comment and logs action.
+    * `mod_warn:<user_id>`: Issues warning modal or immediate warning.
+    * `mod_mute:<user_id>`: Opens mute duration modal.
+    * `mod_ban:<user_id>`: Bans user account.
+    * `report_approve:<id>`: Resolves report and removes flagged content.
+    * `report_dismiss:<id>`: Dismisses report and restores normal status.
+  - `Type 4 (APPLICATION_COMMAND_AUTOCOMPLETE)`: Dynamic media titles and usernames autocomplete.
+  - `Type 5 (MODAL_SUBMIT)`: Handles submitted reason, duration, and notes forms.
+
+### 11.2. Components V2 Notifications
+Dispatched asynchronously on comment events (`comment_created`, `comment_deleted`, `report_filed`, etc.) with message flag `32768` (`IS_COMPONENTS_V2`), container accents, deep link buttons, and moderation buttons.

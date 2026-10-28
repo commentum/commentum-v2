@@ -26,6 +26,10 @@ export function isAdminOrHigher(role: string): boolean {
   return hasMinRole(role, "admin");
 }
 
+export function isSuperAdminOrHigher(role: string): boolean {
+  return hasMinRole(role, "super_admin");
+}
+
 export function isOwner(role: string): boolean {
   return hasMinRole(role, "app_owner");
 }

@@ -5,8 +5,8 @@ import { isModeratorOrHigher } from "../shared/roles";
 import { createDb } from "../db";
 import { comments, commentumUsers, notifications } from "../db/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { queueDiscordNotification } from "../shared/discord";
-import { resolveMediaById, isUnknownMediaTitle } from "../shared/mediaResolver";
+import { queueDiscordNotification } from "../shared/discord.js";
+import { getOrResolveMedia } from "../shared/mediaMapping.js";
 
 export const commentsRoutes = new Hono<AppContext>();
 
@@ -58,26 +58,14 @@ commentsRoutes.post("/", requireAuth, async (c) => {
         return c.json({ success: false, error: "media_id is required" }, 400);
       }
 
-      let mediaType = body.media_type || body.media_info?.type || "anime";
-      let mediaTitle = body.media_title || body.media_info?.title || "";
-      let mediaPoster = body.media_poster || body.media_info?.poster || null;
-      let mediaYear = body.media_year || null;
+      const mediaTypeHint = body.media_type || body.media_info?.type || "anime";
 
-      // Automatically resolve media info from AniList if missing or 'Unknown Media'
-      if (isUnknownMediaTitle(mediaTitle)) {
-        const resolved = await resolveMediaById(c.env.DB, mediaId, mediaType);
-        if (resolved) {
-          mediaTitle = resolved.media_title;
-          mediaPoster = resolved.media_poster || mediaPoster;
-          mediaType = resolved.media_type;
-          mediaYear = resolved.media_year;
-        }
-      }
-      const episode = body.episode ? String(body.episode) : null;
-      const chapter = body.chapter ? String(body.chapter) : null;
+      // Automatically resolve media metadata and cross-client mappings via client APIs
+      const mediaInfo = await getOrResolveMedia(c.env.DB, user.provider, mediaId, mediaTypeHint);
+
       const parentId = body.parent_id ? parseInt(body.parent_id, 10) : null;
       const tags = Array.isArray(body.tags) ? JSON.stringify(body.tags) : "[]";
-      const tag = body.tag ? parseInt(body.tag, 10) : null;
+      const tag = body.tag !== undefined && body.tag !== null && body.tag !== "" ? parseInt(body.tag, 10) : null;
 
       // If this is a reply, check if parent exists and is not locked
       let parentComment: typeof comments.$inferSelect | undefined;
@@ -92,7 +80,7 @@ commentsRoutes.post("/", requireAuth, async (c) => {
         }
       }
 
-      // Insert new comment
+      // Insert new comment (clean normalized schema)
       const inserted = await db
         .insert(comments)
         .values({
@@ -104,11 +92,6 @@ commentsRoutes.post("/", requireAuth, async (c) => {
           avatarDecoration: author?.avatarDecoration,
           bannerUrl: author?.bannerUrl,
           mediaId,
-          mediaType,
-          mediaTitle,
-          mediaPoster,
-          episode,
-          chapter,
           content,
           parentId,
           tags,
@@ -141,12 +124,12 @@ commentsRoutes.post("/", requireAuth, async (c) => {
           type: "reply",
           commentId: newComment.id,
           mediaId,
-          mediaTitle,
+          mediaTitle: mediaInfo.title,
           content: content.slice(0, 150),
         });
       }
 
-      // Queue Discord webhook notification in background
+      // Queue Discord bot notification in background
       queueDiscordNotification(
         {
           type: "comment_created",
@@ -156,14 +139,23 @@ commentsRoutes.post("/", requireAuth, async (c) => {
             username: newComment.username,
             client_type: user.provider,
             media_id: mediaId,
-            media_title: mediaTitle,
+            media_title: mediaInfo.title,
+            media_type: mediaInfo.type,
             content,
-            episode: episode || undefined,
-            chapter: chapter || undefined,
+            tag: tag ?? undefined,
+            labels: Array.isArray(body.tags) ? body.tags : undefined,
+          },
+          media: {
+            id: mediaId,
+            title: mediaInfo.title,
+            type: mediaInfo.type,
+            poster: mediaInfo.poster || undefined,
+            year: mediaInfo.year || undefined,
+            client_type: user.provider,
           },
         },
         c.env
-      ).catch(() => {});
+      );
 
       return c.json({
         success: true,

@@ -8,10 +8,12 @@ export interface Bindings {
   FIREBASE_CLIENT_EMAIL?: string;
   FIREBASE_PRIVATE_KEY?: string;
 
-  // Discord 3-Channel Bot / Webhook system
-  DISCORD_WEBHOOK_COMMENTS?: string;
-  DISCORD_WEBHOOK_REPORTS?: string;
-  DISCORD_WEBHOOK_LOGS?: string;
+  // Discord Bot Integration
+  DISCORD_BOT_TOKEN?: string;
+  DISCORD_CLIENT_ID?: string;
+  DISCORD_APPLICATION_ID?: string;
+  DISCORD_PUBLIC_KEY?: string;
+  DISCORD_COMMAND_SYNC_ON_BOOT?: string;
 
   // Dantotsu Sync Integration
   DANTOTSU_API_URL?: string;
