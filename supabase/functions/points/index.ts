@@ -40,23 +40,30 @@ serve(async (req) => {
     const auth = await getAuthUser(req, { requireAuth: false })
     const isTokenAuth = auth.valid && !!auth.user
 
+    const url = new URL(req.url)
     const body = await req.json().catch(() => ({}))
-    const { action, user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, user_ids, page, limit } = body
+    const action = (body.action || url.searchParams.get('action') || (req.method === 'GET' ? 'get_user_points' : '')).toLowerCase()
+    const { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, user_ids, page, limit } = body
 
     switch (action) {
       case 'get_user_points':
         return await handleGetUserPoints(supabase, {
           user_info,
           client_type,
-          target_user_id,
-          target_client_type,
+          target_user_id: target_user_id || url.searchParams.get('target_user_id'),
+          target_client_type: target_client_type || url.searchParams.get('target_client_type'),
           requester_user_id: isTokenAuth ? auth.user!.uid : requester_user_id,
           requester_client_type: isTokenAuth ? auth.user!.provider : requester_client_type,
-          authUser: isTokenAuth ? auth.user : null
+          authUser: isTokenAuth ? auth.user : null,
+          body
         })
 
       case 'get_leaderboard':
-        return await handleGetLeaderboard(supabase, { client_type: target_client_type, page, limit })
+        return await handleGetLeaderboard(supabase, { 
+          client_type: target_client_type || url.searchParams.get('client_type'), 
+          page: page || (url.searchParams.get('page') ? parseInt(url.searchParams.get('page')!) : 1), 
+          limit: limit || (url.searchParams.get('limit') ? parseInt(url.searchParams.get('limit')!) : 50) 
+        })
 
       case 'get_points_config':
         return await handleGetPointsConfig(supabase)
@@ -65,14 +72,21 @@ serve(async (req) => {
         return await handleGetBatchUserPoints(supabase, { client_type, user_ids })
 
       case 'refresh_user':
-        return await handleRefreshUser(supabase, { target_user_id, target_client_type, client_type })
+        return await handleRefreshUser(supabase, { 
+          target_user_id: target_user_id || (isTokenAuth ? auth.user!.uid : undefined), 
+          target_client_type: target_client_type || (isTokenAuth ? auth.user!.provider : undefined), 
+          client_type 
+        })
 
       case 'refresh_all':
         return await handleRefreshAll(supabase, { client_type: target_client_type })
 
+      case 'claim_ad_points':
+        return await handleClaimAdPoints(supabase, auth.user, body)
+
       default:
         return new Response(
-          JSON.stringify({ error: 'Invalid action. Must be get_user_points, get_leaderboard, get_points_config, get_batch_user_points, refresh_user, or refresh_all' }),
+          JSON.stringify({ error: 'Invalid action. Must be get_user_points, get_leaderboard, get_points_config, get_batch_user_points, refresh_user, refresh_all, or claim_ad_points' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
     }
@@ -138,23 +152,23 @@ function resolveBonusTag(role?: string, roleBonus?: number, isInfinite?: boolean
  * Otherwise, negative breakdown is stripped from the response.
  */
 async function handleGetUserPoints(supabase: any, params: any) {
-  const { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, authUser } = params
+  const { user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, authUser, body } = params
 
   let query_client_type: string
   let query_user_id: string
 
-  // If target_user_id provided, look up that user
   if (target_user_id && target_client_type) {
     query_client_type = target_client_type
     query_user_id = target_user_id
   } else if (authUser) {
-    // If authenticated via Bearer token, look up the authenticated user
     query_client_type = authUser.provider
     query_user_id = authUser.uid
+  } else if (body?.user_id && (body?.client_type || body?.provider)) {
+    query_client_type = body.client_type || body.provider
+    query_user_id = String(body.user_id)
   } else if (user_info?.user_id && client_type) {
-    // Otherwise, look up the requesting user via legacy user_info
     query_client_type = client_type
-    query_user_id = user_info.user_id
+    query_user_id = String(user_info.user_id)
   } else {
     return new Response(
       JSON.stringify({ error: 'Provide Bearer token or (user_info + client_type) or (target_user_id + target_client_type)' }),
@@ -435,5 +449,55 @@ async function handleRefreshAll(supabase: any, params: any) {
   return new Response(
     JSON.stringify({ success: true, refreshed_count: data }),
     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  )
+}
+
+/**
+ * claim_ad_points
+ * Reward points for watching a voluntary ad.
+ */
+async function handleClaimAdPoints(supabase: any, user: any, body: any) {
+  if (!user) {
+    return new Response(
+      JSON.stringify({ error: 'Authentication required' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const client_type = user.provider
+  const user_id = user.uid
+  const ad_id = body.ad_id || body.refer_id
+  const points = body.points ?? body.points_reward ?? body.reward_points
+
+  if (!ad_id || typeof ad_id !== 'string' || ad_id.trim() === '') {
+    return new Response(
+      JSON.stringify({ success: false, error: 'ad_id_required', message: 'ad_id (or refer_id) is required' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const parsedPoints = points !== undefined && points !== null && !isNaN(Number(points)) && Number(points) > 0
+    ? Math.floor(Number(points))
+    : null
+
+  const { data, error } = await supabase.rpc('claim_ad_points', {
+    p_client_type: client_type,
+    p_user_id: String(user_id),
+    p_ad_id: ad_id.trim(),
+    p_points: parsedPoints
+  })
+
+  if (error) {
+    console.error('claim_ad_points RPC error:', error)
+    return new Response(
+      JSON.stringify({ success: false, error: 'Failed to claim ad points', details: error.message || error }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
+  const statusCode = data?.success === true ? 200 : 400
+  return new Response(
+    JSON.stringify(data),
+    { status: statusCode, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   )
 }

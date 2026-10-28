@@ -260,6 +260,19 @@ All moderation actions verify staff credentials directly from the verified Beare
 - **Endpoint**: `GET /points?action=get_leaderboard&limit=50`
 - **Auth**: ✅ Bearer JWT (Required)
 
+### Claim Ad Points
+- **Endpoint**: `POST /points`
+- **Auth**: ✅ Bearer JWT (Required)
+- **Body**:
+  ```json
+  {
+    "action": "claim_ad_points",
+    "ad_id": "admob_reward_tx_998877",
+    "points": 25
+  }
+  ```
+*(Also accepts `refer_id` instead of `ad_id`, and `points_reward` instead of `points`).*
+
 ### Unlock Customization Item
 - **Endpoint**: `POST /users`
 - **Auth**: ✅ Bearer JWT (Required)

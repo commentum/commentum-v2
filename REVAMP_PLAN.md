@@ -358,6 +358,7 @@ Replaces repetitive external token verification with verified token authorizatio
   - Reply to Comment: `+10` points.
   - Received Upvote: `+5` points.
   - Daily Login / First Action Streak: `+20` points base + streak multiplier.
+  - Watching Voluntary Rewarded Ads: Custom points (default `+10`) with cross-account deduplication.
 - **Penalties**:
   - Warning: `-100` points.
   - Comment Deleted by Mod: `-50` points.
@@ -374,6 +375,7 @@ Replaces repetitive external token verification with verified token authorizatio
 - **`GET /points/leaderboard`**:
   - Query: `page=1&limit=50&client_type=all`.
   - Returns top ranked users with points, streak, badges, avatar decorations, and rank badges.
+- **`POST /points` (`claim_ad_points`)**: Claim points for watching a voluntary ad (`ad_id`, `points`). Authenticated via session Bearer token and deduplicated across all linked accounts.
 - **`POST /points/batch`**: Efficiently resolves points and badges for multiple user IDs in one SQL query.
 
 ---

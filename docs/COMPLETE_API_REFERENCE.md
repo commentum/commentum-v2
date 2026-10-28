@@ -485,6 +485,47 @@ Fetch global points leaderboard rankings.
 
 ---
 
+### `POST /points` — Claim Voluntary Ad Points
+Claim points for watching a voluntary rewarded ad. The authenticated user is automatically resolved from the session token.
+Ad claims are deduplicated across all linked accounts (AniList, MAL, Simkl) to prevent duplicate claims.
+
+#### Request Headers
+```http
+Authorization: Bearer <session_token>
+Content-Type: application/json
+```
+
+#### Request Body
+```json
+{
+  "action": "claim_ad_points",
+  "ad_id": "admob_reward_tx_998877",
+  "points": 25
+}
+```
+*(Also accepts `refer_id` instead of `ad_id`, and `points_reward` instead of `points`).*
+
+#### Successful Response (`200 OK`)
+```json
+{
+  "success": true,
+  "points_added": 25,
+  "new_total_points": 1475,
+  "ad_id": "admob_reward_tx_998877"
+}
+```
+
+#### Duplicate Claim Error (`400 Bad Request`)
+```json
+{
+  "success": false,
+  "error": "ad_already_claimed",
+  "message": "Points have already been claimed for this ad"
+}
+```
+
+---
+
 ## 9. Notifications & FCM Push (`/notifications`)
 
 Cross-platform Firebase Cloud Messaging push notifications and in-app inbox.

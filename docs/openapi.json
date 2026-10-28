@@ -438,6 +438,32 @@
         "responses": {
           "200": { "description": "Points data" }
         }
+      },
+      "post": {
+        "summary": "Claim voluntary ad reward points",
+        "operationId": "claimAdPoints",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action", "ad_id"],
+                "properties": {
+                  "action": { "type": "string", "enum": ["claim_ad_points"] },
+                  "ad_id": { "type": "string", "description": "Unique AdMob or ad transaction reference ID" },
+                  "points": { "type": "integer", "description": "Reward points to credit (optional, default 10)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Points successfully claimed and credited" },
+          "400": { "description": "Duplicate claim or missing ad_id" },
+          "401": { "description": "Authentication required" }
+        }
       }
     },
     "/users": {
