@@ -1,0 +1,556 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Commentum v2 API",
+    "version": "2.0.0",
+    "description": "High-performance community commenting, social gamification, and notification platform for AnymeX. Built with Hono on Cloudflare Workers and D1 Database with HMAC-SHA256 JWT session authentication.",
+    "contact": {
+      "name": "AnymeX Development Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8787",
+      "description": "Local Development (Wrangler)"
+    },
+    {
+      "url": "https://api.commentum.app",
+      "description": "Production Cloudflare Edge Network"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "HMAC-SHA256 session token obtained from POST /auth/login. Also accepted in x-session-token header."
+      }
+    },
+    "schemas": {
+      "UserProfile": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "user_id": { "type": "string" },
+          "client_type": { "type": "string", "example": "anilist" },
+          "provider": { "type": "string", "example": "anilist" },
+          "username": { "type": "string" },
+          "avatar": { "type": "string", "nullable": true },
+          "role": { "type": "string", "enum": ["user", "moderator", "admin", "super_admin", "app_owner", "owner"] },
+          "is_banned": { "type": "boolean" },
+          "is_muted": { "type": "boolean" },
+          "total_points": { "type": "integer" },
+          "current_streak": { "type": "integer" },
+          "longest_streak": { "type": "integer" },
+          "avatar_decoration": { "type": "string", "nullable": true },
+          "banner_url": { "type": "string", "nullable": true },
+          "banner_theme": { "type": "string", "nullable": true },
+          "nameplate_theme": { "type": "string", "nullable": true },
+          "profile_effect_url": { "type": "string", "nullable": true },
+          "unlocked_customizations": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "linked_accounts": {
+            "type": "object",
+            "properties": {
+              "anilist": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "id": { "type": "string" },
+                  "username": { "type": "string" }
+                }
+              },
+              "mal": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "id": { "type": "string" },
+                  "username": { "type": "string" }
+                }
+              },
+              "simkl": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "id": { "type": "string" },
+                  "username": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CommentItem": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "comment_id": { "type": "integer" },
+          "client_type": { "type": "string" },
+          "user_id": { "type": "string" },
+          "username": { "type": "string" },
+          "user_avatar": { "type": "string", "nullable": true },
+          "user_role": { "type": "string" },
+          "avatar_decoration": { "type": "string", "nullable": true },
+          "banner_url": { "type": "string", "nullable": true },
+          "media_id": { "type": "string" },
+          "media_type": { "type": "string" },
+          "media_title": { "type": "string" },
+          "episode": { "type": "string", "nullable": true },
+          "chapter": { "type": "string", "nullable": true },
+          "content": { "type": "string" },
+          "parent_id": { "type": "integer", "nullable": true },
+          "pinned": { "type": "boolean" },
+          "locked": { "type": "boolean" },
+          "upvotes": { "type": "integer" },
+          "downvotes": { "type": "integer" },
+          "vote_score": { "type": "integer" },
+          "user_vote": { "type": "integer", "enum": [-1, 0, 1] },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "tag": { "type": "integer", "nullable": true },
+          "is_edited": { "type": "boolean" },
+          "replies_count": { "type": "integer" },
+          "replies": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CommentItem" }
+          },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "summary": "Exchange provider OAuth token for Commentum session JWT",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["provider", "access_token"],
+                "properties": {
+                  "provider": { "type": "string", "enum": ["anilist", "mal", "simkl"] },
+                  "access_token": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "token": { "type": "string" },
+                    "session_token": { "type": "string" },
+                    "token_type": { "type": "string", "example": "Bearer" },
+                    "expires_in": { "type": "integer", "example": 604800 },
+                    "expires_at": { "type": "integer" },
+                    "user": { "$ref": "#/components/schemas/UserProfile" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "summary": "Fetch profile of currently authenticated user",
+        "responses": {
+          "200": {
+            "description": "User profile with linked accounts and points",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "user": { "$ref": "#/components/schemas/UserProfile" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "summary": "Refresh active session JWT",
+        "responses": {
+          "200": {
+            "description": "New refreshed session JWT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "token": { "type": "string" },
+                    "expires_at": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/media": {
+      "get": {
+        "summary": "Get threaded comments for a media title with cross-client merging",
+        "parameters": [
+          { "name": "media_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "client_type", "in": "query", "required": false, "schema": { "type": "string", "default": "anilist" } },
+          { "name": "media_type", "in": "query", "required": false, "schema": { "type": "string", "default": "anime" } },
+          { "name": "episode", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "chapter", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "sort", "in": "query", "required": false, "schema": { "type": "string", "enum": ["newest", "oldest", "best"], "default": "newest" } },
+          { "name": "page", "in": "query", "required": false, "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "default": 30 } },
+          { "name": "merge", "in": "query", "required": false, "schema": { "type": "string", "enum": ["true", "false"], "default": "true" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Threaded comment list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "media_id": { "type": "string" },
+                    "page": { "type": "integer" },
+                    "limit": { "type": "integer" },
+                    "total_count": { "type": "integer" },
+                    "comments": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CommentItem" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comments": {
+      "post": {
+        "summary": "Create, edit, or delete a comment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": { "type": "string", "enum": ["create", "edit", "delete"] },
+                  "media_id": { "type": "string" },
+                  "content": { "type": "string" },
+                  "parent_id": { "type": "integer", "nullable": true },
+                  "comment_id": { "type": "integer" },
+                  "episode": { "type": "string" },
+                  "chapter": { "type": "string" },
+                  "tags": { "type": "array", "items": { "type": "string" } },
+                  "tag": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "comment": { "$ref": "#/components/schemas/CommentItem" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/votes": {
+      "post": {
+        "summary": "Cast or toggle upvote / downvote",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["comment_id", "vote_type"],
+                "properties": {
+                  "comment_id": { "type": "integer" },
+                  "vote_type": { "type": "integer", "enum": [1, -1, 0] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Vote toggled result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "comment_id": { "type": "integer" },
+                    "vote_type": { "type": "integer" },
+                    "upvotes": { "type": "integer" },
+                    "downvotes": { "type": "integer" },
+                    "vote_score": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports": {
+      "post": {
+        "summary": "File comment report or manage reports queue (mod+)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": { "type": "string", "enum": ["report", "get_queue", "resolve"] },
+                  "comment_id": { "type": "integer" },
+                  "reason": { "type": "string" },
+                  "notes": { "type": "string" },
+                  "resolution": { "type": "string", "enum": ["resolved", "dismissed"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Report action result" }
+        }
+      }
+    },
+    "/moderation": {
+      "post": {
+        "summary": "Staff moderation actions (pin, lock, warn, mute, ban)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "pin_comment", "unpin_comment",
+                      "lock_thread", "unlock_thread",
+                      "warn_user", "mute_user", "unmute_user",
+                      "ban_user", "unban_user"
+                    ]
+                  },
+                  "comment_id": { "type": "integer" },
+                  "target_user_id": { "type": "string" },
+                  "client_type": { "type": "string" },
+                  "reason": { "type": "string" },
+                  "muted_until": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Moderation result" }
+        }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "summary": "Get notification history or unread count",
+        "parameters": [
+          { "name": "action", "in": "query", "schema": { "type": "string", "enum": ["get_history", "get_unread_count"] } },
+          { "name": "page", "in": "query", "schema": { "type": "integer" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Notifications response" } }
+      },
+      "post": {
+        "summary": "Register FCM token or mark notifications as read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": { "type": "string", "enum": ["register_token", "mark_read", "mark_all_read"] },
+                  "fcm_token": { "type": "string" },
+                  "platform": { "type": "string" },
+                  "app_version": { "type": "string" },
+                  "notification_id": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Action completed" } }
+      }
+    },
+    "/points": {
+      "get": {
+        "summary": "Get user points breakdown or global leaderboard",
+        "parameters": [
+          { "name": "action", "in": "query", "schema": { "type": "string", "enum": ["get_points", "get_leaderboard"] } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Points or leaderboard data" } }
+      },
+      "post": {
+        "summary": "Claim voluntary rewarded ad points",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action", "ad_id"],
+                "properties": {
+                  "action": { "type": "string", "example": "claim_ad_points" },
+                  "ad_id": { "type": "string" },
+                  "points": { "type": "integer", "default": 10 }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Ad reward claimed successfully" } }
+      }
+    },
+    "/customizations": {
+      "get": {
+        "summary": "Public catalog of shop items (Discord decorations, banners, nameplates, effects)",
+        "security": [],
+        "parameters": [
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["decoration", "banner", "nameplate", "effect", "frame"] } },
+          { "name": "category", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Catalog items" } }
+      }
+    },
+    "/users": {
+      "post": {
+        "summary": "Unlock shop items, equip customizations, link accounts, or export GDPR data",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "unlock_customization", "update_customizations",
+                      "link_account", "unlink_account",
+                      "export_my_data"
+                    ]
+                  },
+                  "customization_id": { "type": "string" },
+                  "avatar_decoration": { "type": "string" },
+                  "banner_url": { "type": "string" },
+                  "banner_theme": { "type": "string" },
+                  "nameplate_theme": { "type": "string" },
+                  "profile_effect_url": { "type": "string" },
+                  "target_client_type": { "type": "string" },
+                  "target_access_token": { "type": "string" },
+                  "service_to_unlink": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "User action result" } }
+      }
+    },
+    "/announcements": {
+      "get": {
+        "summary": "Public announcement feed for AnymeX",
+        "parameters": [
+          { "name": "app_id", "in": "query", "schema": { "type": "string", "default": "anymex" } },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": { "200": { "description": "Announcements feed" } }
+      },
+      "post": {
+        "summary": "Create and publish announcement (admin+)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title", "full_content"],
+                "properties": {
+                  "app_id": { "type": "string", "default": "anymex" },
+                  "title": { "type": "string" },
+                  "short_description": { "type": "string" },
+                  "full_content": { "type": "string" },
+                  "category": { "type": "string", "default": "general" },
+                  "priority": { "type": "integer", "default": 0 },
+                  "pinned": { "type": "boolean", "default": false },
+                  "status": { "type": "string", "enum": ["draft", "published"], "default": "published" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Announcement created" } }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Service health check",
+        "security": [],
+        "responses": {
+          "200": { "description": "Healthy service status" }
+        }
+      }
+    }
+  }
+}
