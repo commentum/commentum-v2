@@ -83,10 +83,9 @@ jobs:
             cd /root/commentum
             docker compose ps -q db | grep -q . || { echo "❌ db container not found in $(pwd)"; exit 1; }
             MDIR=/root/commentum/migrations
-            # Run as supabase_admin (superuser + function owner).
-            # -U postgres fails every CREATE OR REPLACE FUNCTION with
-            # "must be owner" while still printing success.
-            PSQL="docker compose exec -T db psql -U supabase_admin -d postgres -t -A"
+            # commentum-db: postgres owns the functions/tables; supabase_admin
+            # requires a password here, so use postgres over the local socket.
+            PSQL="docker compose exec -T db psql -U postgres -d postgres -t -A"
             TRACKING_EXISTS=$($PSQL -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations';")
             case "$TRACKING_EXISTS" in 0|1) ;; *) echo "❌ tracking check failed (got '$TRACKING_EXISTS')"; exit 1;; esac
             if [ "$TRACKING_EXISTS" = "0" ]; then
@@ -118,7 +117,7 @@ jobs:
               case "$APPLIED" in 0|1) ;; *) echo "❌ check failed for $BASE (got '$APPLIED')"; exit 1;; esac
               if [ "$APPLIED" = "0" ]; then
                 echo "▶️ Running: $BASE"
-                cat "$f" | docker compose exec -T db psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1
+                cat "$f" | docker compose exec -T db psql -U postgres -d postgres -v ON_ERROR_STOP=1
                 $PSQL -c "INSERT INTO public.schema_migrations (filename) VALUES ('$BASE') ON CONFLICT (filename) DO NOTHING;"
               else
                 echo "⏭️ Skipped (already applied): $BASE"
