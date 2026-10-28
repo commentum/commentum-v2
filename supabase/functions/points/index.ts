@@ -61,7 +61,8 @@ serve(async (req) => {
           client_type: body.client_type,
           user_id: body.user_id || body.user_info?.user_id,
           ad_id: body.ad_id || body.refer_id,
-          points: body.points ?? body.points_reward ?? body.reward_points
+          points: body.points ?? body.amount ?? body.points_reward ?? body.reward_points,
+          mode: body.mode ?? body.type
         })
 
       default:
@@ -434,7 +435,7 @@ async function handleRefreshAll(supabase: any, params: any) {
  * Validates ad_id (refer_id) to prevent duplicate claims across linked accounts.
  */
 async function handleClaimAdPoints(supabase: any, params: any) {
-  const { client_type, user_id, ad_id, points } = params
+  const { client_type, user_id, ad_id, points, mode } = params
 
   if (!client_type || !user_id) {
     return new Response(
@@ -443,28 +444,52 @@ async function handleClaimAdPoints(supabase: any, params: any) {
     )
   }
 
-  if (!ad_id || typeof ad_id !== 'string' || ad_id.trim() === '') {
+  // ad_id is optional. Without it we generate a unique id, so there is NO duplicate
+  // protection for that call (every request counts).
+  const refId = typeof ad_id === 'string' && ad_id.trim() !== '' ? ad_id.trim() : crypto.randomUUID()
+
+  const normMode = String(mode ?? 'add').toLowerCase()
+  const isDeduct = ['deduct', 'spend', 'decrease', 'remove'].includes(normMode)
+  const isAdd = ['add', 'earn', 'increase'].includes(normMode)
+  if (!isDeduct && !isAdd) {
     return new Response(
-      JSON.stringify({ success: false, error: 'ad_id_required', message: 'ad_id (or refer_id) is required' }),
+      JSON.stringify({ success: false, error: 'invalid_mode', message: 'mode must be "add" or "deduct"' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 
-  const parsedPoints = points !== undefined && points !== null && !isNaN(Number(points)) && Number(points) > 0
-    ? Math.floor(Number(points))
-    : null
+  const numPoints = points !== undefined && points !== null && points !== '' ? Math.trunc(Number(points)) : NaN
+  if (Number.isFinite(numPoints) && numPoints <= 0) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'invalid_amount', message: 'points must be a positive number; use mode to add or deduct' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+  if (isDeduct && !Number.isFinite(numPoints)) {
+    return new Response(
+      JSON.stringify({ success: false, error: 'invalid_amount', message: 'points is required when mode is "deduct"' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
 
-  const { data, error } = await supabase.rpc('claim_ad_points', {
-    p_client_type: client_type,
-    p_user_id: String(user_id),
-    p_ad_id: ad_id.trim(),
-    p_points: parsedPoints
-  })
+  const { data, error } = isDeduct
+    ? await supabase.rpc('spend_points_once', {
+        p_client_type: client_type,
+        p_user_id: String(user_id),
+        p_ref_id: refId,
+        p_amount: numPoints
+      })
+    : await supabase.rpc('claim_ad_points', {
+        p_client_type: client_type,
+        p_user_id: String(user_id),
+        p_ad_id: refId,
+        p_points: Number.isFinite(numPoints) ? numPoints : null
+      })
 
   if (error) {
     console.error('claim_ad_points RPC error:', error)
     return new Response(
-      JSON.stringify({ success: false, error: 'Failed to claim ad points', details: error.message || error }),
+      JSON.stringify({ success: false, error: 'Failed to update points', details: error.message || error }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
