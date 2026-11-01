@@ -192,6 +192,35 @@ export async function getDanModAuth(supabase?: any): Promise<DanAuthResult | nul
 }
 
 /**
+ * Convert whatever tag a client sent into the plain number Dantotsu expects
+ * (episode or chapter number only). Handles 5, "5", "episode:5", "Episode 5",
+ * "Chapter 12", "Ep. 3", "ch-7" ... Non-numbered tags ("Spoiler", "General")
+ * return null. Dantotsu tags are integers, so "10.5" -> 10.
+ */
+export function toDantotsuTag(tag: unknown): number | null {
+  if (typeof tag === 'number') {
+    return Number.isFinite(tag) && tag >= 0 ? Math.floor(tag) : null
+  }
+  if (Array.isArray(tag)) {
+    for (const t of tag) {
+      const n = toDantotsuTag(t)
+      if (n != null) return n
+    }
+    return null
+  }
+  if (typeof tag !== 'string') return null
+
+  const s = tag.trim()
+  if (!s) return null
+  // Bare number: "5", "05", "5.5"
+  if (/^\d+(?:\.\d+)?$/.test(s)) return Math.floor(parseFloat(s))
+  // Labelled: "episode:5", "Episode 5", "Chapter 12", "ep.3", "ch-7"
+  const m = s.match(/(?:episode|chapter|ep|chap|ch)\b\D*?(\d+)/i)
+  if (m) return parseInt(m[1], 10)
+  return null
+}
+
+/**
  * Post a new comment to Dantotsu API
  */
 export async function danPostComment(params: {

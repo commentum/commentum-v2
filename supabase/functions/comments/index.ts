@@ -15,6 +15,7 @@ import {
   danPostComment,
   danEditComment,
   danDeleteComment,
+  toDantotsuTag,
 } from '../shared/dantotsuClient.ts'
 import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
 
@@ -700,18 +701,10 @@ async function handleCreateComment(supabase: any, params: any) {
           }
         }
 
-        // Dantotsu's tag is just the episode number — only ep/chap tags map
-        // across; 'Spoiler' / 'General' / anything else stays null there.
-        let parsedTag: number | null = null
-        if (typeof tag === 'number') parsedTag = tag
-        else if (typeof tag === 'string') {
-          const m = tag.trim().match(/^(?:episode|chapter):(\d+)$/i)
-          if (m) parsedTag = parseInt(m[1], 10)
-          else {
-            const n = parseInt(tag, 10)
-            if (!isNaN(n)) parsedTag = n
-          }
-        }
+        // Dantotsu's tag is just the episode/chapter number. AnymeX sends
+        // things like "Episode 5" / "Chapter 5" / "episode:5" / 5 — extract
+        // the number; 'Spoiler' / 'General' / anything else stays null there.
+        const parsedTag = toDantotsuTag(tag)
 
         let targetMediaId: number | null = null
         if (client_type === 'anilist') {
