@@ -12,6 +12,64 @@ interface DanAuthResult {
   isAdmin: boolean
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+interface DanFetchOpts {
+  /** Used in log lines, e.g. 'danPostComment' */
+  label: string
+  /** Per-attempt timeout. Dantotsu can be slow / cold; these run in the background. */
+  timeoutMs: number
+  /** Extra attempts after the first one (default 2 => 3 attempts total) */
+  retries?: number
+  /**
+   * false for non-idempotent calls (creating a comment). A timeout or 5xx there
+   * is ambiguous - Dantotsu may already have created it - so we only retry when
+   * we know the request was NOT processed (connection error, 429, 503).
+   */
+  idempotent?: boolean
+}
+
+/**
+ * fetch() with a per-attempt timeout, bounded retries and exponential backoff
+ * (honours Retry-After). Returns the final Response (check res.ok yourself),
+ * or null when every attempt failed at the network level.
+ */
+async function danFetch(url: string, init: RequestInit, opts: DanFetchOpts): Promise<Response | null> {
+  const { label, timeoutMs, retries = 2, idempotent = true } = opts
+  const maxAttempts = retries + 1
+  const retryStatus = idempotent
+    ? new Set([408, 425, 429, 500, 502, 503, 504])
+    : new Set([429, 503])
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const backoff = Math.min(1000 * 2 ** (attempt - 1), 8000) + Math.floor(Math.random() * 250)
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+      if (res.ok || !retryStatus.has(res.status) || attempt === maxAttempts) return res
+
+      const retryAfter = parseInt(res.headers.get('retry-after') || '', 10)
+      const wait = !isNaN(retryAfter) ? Math.min(retryAfter * 1000, 10_000) : backoff
+      console.warn(`[${label}] HTTP ${res.status}, retry ${attempt}/${maxAttempts - 1} in ${wait}ms`)
+      await res.body?.cancel().catch(() => {})
+      await sleep(wait)
+    } catch (err) {
+      const e = err as any
+      const timedOut = e?.name === 'TimeoutError' || e?.name === 'AbortError'
+      if (timedOut && !idempotent) {
+        console.error(`[${label}] timed out after ${timeoutMs}ms - NOT retrying (request may have been processed)`)
+        return null
+      }
+      if (attempt === maxAttempts) {
+        console.error(`[${label}] failed after ${maxAttempts} attempt(s): ${timedOut ? `timeout ${timeoutMs}ms` : e?.message || e}`)
+        return null
+      }
+      console.warn(`[${label}] ${timedOut ? `timeout ${timeoutMs}ms` : e?.message || e}, retry ${attempt}/${maxAttempts - 1} in ${backoff}ms`)
+      await sleep(backoff)
+    }
+  }
+  return null
+}
+
 // In-memory cache for Dantotsu auth tokens (avoids re-authenticating on every comment action)
 const tokenCache = new Map<string, { data: DanAuthResult; expiresAt: number }>()
 
@@ -44,18 +102,22 @@ export async function danAuthenticate(
   }
 
   try {
-    const res = await fetch(`${DANTOTSU_API}/authenticate`, {
+    const res = await danFetch(`${DANTOTSU_API}/authenticate`, {
       method: 'POST',
       headers: {
         'appauth': APP_AUTH_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ token: anilistToken }),
-      signal: AbortSignal.timeout(6000),
-    })
+    }, { label: 'danAuth', timeoutMs: 15_000 })
 
+    if (!res) {
+      console.warn('[danAuth] Dantotsu /authenticate unreachable (network/timeout)')
+      return null
+    }
     if (!res.ok) {
-      console.warn(`[danAuth] Dantotsu auth failed HTTP ${res.status}`)
+      const errText = await res.text().catch(() => '')
+      console.warn(`[danAuth] Dantotsu auth rejected HTTP ${res.status}${res.status === 400 || res.status === 401 || res.status === 403 ? ' (AniList token invalid/expired?)' : ''}: ${errText.slice(0, 200)}`)
       return null
     }
 
@@ -71,14 +133,13 @@ export async function danAuthenticate(
     let rawAdmin = data.user.is_admin
 
     try {
-      const userRes = await fetch(`${DANTOTSU_API}/user`, {
+      const userRes = await danFetch(`${DANTOTSU_API}/user`, {
         headers: {
           'appauth': APP_AUTH_KEY,
           'Authorization': data.authToken,
         },
-        signal: AbortSignal.timeout(4000),
-      })
-      if (userRes.ok) {
+      }, { label: 'danAuth:/user', timeoutMs: 10_000 })
+      if (userRes?.ok) {
         const userData = await userRes.json()
         if (userData?.user) {
           rawMod = userData.user.is_mod ?? rawMod
@@ -245,7 +306,7 @@ export async function danPostComment(params: {
       body.append('parent_comment_id', String(parentCommentId))
     }
 
-    const res = await fetch(`${DANTOTSU_API}/comments`, {
+    const res = await danFetch(`${DANTOTSU_API}/comments`, {
       method: 'POST',
       headers: {
         'appauth': APP_AUTH_KEY,
@@ -253,8 +314,9 @@ export async function danPostComment(params: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: body.toString(),
-      signal: AbortSignal.timeout(8000),
-    })
+    }, { label: 'danPostComment', timeoutMs: 20_000, idempotent: false })
+
+    if (!res) return null
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
@@ -285,7 +347,7 @@ export async function danEditComment(params: {
     const body = new URLSearchParams()
     body.append('content', content)
 
-    const res = await fetch(`${DANTOTSU_API}/comments/${danCommentId}`, {
+    const res = await danFetch(`${DANTOTSU_API}/comments/${danCommentId}`, {
       method: 'PUT',
       headers: {
         'appauth': APP_AUTH_KEY,
@@ -293,8 +355,9 @@ export async function danEditComment(params: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: body.toString(),
-      signal: AbortSignal.timeout(8000),
-    })
+    }, { label: 'danEditComment', timeoutMs: 20_000 })
+
+    if (!res) return false
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
@@ -319,14 +382,15 @@ export async function danDeleteComment(params: {
   const { authToken, danCommentId } = params
 
   try {
-    const res = await fetch(`${DANTOTSU_API}/comments/${danCommentId}`, {
+    const res = await danFetch(`${DANTOTSU_API}/comments/${danCommentId}`, {
       method: 'DELETE',
       headers: {
         'appauth': APP_AUTH_KEY,
         'Authorization': authToken,
       },
-      signal: AbortSignal.timeout(8000),
-    })
+    }, { label: 'danDeleteComment', timeoutMs: 20_000 })
+
+    if (!res) return false
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '')
@@ -352,16 +416,15 @@ export async function danVoteComment(params: {
   const { authToken, danCommentId, voteType } = params
 
   try {
-    const res = await fetch(`${DANTOTSU_API}/comments/vote/${danCommentId}/${voteType}`, {
+    const res = await danFetch(`${DANTOTSU_API}/comments/vote/${danCommentId}/${voteType}`, {
       method: 'POST',
       headers: {
         'appauth': APP_AUTH_KEY,
         'Authorization': authToken,
       },
-      signal: AbortSignal.timeout(6000),
-    })
+    }, { label: 'danVoteComment', timeoutMs: 15_000 })
 
-    return res.ok
+    return !!res?.ok
   } catch (err) {
     console.error('[danVoteComment] Exception voting on Dantotsu:', err)
     return false
@@ -388,7 +451,7 @@ export async function danReportComment(params: {
     body.append('reporter', reporter)
     body.append('reportedId', reportedId)
 
-    const res = await fetch(`${DANTOTSU_API}/report/${danCommentId}`, {
+    const res = await danFetch(`${DANTOTSU_API}/report/${danCommentId}`, {
       method: 'POST',
       headers: {
         'appauth': APP_AUTH_KEY,
@@ -396,10 +459,9 @@ export async function danReportComment(params: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: body.toString(),
-      signal: AbortSignal.timeout(8000),
-    })
+    }, { label: 'danReportComment', timeoutMs: 20_000, idempotent: false })
 
-    return res.ok
+    return !!res?.ok
   } catch (err) {
     console.error('[danReportComment] Exception reporting on Dantotsu:', err)
     return false
@@ -431,10 +493,8 @@ export async function danFetchComments(
       headers['Authorization'] = authToken
     }
 
-    const res = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(5000),
-    })
+    const res = await danFetch(url, { headers }, { label: 'danFetchComments', timeoutMs: 15_000 })
+    if (!res) return null
 
     if (!res.ok) {
       console.warn(`[danFetchComments] HTTP ${res.status} for media ${mediaId} page ${page}`)
@@ -463,10 +523,8 @@ export async function danFetchReplies(
       headers['Authorization'] = authToken
     }
 
-    const res = await fetch(`${DANTOTSU_API}/comments/parent/${parentCommentId}/${page}`, {
-      headers,
-      signal: AbortSignal.timeout(5000),
-    })
+    const res = await danFetch(`${DANTOTSU_API}/comments/parent/${parentCommentId}/${page}`, { headers }, { label: 'danFetchReplies', timeoutMs: 15_000 })
+    if (!res) return null
 
     if (!res.ok) {
       console.warn(`[danFetchReplies] HTTP ${res.status} for parent ${parentCommentId}`)

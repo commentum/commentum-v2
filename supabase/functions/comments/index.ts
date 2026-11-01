@@ -504,7 +504,10 @@ async function handleCreateComment(supabase: any, params: any) {
     comment.translated_at = translation.translatedContent ? new Date().toISOString() : null
   }
 
+  let createdNotificationSent = false
   const sendCreatedNotification = (danId?: number | null) => {
+    if (createdNotificationSent) return // never notify twice for one comment
+    createdNotificationSent = true
     queueDiscordNotification({
       type: 'comment_created',
       comment: {
@@ -682,11 +685,15 @@ async function handleCreateComment(supabase: any, params: any) {
   if (danToken) {
     const danPromise = (async () => {
       let syncedDanId: number | null = null
+      // Dantotsu calls now use longer timeouts + retries; never let a slow
+      // Dantotsu hold the "new comment" notification back for more than 20s.
+      // (sendCreatedNotification is once-only, so finally{} won't double-send.)
+      const notifyTimer = setTimeout(() => sendCreatedNotification(null), 20_000)
       try {
         const auth = await danAuthenticate(danToken, supabase)
         if (!auth) {
-          sendCreatedNotification(null)
-          return
+          console.warn(`[DantotsuSync] Skipped comment ${comment.id}: Dantotsu authentication failed (token invalid/expired or Dantotsu unreachable)`)
+          return // finally{} below sends the notification
         }
 
         let danParentId: number | null = null
@@ -698,6 +705,8 @@ async function handleCreateComment(supabase: any, params: any) {
             .maybeSingle()
           if (parentMap?.dantotsu_comment_id) {
             danParentId = parentMap.dantotsu_comment_id
+          } else {
+            console.warn(`[DantotsuSync] Reply ${comment.id}: parent ${parent_id} has no Dantotsu mapping - it will be posted as a top-level comment on Dantotsu`)
           }
         }
 
@@ -714,9 +723,8 @@ async function handleCreateComment(supabase: any, params: any) {
           targetMediaId = await resolveAnilistMediaId(supabase, client_type, media_id, mediaInfo?.type)
         }
         if (!targetMediaId) {
-          console.warn(`[DantotsuSync] Could not resolve AniList media ID for ${client_type} ${media_id}`)
-          sendCreatedNotification(null)
-          return
+          console.warn(`[DantotsuSync] Skipped comment ${comment.id}: could not resolve AniList media ID for ${client_type} ${media_id}`)
+          return // finally{} below sends the notification
         }
 
         // Dantotsu marks spoilers with ||text|| (their clients render it as
@@ -743,10 +751,13 @@ async function handleCreateComment(supabase: any, params: any) {
             origin: 'anymex',
           }, { onConflict: 'dantotsu_comment_id' })
           console.log(`[DantotsuSync] Comment ${comment.id} mapped to Dantotsu ${danCommentId} (media ${targetMediaId})`)
+        } else {
+          console.warn(`[DantotsuSync] Comment ${comment.id} was NOT posted to Dantotsu (media ${targetMediaId}, tag ${parsedTag}) - see [danPostComment] log above`)
         }
       } catch (err) {
         console.error('[DantotsuSync] Error syncing new comment to Dantotsu:', err)
       } finally {
+        clearTimeout(notifyTimer)
         sendCreatedNotification(syncedDanId)
       }
     })()
@@ -756,6 +767,7 @@ async function handleCreateComment(supabase: any, params: any) {
       EdgeRuntime.waitUntil(danPromise)
     }
   } else {
+    console.log(`[DantotsuSync] Skipped comment ${comment.id}: no AniList token (client_type=${client_type}; non-anilist clients must send anilist_token)`)
     sendCreatedNotification(null)
   }
 
