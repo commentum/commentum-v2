@@ -27,6 +27,20 @@ interface DanFetchOpts {
    * we know the request was NOT processed (connection error, 429, 503).
    */
   idempotent?: boolean
+  /** Absolute epoch-ms deadline for the whole call (all attempts + waits). */
+  deadline?: number
+  /**
+   * Background/read calls: skip instantly while Dantotsu has us rate-limited,
+   * and never sit in a retry loop on 429 (set the cooldown instead).
+   */
+  respectCooldown?: boolean
+}
+
+// Shared across all calls in this isolate: after Dantotsu answers 429 we stop
+// hammering it for a while instead of retrying every request into the limit.
+let danRateLimitedUntil = 0
+export function isDantotsuRateLimited(): boolean {
+  return Date.now() < danRateLimitedUntil
 }
 
 /**
@@ -35,20 +49,39 @@ interface DanFetchOpts {
  * or null when every attempt failed at the network level.
  */
 async function danFetch(url: string, init: RequestInit, opts: DanFetchOpts): Promise<Response | null> {
-  const { label, timeoutMs, retries = 2, idempotent = true } = opts
+  const { label, timeoutMs, retries = 2, idempotent = true, deadline, respectCooldown = false } = opts
   const maxAttempts = retries + 1
   const retryStatus = idempotent
-    ? new Set([408, 425, 429, 500, 502, 503, 504])
-    : new Set([429, 503])
+    ? new Set([408, 425, 500, 502, 503, 504, ...(respectCooldown ? [] : [429])])
+    : new Set([503, ...(respectCooldown ? [] : [429])])
+
+  if (respectCooldown && isDantotsuRateLimited()) {
+    console.log(`[${label}] skipped: Dantotsu rate-limited for another ${Math.ceil((danRateLimitedUntil - Date.now()) / 1000)}s`)
+    return null
+  }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const backoff = Math.min(1000 * 2 ** (attempt - 1), 8000) + Math.floor(Math.random() * 250)
+    const remaining = deadline ? deadline - Date.now() : Infinity
+    if (remaining <= 250) {
+      console.warn(`[${label}] time budget exhausted, giving up`)
+      return null
+    }
     try {
-      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(Math.min(timeoutMs, remaining)) })
+
+      if (res.status === 429) {
+        const ra = parseInt(res.headers.get('retry-after') || '', 10)
+        const cool = !isNaN(ra) ? Math.min(ra * 1000, 300_000) : 60_000
+        danRateLimitedUntil = Math.max(danRateLimitedUntil, Date.now() + cool)
+        console.warn(`[${label}] HTTP 429 - Dantotsu cooldown ${Math.round(cool / 1000)}s`)
+      }
+
       if (res.ok || !retryStatus.has(res.status) || attempt === maxAttempts) return res
 
       const retryAfter = parseInt(res.headers.get('retry-after') || '', 10)
       const wait = !isNaN(retryAfter) ? Math.min(retryAfter * 1000, 10_000) : backoff
+      if (deadline && Date.now() + wait >= deadline) return res // no time left to wait + retry
       console.warn(`[${label}] HTTP ${res.status}, retry ${attempt}/${maxAttempts - 1} in ${wait}ms`)
       await res.body?.cancel().catch(() => {})
       await sleep(wait)
@@ -61,6 +94,10 @@ async function danFetch(url: string, init: RequestInit, opts: DanFetchOpts): Pro
       }
       if (attempt === maxAttempts) {
         console.error(`[${label}] failed after ${maxAttempts} attempt(s): ${timedOut ? `timeout ${timeoutMs}ms` : e?.message || e}`)
+        return null
+      }
+      if (deadline && Date.now() + backoff >= deadline) {
+        console.warn(`[${label}] ${timedOut ? 'timeout' : e?.message || e} and no time budget left to retry`)
         return null
       }
       console.warn(`[${label}] ${timedOut ? `timeout ${timeoutMs}ms` : e?.message || e}, retry ${attempt}/${maxAttempts - 1} in ${backoff}ms`)
@@ -476,7 +513,8 @@ export async function danFetchComments(
   page = 1,
   tag?: number,
   sort?: string,
-  authToken?: string
+  authToken?: string,
+  deadline?: number
 ): Promise<any | null> {
   try {
     let url = `${DANTOTSU_API}/comments/${mediaId}/${page}`
@@ -493,7 +531,7 @@ export async function danFetchComments(
       headers['Authorization'] = authToken
     }
 
-    const res = await danFetch(url, { headers }, { label: 'danFetchComments', timeoutMs: 15_000 })
+    const res = await danFetch(url, { headers }, { label: 'danFetchComments', timeoutMs: 10_000, retries: 1, deadline, respectCooldown: true })
     if (!res) return null
 
     if (!res.ok) {
@@ -513,7 +551,8 @@ export async function danFetchComments(
 export async function danFetchReplies(
   parentCommentId: number,
   page = 1,
-  authToken?: string
+  authToken?: string,
+  deadline?: number
 ): Promise<any | null> {
   try {
     const headers: Record<string, string> = {
@@ -523,7 +562,7 @@ export async function danFetchReplies(
       headers['Authorization'] = authToken
     }
 
-    const res = await danFetch(`${DANTOTSU_API}/comments/parent/${parentCommentId}/${page}`, { headers }, { label: 'danFetchReplies', timeoutMs: 15_000 })
+    const res = await danFetch(`${DANTOTSU_API}/comments/parent/${parentCommentId}/${page}`, { headers }, { label: 'danFetchReplies', timeoutMs: 10_000, retries: 1, deadline, respectCooldown: true })
     if (!res) return null
 
     if (!res.ok) {
@@ -632,6 +671,9 @@ async function reconcileMappedComments(
 
 // Media sync rate limiter: avoids spamming Dantotsu on every single page load of the same anime
 const mediaSyncCooldown = new Map<string, number>()
+const MEDIA_SYNC_COOLDOWN_MS = 60_000
+const MEDIA_SYNC_BUDGET_MS = 25_000 // total wall time one sync may spend on Dantotsu
+const REPLY_FETCH_CONCURRENCY = 4
 
 /**
  * On-demand sync for a media from Dantotsu:
@@ -644,14 +686,21 @@ export async function syncMediaFromDantotsu(
   supabase: any,
   mediaId: number,
   requestedPage = 1,
-  callerAuthToken?: string
+  callerAuthToken?: string,
+  budgetMs = MEDIA_SYNC_BUDGET_MS
 ): Promise<void> {
+  if (isDantotsuRateLimited()) return // Dantotsu told us to back off
   const cooldownKey = `${mediaId}:${requestedPage}`
   const lastSync = mediaSyncCooldown.get(cooldownKey)
-  if (lastSync && Date.now() - lastSync < 20_000) {
-    return // Cooldown of 20 seconds
+  if (lastSync && Date.now() - lastSync < MEDIA_SYNC_COOLDOWN_MS) {
+    return
   }
   mediaSyncCooldown.set(cooldownKey, Date.now())
+  if (mediaSyncCooldown.size > 2000) {
+    const cutoff = Date.now() - MEDIA_SYNC_COOLDOWN_MS
+    for (const [k, t] of mediaSyncCooldown) if (t < cutoff) mediaSyncCooldown.delete(k)
+  }
+  const deadline = Date.now() + budgetMs
 
   try {
     // 1. Get an active auth token to access Dantotsu API (requires Authorization header)
@@ -716,7 +765,8 @@ export async function syncMediaFromDantotsu(
     let maxPages = requestedPage
 
     while (currentPage <= maxPages && currentPage <= requestedPage + 2) {
-      const data = await danFetchComments(mediaId, currentPage, undefined, undefined, authToken)
+      if (Date.now() >= deadline) { console.warn(`[syncMediaFromDantotsu] media ${mediaId}: time budget reached, stopping`); break }
+      const data = await danFetchComments(mediaId, currentPage, undefined, undefined, authToken, deadline)
       const danComments = data?.comments
       if (!Array.isArray(danComments) || danComments.length === 0) break
 
@@ -845,8 +895,13 @@ export async function syncMediaFromDantotsu(
       }
 
       while (replyQueue.length > 0) {
-        const item = replyQueue.shift()!
-        const repliesData = await danFetchReplies(item.danParentId, 1, authToken)
+        if (Date.now() >= deadline) { console.warn(`[syncMediaFromDantotsu] media ${mediaId}: time budget reached, ${replyQueue.length} reply thread(s) left for next sync`); break }
+        // Fetch a few reply threads in parallel (was one-by-one), then ingest in order
+        const batch = replyQueue.splice(0, REPLY_FETCH_CONCURRENCY)
+        const batchData = await Promise.all(batch.map((b) => danFetchReplies(b.danParentId, 1, authToken, deadline)))
+        for (let bi = 0; bi < batch.length; bi++) {
+        const item = batch[bi]
+        const repliesData = batchData[bi]
         const replies = repliesData?.comments
         if (!Array.isArray(replies) || replies.length === 0) continue
 
@@ -937,6 +992,7 @@ export async function syncMediaFromDantotsu(
             }
           }
         }
+        } // end for (batch)
       }
 
       // If every comment on this page was already mapped and we're scanning page 1,

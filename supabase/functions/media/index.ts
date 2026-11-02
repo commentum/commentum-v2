@@ -12,6 +12,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'content-type',
 }
 
+// Media this isolate has already served once (later loads never wait on Dantotsu)
+const seenMedia = new Set<string>()
+const FIRST_LOAD_WAIT_MS = 3000
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -40,7 +44,12 @@ serve(async (req) => {
       )
     }
 
-    // On-demand sync from Dantotsu (AniList directly, or resolved from MAL / SIMKL)
+    // On-demand sync from Dantotsu (AniList directly, or resolved from MAL / SIMKL).
+    // The id resolution stays in the foreground exactly as before; only the
+    // Dantotsu sync itself runs in the background so /media never blocks on it.
+    // Local comments are returned right away (stale-while-revalidate), so the
+    // next load sees any new Dantotsu comments. Only the very first load of a
+    // media in this isolate waits, and then for at most FIRST_LOAD_WAIT_MS.
     let syncAnilistId: number | null = null
     if (client_type === 'anilist') {
       const mid = parseInt(media_id, 10)
@@ -50,8 +59,20 @@ serve(async (req) => {
       syncAnilistId = await resolveAnilistMediaId(supabase, client_type, media_id, mediaType)
     }
 
-    if (syncAnilistId) {
-      await syncMediaFromDantotsu(supabase, syncAnilistId, page || 1).catch(() => {})
+    const syncPromise: Promise<void> = syncAnilistId
+      ? syncMediaFromDantotsu(supabase, syncAnilistId, page || 1)
+          .catch((err) => console.error('[media] background Dantotsu sync failed:', err))
+      : Promise.resolve()
+
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+      // @ts-ignore EdgeRuntime is provided by the Supabase edge runtime
+      EdgeRuntime.waitUntil(syncPromise)
+    }
+    const seenKey = `${client_type}:${media_id}`
+    if (!seenMedia.has(seenKey)) {
+      if (seenMedia.size > 2000) seenMedia.clear()
+      seenMedia.add(seenKey)
+      await Promise.race([syncPromise, new Promise((r) => setTimeout(r, FIRST_LOAD_WAIT_MS))])
     }
 
     // ====================================
