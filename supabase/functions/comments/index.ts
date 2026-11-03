@@ -120,9 +120,24 @@ serve(async (req) => {
       )
     }
 
+    if (content !== undefined && content !== null && typeof content !== 'string') {
+      return new Response(
+        JSON.stringify({ error: 'Content must be a string' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     if (content && (content.length < 1 || content.length > 10000)) {
       return new Response(
         JSON.stringify({ error: 'Content must be between 1 and 10000 characters' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Reject blank / invisible-only comments (create and edit)
+    if ((action === 'create' || action === 'edit') && isBlankContent(content)) {
+      return new Response(
+        JSON.stringify({ error: 'Comment cannot be empty' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -151,7 +166,7 @@ serve(async (req) => {
     }
 
     // Get all needed configs in ONE query (cached)
-    const configs = await getConfigs(supabase, ['system_enabled', 'max_nesting_level', 'banned_keywords'])
+    const configs = await getConfigs(supabase, ['system_enabled', 'max_nesting_level', 'banned_keywords', 'rate_limit_comments_per_hour', 'rate_limit_comments_per_minute', 'comment_cooldown_seconds'])
 
     if (configs.system_enabled === false) {
       return new Response(
@@ -369,6 +384,25 @@ serve(async (req) => {
   }
 })
 
+// True when content is empty or only whitespace / invisible characters
+// (zero-width chars, Braille blank U+2800, Hangul fillers, format chars, ...).
+const BLANK_CONTENT_RE = /^[\p{Z}\p{Cc}\p{Cf}\u2800\u3164\u115F\u1160\uFFA0\u034F\u180E]*$/u
+function isBlankContent(content: unknown): boolean {
+  return typeof content !== 'string' || BLANK_CONTENT_RE.test(content)
+}
+
+const normalizeForCompare = (c: string) => c.replace(/\s+/g, ' ').trim().toLowerCase()
+
+function tooManyRequests(message: string, retryAfterSec: number) {
+  return new Response(
+    JSON.stringify({ error: message, retry_after: retryAfterSec }),
+    {
+      status: 429,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': String(retryAfterSec) },
+    }
+  )
+}
+
 async function handleCreateComment(supabase: any, params: any) {
   let { client_type, user_id, media_id, content, parent_id, tag, userInfo, mediaInfo, userRole, req, configs, token, anilistToken } = params
 
@@ -441,6 +475,61 @@ async function handleCreateComment(supabase: any, params: any) {
       JSON.stringify({ error: 'Comment contains prohibited content' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
+  }
+
+  // ---- Anti-spam: hourly limit, cooldown between comments, duplicate guard ----
+  // Staff (moderator and above) are exempt. Deleted comments still count, so
+  // posting-then-deleting can't be used to dodge the limit.
+  if (userRole === 'user') {
+    const hourlyLimit = Number(configs.rate_limit_comments_per_hour ?? 20)
+    const minuteLimit = Number(configs.rate_limit_comments_per_minute ?? 5)
+    const cooldownSec = Number(configs.comment_cooldown_seconds ?? 5)
+    const now = Date.now()
+    const { data: recent } = await supabase
+      .from('comments')
+      .select('created_at, content')
+      .eq('user_id', user_id)
+      .eq('client_type', client_type)
+      .gte('created_at', new Date(now - 3_600_000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(Math.max(hourlyLimit, minuteLimit, 1))
+
+    if (recent && recent.length > 0) {
+      const lastAgeSec = (now - new Date(recent[0].created_at).getTime()) / 1000
+      if (cooldownSec > 0 && lastAgeSec < cooldownSec) {
+        return tooManyRequests(
+          `You're commenting too fast. Try again in ${Math.ceil(cooldownSec - lastAgeSec)}s.`,
+          Math.ceil(cooldownSec - lastAgeSec)
+        )
+      }
+
+      const norm = normalizeForCompare(content)
+      const dup = recent.find((r: any) =>
+        now - new Date(r.created_at).getTime() < 600_000 && normalizeForCompare(r.content || '') === norm)
+      if (dup) {
+        return tooManyRequests(
+          'You already posted this comment recently.',
+          Math.max(1, Math.ceil(600 - (now - new Date(dup.created_at).getTime()) / 1000))
+        )
+      }
+
+      // Burst limit: max N comments in any rolling 60 seconds
+      if (minuteLimit > 0 && recent.length >= minuteLimit) {
+        const nthAgeSec = (now - new Date(recent[minuteLimit - 1].created_at).getTime()) / 1000
+        if (nthAgeSec < 60) {
+          const wait = Math.max(1, Math.ceil(60 - nthAgeSec))
+          return tooManyRequests(`Slow down - max ${minuteLimit} comments per minute. Try again in ${wait}s.`, wait)
+        }
+      }
+
+      if (hourlyLimit > 0 && recent.length >= hourlyLimit) {
+        const oldestSec = (now - new Date(recent[recent.length - 1].created_at).getTime()) / 1000
+        return tooManyRequests(
+          `Comment limit reached (${hourlyLimit} per hour). Try again later.`,
+          Math.max(1, Math.ceil(3600 - oldestSec))
+        )
+      }
+    }
   }
 
   // Auto-translate comment content in the background (non-blocking)
