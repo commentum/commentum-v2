@@ -18,6 +18,7 @@ import {
   toDantotsuTag,
 } from '../shared/dantotsuClient.ts'
 import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
+import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -166,7 +167,7 @@ serve(async (req) => {
     }
 
     // Get all needed configs in ONE query (cached)
-    const configs = await getConfigs(supabase, ['system_enabled', 'max_nesting_level', 'banned_keywords', 'rate_limit_comments_per_hour', 'rate_limit_comments_per_minute', 'comment_cooldown_seconds'])
+    const configs = await getConfigs(supabase, ['system_enabled', 'max_nesting_level', 'banned_keywords', 'rate_limit_comments_per_hour', 'rate_limit_comments_per_minute', 'comment_cooldown_seconds', 'rate_limit_edits_per_hour', 'rate_limit_deletes_per_hour', 'rate_limit_translations_per_minute'])
 
     if (configs.system_enabled === false) {
       return new Response(
@@ -310,6 +311,22 @@ serve(async (req) => {
     }
 
     const userAuthToken = token || access_token
+
+    // Rate limit edit / delete / translate per user (staff exempt for delete/edit)
+    if (action === 'edit' || action === 'delete' || action === 'translate') {
+      const isStaff = userRole && userRole !== 'user'
+      const rules = action === 'translate'
+        ? [{ key: `translate:min:${user_id}`, limit: Number(configs.rate_limit_translations_per_minute ?? 15), windowSec: 60 }]
+        : isStaff
+          ? []
+          : action === 'edit'
+            ? [{ key: `edit:hr:${user_id}`, limit: Number(configs.rate_limit_edits_per_hour ?? 30), windowSec: 3600 }]
+            : [{ key: `delete:hr:${user_id}`, limit: Number(configs.rate_limit_deletes_per_hour ?? 30), windowSec: 3600 }]
+      const rl = await checkRateLimits(supabase, rules)
+      if (!rl.allowed) {
+        return rateLimitedResponse(`Too many ${action} requests. Try again in ${rl.retryAfter}s.`, rl.retryAfter, corsHeaders)
+      }
+    }
     const userAnilistToken = anilist_token || (client_type === 'anilist' ? userAuthToken : null)
 
     switch (action) {

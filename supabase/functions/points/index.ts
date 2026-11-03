@@ -2,7 +2,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { getUserRole } from '../shared/auth.ts'
 import { resolveUserBadges } from '../shared/badges.ts'
-import { getConfig } from '../shared/configCache.ts'
+import { getConfig, getConfigs } from '../shared/configCache.ts'
+import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -36,6 +37,26 @@ serve(async (req) => {
 
     const body = await req.json()
     const { action, user_info, client_type, target_user_id, target_client_type, requester_user_id, requester_client_type, user_ids, page, limit } = body
+
+    // Rate limits for the expensive / abusable actions
+    if (action === 'claim_ad_points' || action === 'refresh_user' || action === 'refresh_all') {
+      const cfg = await getConfigs(supabase, ['rate_limit_points_claims_per_minute', 'rate_limit_points_claims_per_hour'])
+      const claimUser = body.user_id || body.user_info?.user_id
+      const rules = action === 'claim_ad_points' && claimUser
+        ? [
+            { key: `claim:min:${body.client_type}:${claimUser}`, limit: Number(cfg.rate_limit_points_claims_per_minute ?? 5), windowSec: 60 },
+            { key: `claim:hr:${body.client_type}:${claimUser}`, limit: Number(cfg.rate_limit_points_claims_per_hour ?? 30), windowSec: 3600 },
+          ]
+        : action === 'refresh_user'
+          ? [{ key: `refresh:user:${target_client_type || client_type}:${target_user_id}`, limit: 6, windowSec: 60 }]
+          : action === 'refresh_all'
+            ? [{ key: 'refresh:all', limit: 1, windowSec: 300 }] // global: heavy full recompute, once per 5 min
+            : []
+      const rl = await checkRateLimits(supabase, rules)
+      if (!rl.allowed) {
+        return rateLimitedResponse(`Too many requests. Try again in ${rl.retryAfter}s.`, rl.retryAfter, corsHeaders)
+      }
+    }
 
     switch (action) {
       case 'get_user_points':

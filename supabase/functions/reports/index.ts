@@ -4,6 +4,8 @@ import { verifyAdminAccess, getDisplayRole } from '../shared/auth.ts'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
+import { getConfigs } from '../shared/configCache.ts'
+import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
 import {
   danAuthenticate,
   getDanModAuth,
@@ -135,6 +137,18 @@ async function handleCreateReport(supabase: any, params: any) {
       JSON.stringify({ error: 'reporter_info.user_id is required' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
+  }
+
+  // Rate limit reports per user (per minute + per hour)
+  {
+    const cfg = await getConfigs(supabase, ['rate_limit_reports_per_minute', 'rate_limit_reports_per_hour'])
+    const rl = await checkRateLimits(supabase, [
+      { key: `report:min:${reporter_id}`, limit: Number(cfg.rate_limit_reports_per_minute ?? 3), windowSec: 60 },
+      { key: `report:hr:${reporter_id}`, limit: Number(cfg.rate_limit_reports_per_hour ?? 10), windowSec: 3600 },
+    ])
+    if (!rl.allowed) {
+      return rateLimitedResponse(`Too many reports. Try again in ${rl.retryAfter}s.`, rl.retryAfter, corsHeaders)
+    }
   }
 
   // Validate comment_id (must be integer)

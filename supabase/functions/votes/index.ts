@@ -2,6 +2,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
+import { getConfigs } from '../shared/configCache.ts'
+import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
 import {
   danAuthenticate,
   getDanModAuth,
@@ -41,6 +43,18 @@ serve(async (req) => {
         JSON.stringify({ error: 'user_info.user_id is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // Rate limit votes per user (per minute + per hour)
+    {
+      const cfg = await getConfigs(supabase, ['rate_limit_votes_per_minute', 'rate_limit_votes_per_hour'])
+      const rl = await checkRateLimits(supabase, [
+        { key: `vote:min:${user_id}`, limit: Number(cfg.rate_limit_votes_per_minute ?? 20), windowSec: 60 },
+        { key: `vote:hr:${user_id}`, limit: Number(cfg.rate_limit_votes_per_hour ?? 100), windowSec: 3600 },
+      ])
+      if (!rl.allowed) {
+        return rateLimitedResponse(`Too many votes. Try again in ${rl.retryAfter}s.`, rl.retryAfter, corsHeaders)
+      }
     }
 
     // Validate comment_id (must be integer)
