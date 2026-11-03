@@ -30,34 +30,64 @@ interface Target {
 
 // Find the user and the platform they are on. The same numeric id can exist on
 // more than one platform, in which case the caller must pass `platform`.
-async function resolveTarget(supabase: any, userId: string, platform?: string): Promise<Target | { error: string }> {
-  let q = supabase
-    .from('commentum_users')
-    .select('commentum_client_type, commentum_username, commentum_user_role')
-    .eq('commentum_user_id', userId)
-  if (platform) q = q.in('commentum_client_type', aliases(platform))
-  const { data } = await q
+async function resolveTarget(supabase: any, input: string, platform?: string): Promise<Target | { error: string }> {
+  const raw = String(input).trim()
+  type Row = { id: string; client: string; username: string; role: string }
 
-  let rows: Array<{ client: string; username: string; role: string }> = (data || []).map((r: any) => ({
-    client: normClient(r.commentum_client_type),
-    username: r.commentum_username,
-    role: r.commentum_user_role || 'user',
-  }))
+  const byId = async (id: string): Promise<Row[]> => {
+    let q = supabase
+      .from('commentum_users')
+      .select('commentum_user_id, commentum_client_type, commentum_username, commentum_user_role')
+      .eq('commentum_user_id', id)
+    if (platform) q = q.in('commentum_client_type', aliases(platform))
+    const { data, error } = await q
+    if (error) console.error('points resolveTarget users query:', error.message)
+    let rows: Row[] = (data || []).map((r: any) => ({
+      id: String(r.commentum_user_id), client: normClient(r.commentum_client_type),
+      username: r.commentum_username, role: r.commentum_user_role || 'user',
+    }))
+    if (rows.length === 0) {
+      let cq = supabase.from('comments').select('user_id, client_type, username').eq('user_id', id).limit(10)
+      if (platform) cq = cq.in('client_type', aliases(platform))
+      const { data: c } = await cq
+      rows = (c || []).map((r: any) => ({
+        id: String(r.user_id), client: normClient(r.client_type), username: r.username, role: 'user',
+      }))
+    }
+    return rows
+  }
 
+  let rows = await byId(raw)
+
+  // Not an ID we know: accept an exact username too (case-insensitive).
   if (rows.length === 0) {
-    let cq = supabase.from('comments').select('client_type, username').eq('user_id', userId).limit(10)
-    if (platform) cq = cq.in('client_type', aliases(platform))
-    const { data: c } = await cq
-    rows = (c || []).map((r: any) => ({ client: normClient(r.client_type), username: r.username, role: 'user' }))
+    const esc = raw.replace(/[\\%_]/g, (m) => '\\' + m)
+    let uq = supabase
+      .from('commentum_users')
+      .select('commentum_user_id, commentum_client_type, commentum_username, commentum_user_role')
+      .ilike('commentum_username', esc)
+      .limit(10)
+    if (platform) uq = uq.in('commentum_client_type', aliases(platform))
+    const { data: named } = await uq
+    rows = (named || []).map((r: any) => ({
+      id: String(r.commentum_user_id), client: normClient(r.commentum_client_type),
+      username: r.commentum_username, role: r.commentum_user_role || 'user',
+    }))
+    const ids = [...new Set(rows.map((r) => r.id + ':' + r.client))]
+    if (ids.length > 1) {
+      return { error: `Several users are named "${raw}" (${ids.join(', ')}). Use the ID, or pass \`platform\`.` }
+    }
   }
 
   const clients = [...new Set(rows.map((r) => r.client))]
-  if (clients.length === 0) return { error: 'User not found in the system.' }
+  if (clients.length === 0) {
+    return { error: `User not found: "${raw}"${platform ? ` on ${platform}` : ''}. Pick the user from the autocomplete list, or paste their numeric ID.` }
+  }
   if (clients.length > 1) {
-    return { error: `ID ${userId} exists on several platforms (${clients.join(', ')}). Re-run with the \`platform\` option.` }
+    return { error: `ID ${raw} exists on several platforms (${clients.join(', ')}). Re-run with the \`platform\` option.` }
   }
   const row = rows[0]
-  return { userId, clientType: row.client, username: row.username || 'Unknown', role: row.role }
+  return { userId: row.id, clientType: row.client, username: row.username || 'Unknown', role: row.role }
 }
 
 async function adjust(supabase: any, t: Target, points: number, reason: string, by: string) {
