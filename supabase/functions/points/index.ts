@@ -4,6 +4,7 @@ import { getUserRole } from '../shared/auth.ts'
 import { resolveUserBadges } from '../shared/badges.ts'
 import { getConfig, getConfigs } from '../shared/configCache.ts'
 import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
+import { getActiveRestriction, restrictionResponse } from '../shared/restrictions.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -77,7 +78,12 @@ serve(async (req) => {
       case 'refresh_all':
         return await handleRefreshAll(supabase, { client_type: target_client_type })
 
-      case 'claim_ad_points':
+      case 'claim_ad_points': {
+        const claimer = body.user_id || body.user_info?.user_id
+        if (claimer) {
+          const restriction = await getActiveRestriction(supabase, claimer, body.client_type)
+          if (restriction) return restrictionResponse(restriction, corsHeaders)
+        }
         return await handleClaimAdPoints(supabase, {
           client_type: body.client_type,
           user_id: body.user_id || body.user_info?.user_id,
@@ -85,6 +91,7 @@ serve(async (req) => {
           points: body.points ?? body.amount ?? body.points_reward ?? body.reward_points,
           mode: body.mode ?? body.type
         })
+      }
 
       default:
         return new Response(

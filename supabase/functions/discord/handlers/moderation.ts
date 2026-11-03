@@ -1101,8 +1101,9 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
     }
 
     // Ban user across all platforms using helper function
+    const banFailures: string[] = []
     for (const user of targetUsers) {
-      await supabase
+      const { data: applied, error: banError } = await supabase
         .rpc('ban_commentum_user', {
           p_client_type: user.commentum_client_type,
           p_user_id: targetUserId,
@@ -1111,6 +1112,13 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
           p_shadow_ban: false,
           p_duration_hours: duration || null
         })
+      if (banError || applied === false) {
+        console.error('ban_commentum_user failed:', user.commentum_client_type, banError?.message)
+        banFailures.push(user.commentum_client_type)
+      }
+    }
+    if (banFailures.length === targetUsers.length) {
+      return createErrorResponse(`Ban was NOT applied (${banFailures.join(', ')}). Check the function logs.`)
     }
 
     const durationText = duration ? `${duration} hours` : 'Permanent'

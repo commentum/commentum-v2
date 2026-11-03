@@ -19,6 +19,7 @@ import {
 } from '../shared/dantotsuClient.ts'
 import { resolveAnilistMediaId } from '../shared/mediaMapping.ts'
 import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
+import { getActiveRestriction, restrictionResponse } from '../shared/restrictions.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -274,40 +275,11 @@ serve(async (req) => {
       userRole = await getUserRole(supabase, user_id)
     }
 
-    // Check user restrictions from commentum_users table
-    if (action === 'create') {
-      const { data: userStatus } = await supabase
-        .from('commentum_users')
-        .select('commentum_user_banned, commentum_user_banned_until, commentum_user_muted, commentum_user_muted_until, commentum_user_shadow_banned, commentum_user_shadow_banned_until, commentum_user_warnings')
-        .eq('commentum_client_type', client_type)
-        .eq('commentum_user_id', user_id)
-        .single()
-
-      const now = new Date()
-
-      // Check ban (respecting expiration - a ban with banned_until in the past is not active)
-      if (userStatus?.commentum_user_banned && (userStatus?.commentum_user_banned_until === null || new Date(userStatus.commentum_user_banned_until) > now)) {
-        return new Response(
-          JSON.stringify({ error: 'User is banned' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Check shadow ban (respecting expiration)
-      if (userStatus?.commentum_user_shadow_banned && (userStatus?.commentum_user_shadow_banned_until === null || new Date(userStatus.commentum_user_shadow_banned_until) > now)) {
-        return new Response(
-          JSON.stringify({ error: 'User is banned' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-
-      // Check mute (respecting expiration)
-      if (userStatus?.commentum_user_muted && (userStatus?.commentum_user_muted_until === null || new Date(userStatus.commentum_user_muted_until) > now)) {
-        return new Response(
-          JSON.stringify({ error: 'User is muted' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+    // Banned / shadow banned / muted users cannot write anything (create, edit,
+    // delete, translate). mod_delete is a staff action and is checked by role.
+    if (action !== 'mod_delete') {
+      const restriction = await getActiveRestriction(supabase, user_id, client_type)
+      if (restriction) return restrictionResponse(restriction, corsHeaders)
     }
 
     const userAuthToken = token || access_token

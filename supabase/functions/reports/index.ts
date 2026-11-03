@@ -6,6 +6,7 @@ import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { getConfigs } from '../shared/configCache.ts'
 import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
+import { getActiveRestriction, restrictionResponse } from '../shared/restrictions.ts'
 import {
   danAuthenticate,
   getDanModAuth,
@@ -32,8 +33,14 @@ serve(async (req) => {
     const { action, comment_id, reporter_info, reason, notes, client_type, access_token, resolution, review_notes, delete_comment, token, anilist_token } = await req.json()
 
     switch (action) {
-      case 'create':
+      case 'create': {
+        const reporterId = reporter_info?.user_id
+        if (reporterId) {
+          const restriction = await getActiveRestriction(supabase, reporterId, reporter_info?.client_type || client_type)
+          if (restriction) return restrictionResponse(restriction, corsHeaders)
+        }
         return await handleCreateReport(supabase, { comment_id, reporter_info, reason, notes, token: anilist_token || token || access_token })
+      }
       
       case 'resolve':
         // Resolve requires admin authentication via client token

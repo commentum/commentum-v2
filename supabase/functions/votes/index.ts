@@ -4,6 +4,7 @@ import { queueDiscordNotification } from '../shared/discordNotifications.ts'
 import { queueFcmNotification } from '../shared/fcmNotifications.ts'
 import { getConfigs } from '../shared/configCache.ts'
 import { checkRateLimits, rateLimitedResponse } from '../shared/rateLimit.ts'
+import { getActiveRestriction, restrictionResponse } from '../shared/restrictions.ts'
 import {
   danAuthenticate,
   getDanModAuth,
@@ -43,6 +44,12 @@ serve(async (req) => {
         JSON.stringify({ error: 'user_info.user_id is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
+    }
+
+    // Banned / shadow banned / muted users cannot vote
+    {
+      const restriction = await getActiveRestriction(supabase, user_id, user_info?.client_type)
+      if (restriction) return restrictionResponse(restriction, corsHeaders)
     }
 
     // Rate limit votes per user (per minute + per hour)
