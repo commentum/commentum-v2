@@ -1,6 +1,7 @@
 import { handleAddCommand, handleRegisterCommand, handleStatsCommand, handleHelpCommand, getAvailableServers } from './info.ts'
 import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand, handleQueueCommand } from './moderation.ts'
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
+import { handlePointsGiveCommand, handlePointsDeductCommand, handlePointsCheckCommand, handlePointsUndoCommand } from './points.ts'
 import { handleAutocomplete, handleSearchCommentsCommand, handleSearchPageInteraction } from './search.ts'
 import { createModalResponse, createDiscordResponse } from '../utils.ts'
 import { queueFcmNotification } from '../../shared/fcmNotifications.ts'
@@ -1142,6 +1143,16 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
         return await handleShadowbanCommand(supabase, userId, username, data.options, registration, userRole)
       case 'unshadowban':
         return await handleUnshadowbanCommand(supabase, userId, username, data.options, registration, userRole)
+
+      // Points (admin: give / deduct / undo, moderator+: check)
+      case 'points_give':
+        return await handlePointsGiveCommand(supabase, userId, username, data.options, registration, userRole)
+      case 'points_deduct':
+        return await handlePointsDeductCommand(supabase, userId, username, data.options, registration, userRole)
+      case 'points_check':
+        return await handlePointsCheckCommand(supabase, data.options, userRole)
+      case 'points_undo':
+        return await handlePointsUndoCommand(supabase, userId, username, data.options, registration, userRole)
 
       // Super Admin Commands
       case 'promote':

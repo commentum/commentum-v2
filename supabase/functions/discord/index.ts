@@ -398,6 +398,118 @@ async function handleGlobalCommandSync(): Promise<Response> {
       description: 'View moderation queue of pending reports'
     },
     {
+      name: 'points_give',
+      description: 'Give points to a user',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID',
+          type: 3,
+          required: true,
+          autocomplete: true
+        },
+        {
+          name: 'amount',
+          description: 'Whole number of points (1 - 10,000,000)',
+          type: 4,
+          required: true,
+          min_value: 1,
+          max_value: 10000000
+        },
+        {
+          name: 'reason',
+          description: 'Reason (shown in the audit log)',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'platform',
+          description: 'Only needed if the ID exists on several platforms',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'AniList', value: 'anilist' },
+            { name: 'MyAnimeList', value: 'myanimelist' },
+            { name: 'SIMKL', value: 'simkl' }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'points_deduct',
+      description: 'Deduct points from a user (can go below zero)',
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID',
+          type: 3,
+          required: true,
+          autocomplete: true
+        },
+        {
+          name: 'amount',
+          description: 'Whole number of points (1 - 10,000,000)',
+          type: 4,
+          required: true,
+          min_value: 1,
+          max_value: 10000000
+        },
+        {
+          name: 'reason',
+          description: 'Reason (shown in the audit log)',
+          type: 3,
+          required: true
+        },
+        {
+          name: 'platform',
+          description: 'Only needed if the ID exists on several platforms',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'AniList', value: 'anilist' },
+            { name: 'MyAnimeList', value: 'myanimelist' },
+            { name: 'SIMKL', value: 'simkl' }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'points_check',
+      description: "Show a user's points and recent adjustments",
+      options: [
+        {
+          name: 'user_id',
+          description: 'Platform user ID',
+          type: 3,
+          required: true,
+          autocomplete: true
+        },
+        {
+          name: 'platform',
+          description: 'Only needed if the ID exists on several platforms',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'AniList', value: 'anilist' },
+            { name: 'MyAnimeList', value: 'myanimelist' },
+            { name: 'SIMKL', value: 'simkl' }
+          ]
+        }
+      ]
+    },
+    {
+      name: 'points_undo',
+      description: 'Undo a points adjustment (ID from /points_check)',
+      options: [
+        {
+          name: 'adjustment_id',
+          description: 'Adjustment UUID',
+          type: 3,
+          required: true
+        }
+      ]
+    },
+    {
       name: 'delete',
       description: 'Delete a comment',
       options: [

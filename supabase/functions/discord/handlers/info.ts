@@ -366,14 +366,18 @@ function getHelpContent(role: string): string {
     `• \`/unlock comment_id:<id> [reason:<text>]\` - Unlock thread\n` +
     `• \`/resolve comment_id:<id> reporter_id:<id> resolution:<type> [notes:<text>]\` - Resolve report\n` +
     `• \`/queue\` - View moderation queue\n` +
-    `• \`/delete comment_id:<id>\` - Delete own comments\n`;
+    `• \`/delete comment_id:<id>\` - Delete own comments\n` +
+    `• \`/points_check user_id:<id>\` - Show points and adjustments\n`;
 
   const adminCommands = `\n👑 **Admin Commands**\n` +
     `• \`/ban user_id:<id> reason:<reason> [shadow:<true/false>]\` - Ban user\n` +
     `• \`/unban user_id:<id> reason:<reason>\` - Unban user\n` +
     `• \`/shadowban user_id:<id> reason:<reason>\` - Shadow ban\n` +
     `• \`/unshadowban user_id:<id> reason:<reason>\` - Remove shadow ban\n` +
-    `• \`/delete comment_id:<id>\` - Delete any comment\n`;
+    `• \`/delete comment_id:<id>\` - Delete any comment\n` +
+    `• \`/points_give user_id:<id> amount:<n> reason:<text>\` - Give points\n` +
+    `• \`/points_deduct user_id:<id> amount:<n> reason:<text>\` - Deduct points (can go below zero)\n` +
+    `• \`/points_undo adjustment_id:<uuid>\` - Undo a points adjustment\n`;
 
   const superAdminCommands = `\n⚡ **Super Admin Commands**\n` +
     `• \`/promote user_id:<id> role:<role> [reason:<text>]\` - Promote user\n` +
