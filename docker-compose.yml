@@ -1,0 +1,94 @@
+version: '3.8'
+
+services:
+  db:
+    image: supabase/postgres:15.8.1.085
+    container_name: commentum-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - commentum-db-data:/var/lib/postgresql/data
+    networks:
+      - commentum-net
+
+  rest:
+    image: postgrest/postgrest:v14.8
+    container_name: commentum-rest
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      PGRST_DB_URI: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_BUILTIN_AUTH: "false"
+    networks:
+      - commentum-net
+
+  functions:
+    image: supabase/edge-runtime:v1.71.2
+    container_name: commentum-functions
+    restart: unless-stopped
+    depends_on:
+      - db
+      - rest
+    command: ["start", "--main-service", "/home/deno/functions/main"]
+    volumes:
+      - ./supabase/functions:/home/deno/functions:ro
+      - deno-cache:/root/.cache/deno
+    environment:
+      SUPABASE_URL: http://caddy:8000
+      SUPABASE_PUBLIC_URL: http://anymex.duckdns.org:8000
+      SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      VERIFY_JWT: "false"
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID}
+      DISCORD_PUBLIC_KEY: ${DISCORD_PUBLIC_KEY}
+      AL_CLIENT_SECRET: ${AL_CLIENT_SECRET}
+      MYANIMELIST_CLIENT_ID: ${MYANIMELIST_CLIENT_ID}
+      MAL_CLIENT_SECRET: ${MAL_CLIENT_SECRET}
+      SIMKL_CLIENT_ID: ${SIMKL_CLIENT_ID}
+      SIMKL_CLIENT_SECRET: ${SIMKL_CLIENT_SECRET}
+      DANTOTSU_AL_TOKEN: ${DANTOTSU_AL_TOKEN}
+      ANNOUNCEMENT_API_KEY: ${ANNOUNCEMENT_API_KEY}
+      BACKUP_TOKEN: ${BACKUP_TOKEN}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID}
+      FCM_CLIENT_EMAIL: ${FCM_CLIENT_EMAIL}
+      FCM_PRIVATE_KEY: ${FCM_PRIVATE_KEY}
+    networks:
+      - commentum-net
+
+  caddy:
+    image: caddy:alpine
+    container_name: commentum-caddy
+    restart: unless-stopped
+    depends_on:
+      - functions
+      - rest
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8000:8000"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      - commentum-net
+
+networks:
+  commentum-net:
+    driver: bridge
+
+volumes:
+  commentum-db-data:
+  deno-cache:
+  caddy-data:
+

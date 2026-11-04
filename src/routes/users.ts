@@ -1,17 +1,170 @@
 import { Hono } from "hono";
 import { AppContext } from "../types/env";
-import { requireAuth } from "../middleware/auth";
+import { requireAuth, optionalAuth } from "../middleware/auth";
+import { isAdminOrHigher, isModeratorOrHigher } from "../shared/roles";
 import { createDb } from "../db";
-import { commentumUsers, userPoints, customizationsCatalog, comments } from "../db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { commentumUsers, userPoints, customizationsCatalog, comments, userPointSpends } from "../db/schema";
+import { eq, and, sql, like, inArray, desc } from "drizzle-orm";
 import { verifyClientToken } from "../shared/clientAuth";
 import { formatLinkedAccounts } from "./auth";
+import { computeUserPoints, refreshUserPoints } from "../shared/pointsEngine";
 
 export const usersRoutes = new Hono<AppContext>();
 
 /**
+ * GET /users
+ * Public profile lookup, user search, and batch customizations
+ */
+usersRoutes.get("/", optionalAuth, async (c) => {
+  try {
+    const db = createDb(c.env.DB);
+    const action = (c.req.query("action") || "get_profile").toLowerCase();
+
+    // 1. BATCH CUSTOMIZATIONS
+    if (action === "get_batch_customizations") {
+      const userIdsParam = c.req.query("user_ids") || "";
+      const clientType = (c.req.query("client_type") || "anilist").toLowerCase();
+      const userIds = userIdsParam.split(",").map((s) => s.trim()).filter(Boolean);
+
+      if (userIds.length === 0) {
+        return c.json({ success: true, customizations: {} });
+      }
+
+      const rows = await db
+        .select({
+          userId: commentumUsers.commentumUserId,
+          avatarDecoration: commentumUsers.avatarDecoration,
+          bannerUrl: commentumUsers.bannerUrl,
+          bannerTheme: commentumUsers.bannerTheme,
+          nameplateTheme: commentumUsers.nameplateTheme,
+          profileEffectUrl: commentumUsers.profileEffectUrl,
+        })
+        .from(commentumUsers)
+        .where(
+          and(
+            eq(commentumUsers.commentumClientType, clientType),
+            inArray(commentumUsers.commentumUserId, userIds.slice(0, 100))
+          )
+        );
+
+      const map: Record<string, any> = {};
+      for (const r of rows) {
+        map[r.userId] = {
+          avatar_decoration: r.avatarDecoration,
+          banner_url: r.bannerUrl,
+          banner_theme: r.bannerTheme,
+          nameplate_theme: r.nameplateTheme,
+          profile_effect_url: r.profileEffectUrl,
+        };
+      }
+
+      return c.json({ success: true, customizations: map });
+    }
+
+    // 2. SEARCH USERS
+    if (action === "search_users" || action === "search") {
+      const query = (c.req.query("q") || c.req.query("query") || "").trim();
+      const page = parseInt(c.req.query("page") || "1", 10);
+      const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 50);
+      const offset = (page - 1) * limit;
+
+      if (!query) {
+        return c.json({ success: true, users: [], total: 0 });
+      }
+
+      const results = await db
+        .select({
+          id: commentumUsers.id,
+          user_id: commentumUsers.commentumUserId,
+          client_type: commentumUsers.commentumClientType,
+          username: commentumUsers.commentumUsername,
+          avatar: commentumUsers.commentumUserAvatar,
+          role: commentumUsers.commentumUserRole,
+          avatar_decoration: commentumUsers.avatarDecoration,
+          banner_url: commentumUsers.bannerUrl,
+        })
+        .from(commentumUsers)
+        .where(like(commentumUsers.commentumUsername, `%${query}%`))
+        .limit(limit)
+        .offset(offset);
+
+      return c.json({
+        success: true,
+        page,
+        limit,
+        users: results,
+      });
+    }
+
+    // 3. GET PROFILE
+    const targetUserId = c.req.query("user_id") || c.get("user")?.uid;
+    const clientType = (c.req.query("client_type") || c.get("user")?.provider || "anilist").toLowerCase();
+
+    if (!targetUserId) {
+      return c.json({ success: false, error: "user_id query parameter is required" }, 400);
+    }
+
+    const rows = await db
+      .select()
+      .from(commentumUsers)
+      .where(
+        and(
+          eq(commentumUsers.commentumClientType, clientType),
+          eq(commentumUsers.commentumUserId, targetUserId)
+        )
+      )
+      .limit(1);
+
+    const targetUser = rows[0];
+    if (!targetUser) {
+      return c.json({ success: false, error: "User not found" }, 404);
+    }
+
+    // Compute user points and streaks
+    const pointsData = await computeUserPoints(c.env.DB, clientType, targetUserId);
+
+    return c.json({
+      success: true,
+      user: {
+        id: targetUser.id,
+        user_id: targetUser.commentumUserId,
+        client_type: targetUser.commentumClientType,
+        username: targetUser.commentumUsername,
+        avatar: targetUser.commentumUserAvatar,
+        role: targetUser.commentumUserRole,
+        is_banned: targetUser.commentumUserBanned,
+        is_muted: targetUser.commentumUserMuted,
+        avatar_decoration: targetUser.avatarDecoration,
+        banner_url: targetUser.bannerUrl,
+        banner_theme: targetUser.bannerTheme,
+        nameplate_theme: targetUser.nameplateTheme,
+        profile_effect_url: targetUser.profileEffectUrl,
+        stats: {
+          comment_count: targetUser.commentumUserCommentCount,
+          vote_count: targetUser.commentumUserVoteCount,
+          first_comment_at: targetUser.commentumUserFirstCommentAt,
+          last_comment_at: targetUser.commentumUserLastCommentAt,
+        },
+        points: {
+          total_points: pointsData.points,
+          display_points: pointsData.display_points,
+          is_infinite: pointsData.is_infinite,
+          tier: pointsData.tier,
+          current_streak: pointsData.current_streak,
+          longest_streak: pointsData.longest_streak,
+        },
+        linked_accounts: formatLinkedAccounts(targetUser),
+      },
+    });
+  } catch (error: any) {
+    console.error("GET /users error:", error);
+    return c.json({ success: false, error: error?.message || "Internal server error" }, 500);
+  }
+});
+
+/**
  * POST /users
- * User profile customizations, unlocking items with points, and GDPR data export
+ * User profile customizations, unlocking items with points, role changes, and GDPR data export
  */
 usersRoutes.post("/", requireAuth, async (c) => {
   try {
@@ -35,6 +188,105 @@ usersRoutes.post("/", requireAuth, async (c) => {
     const currentUser = existingUsers[0];
     if (!currentUser) {
       return c.json({ success: false, error: "User not found" }, 404);
+    }
+
+    // ==========================================
+    // ACTION: CHANGE ROLE (Staff only)
+    // ==========================================
+    if (action === "change_role") {
+      if (!isAdminOrHigher(user.role)) {
+        return c.json({ success: false, error: "Admin permissions required to change roles" }, 403);
+      }
+
+      const targetUserId = String(body.target_user_id || body.user_id || "");
+      const targetClient = (body.client_type || "anilist").toLowerCase();
+      const newRole = (body.new_role || body.role || "").toLowerCase();
+
+      const validRoles = ["user", "moderator", "admin", "super_admin", "owner", "app_owner"];
+      if (!validRoles.includes(newRole)) {
+        return c.json({ success: false, error: `Invalid role: ${newRole}` }, 400);
+      }
+
+      // Update role in commentum_users
+      await db
+        .update(commentumUsers)
+        .set({
+          commentumUserRole: newRole,
+          updatedAt: sql`(datetime('now'))`,
+        })
+        .where(
+          and(
+            eq(commentumUsers.commentumClientType, targetClient),
+            eq(commentumUsers.commentumUserId, targetUserId)
+          )
+        );
+
+      // Cascade role update to all user's comments (033)
+      await db
+        .update(comments)
+        .set({
+          userRole: newRole,
+          updatedAt: sql`(datetime('now'))`,
+        })
+        .where(
+          and(
+            eq(comments.clientType, targetClient),
+            eq(comments.userId, targetUserId)
+          )
+        );
+
+      return c.json({
+        success: true,
+        message: `Role changed to ${newRole} for user ${targetUserId}`,
+        role: newRole,
+      });
+    }
+
+    // ==========================================
+    // ACTION: GET USER HISTORY (Moderation / Warnings)
+    // ==========================================
+    if (action === "get_user_history") {
+      const isStaff = isModeratorOrHigher(user.role);
+      const targetUserId = String(body.target_user_id || user.uid);
+      const targetClient = (body.client_type || user.provider).toLowerCase();
+
+      // Only staff can view other users' history
+      if (targetUserId !== user.uid && !isStaff) {
+        return c.json({ success: false, error: "Permission denied" }, 403);
+      }
+
+      const targetRows = await db
+        .select()
+        .from(commentumUsers)
+        .where(
+          and(
+            eq(commentumUsers.commentumClientType, targetClient),
+            eq(commentumUsers.commentumUserId, targetUserId)
+          )
+        )
+        .limit(1);
+
+      const target = targetRows[0];
+      if (!target) {
+        return c.json({ success: false, error: "User not found" }, 404);
+      }
+
+      return c.json({
+        success: true,
+        history: {
+          warnings_count: target.commentumUserWarnings,
+          warning_details: JSON.parse(target.commentumUserWarningDetails || "[]"),
+          last_warning_at: target.commentumUserLastWarningAt,
+          last_warning_reason: target.commentumUserLastWarningReason,
+          is_banned: target.commentumUserBanned,
+          banned_until: target.commentumUserBannedUntil,
+          banned_reason: target.commentumUserBannedReason,
+          is_muted: target.commentumUserMuted,
+          muted_until: target.commentumUserMutedUntil,
+          muted_reason: target.commentumUserMutedReason,
+          moderation_history: JSON.parse(target.commentumUserModerationHistory || "[]"),
+        },
+      });
     }
 
     // ==========================================
@@ -63,43 +315,28 @@ usersRoutes.post("/", requireAuth, async (c) => {
         return c.json({ success: true, message: "Item is already unlocked", unlocked: true });
       }
 
-      // Check points balance
-      const pointsRows = await db
-        .select()
-        .from(userPoints)
-        .where(
-          and(
-            eq(userPoints.userId, user.uid),
-            eq(userPoints.clientType, user.provider)
-          )
-        )
-        .limit(1);
-
-      const userPointRec = pointsRows[0];
-      const currentPoints = userPointRec?.totalPoints || 0;
-
-      if (currentPoints < item.pointsRequired) {
+      // Check points balance via points engine
+      const userPointsData = await computeUserPoints(c.env.DB, user.provider, user.uid);
+      if (!userPointsData.is_infinite && userPointsData.points < item.pointsRequired) {
         return c.json({
           success: false,
-          error: `Insufficient points. Required: ${item.pointsRequired}, Available: ${currentPoints}`,
+          error: `Insufficient points. Required: ${item.pointsRequired}, Available: ${userPointsData.points}`,
         }, 400);
       }
 
-      // Deduct points
+      // Record idempotent spend (049)
       if (item.pointsRequired > 0) {
-        await db
-          .update(userPoints)
-          .set({
-            totalPoints: sql`total_points - ${item.pointsRequired}`,
-            pointsSpent: sql`points_spent + ${item.pointsRequired}`,
-            updatedAt: sql`(datetime('now'))`,
-          })
-          .where(
-            and(
-              eq(userPoints.userId, user.uid),
-              eq(userPoints.clientType, user.provider)
-            )
-          );
+        const spendId = crypto.randomUUID();
+        await db.insert(userPointSpends).values({
+          id: spendId,
+          userId: user.uid,
+          clientType: user.provider,
+          points: item.pointsRequired,
+          refId: `unlock_customization:${customizationId}:${user.provider}:${user.uid}`,
+        });
+
+        // Recompute points & sync
+        await refreshUserPoints(c.env.DB, user.provider, user.uid);
       }
 
       // Add to user inventory
@@ -177,7 +414,7 @@ usersRoutes.post("/", requireAuth, async (c) => {
     }
 
     // ==========================================
-    // ACTION: LINK ACCOUNT (AniList, MAL, Simkl)
+    // ACTION: LINK ACCOUNT
     // ==========================================
     if (action === "link_account") {
       const targetClientType = (body.target_client_type || "").toLowerCase().trim();
@@ -194,7 +431,6 @@ usersRoutes.post("/", requireAuth, async (c) => {
         return c.json({ success: false, error: "Cannot link the same service type to itself" }, 400);
       }
 
-      // Verify target provider OAuth token
       const verified = await verifyClientToken(normTarget, targetAccessToken);
       if (!verified) {
         return c.json({ success: false, error: `Invalid or expired ${targetClientType} access token` }, 401);
@@ -220,6 +456,9 @@ usersRoutes.post("/", requireAuth, async (c) => {
         .set(updateFields)
         .where(eq(commentumUsers.id, currentUser.id))
         .returning();
+
+      // Refresh points for unified account balance
+      await refreshUserPoints(c.env.DB, user.provider, user.uid);
 
       return c.json({
         success: true,
@@ -264,6 +503,8 @@ usersRoutes.post("/", requireAuth, async (c) => {
         .set(updateFields)
         .where(eq(commentumUsers.id, currentUser.id))
         .returning();
+
+      await refreshUserPoints(c.env.DB, user.provider, user.uid);
 
       return c.json({
         success: true,

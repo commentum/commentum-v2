@@ -412,11 +412,19 @@ export const notifications = sqliteTable("notifications", {
   actorUsername: text("actor_username"),
   actorAvatar: text("actor_avatar"), // 016
   type: text("type").notNull(),      // reply, mention, vote, badge, system, mod_action
+  title: text("title"),
+  body: text("body"),
   commentId: integer("comment_id"),
   mediaId: text("media_id"),
   mediaTitle: text("media_title"),
   content: text("content"),
+  metadata: text("metadata").default("{}"),
+  reason: text("reason"),
+  moderatorId: text("moderator_id"),
+  moderatorUsername: text("moderator_username"),
+  clickAction: text("click_action"),
   isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  readAt: text("read_at"),
   createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
 }, (table) => [
   index("idx_notifications_user").on(table.clientType, table.userId, table.isRead),
@@ -570,3 +578,48 @@ export const userAdRewards = sqliteTable("user_ad_rewards", {
   index("idx_ad_rewards_user").on(table.clientType, table.userId),
   index("idx_ad_rewards_master").on(table.masterUserId),
 ]);
+
+// ==========================================
+// 23. USER POINT SPENDS (049 - Idempotent point spends)
+// ==========================================
+export const userPointSpends = sqliteTable("user_point_spends", {
+  id: text("id").primaryKey(), // UUID string
+  userId: text("user_id").notNull(),
+  clientType: text("client_type").notNull(),
+  masterUserId: integer("master_user_id"),
+  points: integer("points").notNull(),
+  refId: text("ref_id").notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => [
+  uniqueIndex("idx_user_point_spends_ref").on(table.refId),
+  index("idx_user_point_spends_user").on(table.clientType, table.userId),
+]);
+
+// ==========================================
+// 24. RATE LIMITS TABLE (051 - Generic fixed-window rate limiter)
+// ==========================================
+export const rateLimits = sqliteTable("rate_limits", {
+  key: text("key").notNull(),
+  windowStart: text("window_start").notNull(),
+  count: integer("count").notNull().default(0),
+}, (table) => [
+  primaryKey({ columns: [table.key, table.windowStart] }),
+  index("idx_rate_limits_window").on(table.windowStart),
+]);
+
+// ==========================================
+// 25. USER POINT ADJUSTMENTS (052 - Manual point adjustments)
+// ==========================================
+export const userPointAdjustments = sqliteTable("user_point_adjustments", {
+  id: text("id").primaryKey(), // UUID string
+  clientType: text("client_type").notNull(),
+  userId: text("user_id").notNull(),
+  points: integer("points").notNull(), // Can be negative!
+  reason: text("reason").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+}, (table) => [
+  index("idx_user_point_adj_user").on(table.clientType, table.userId, table.createdAt),
+  index("idx_user_point_adj_reason").on(table.reason),
+]);
+

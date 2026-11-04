@@ -1,3 +1,4 @@
+import { handleDiscordPointsAdjust, handleDiscordPointsCheck, handleDiscordPointsUndo } from "../shared/discordPoints";
 import { Hono } from "hono";
 import { AppContext } from "../types/env.js";
 import { createDb } from "../db/index.js";
@@ -45,6 +46,30 @@ async function verifyDiscordSignature(
     console.warn("Discord signature verification error:", err);
     return false;
   }
+}
+
+function createDiscordEmbed(
+  title: string,
+  description: string,
+  color: number = 0x5865f2,
+  fields: Array<{ name: string; value: string; inline?: boolean }> = [],
+  ephemeral = false
+) {
+  return {
+    type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
+    data: {
+      embeds: [
+        {
+          title,
+          description,
+          color,
+          fields,
+          timestamp: new Date().toISOString(),
+        },
+      ],
+      flags: ephemeral ? 64 : 0,
+    },
+  };
 }
 
 function createDiscordMessage(content: string, ephemeral = false) {
@@ -1702,6 +1727,104 @@ discordRoutes.post("/", async (c) => {
       }
 
       // /add
+      
+      // /points_give & /points_deduct
+      if (commandName === "points_give" || commandName === "points_deduct") {
+        const kind = commandName === "points_give" ? "give" : "deduct";
+        const targetUserId = String(getOpt("user_id"));
+        const amount = Number(getOpt("amount"));
+        const reason = String(getOpt("reason") || "");
+        const platform = getOpt("platform") ? String(getOpt("platform")) : undefined;
+
+        const res = await handleDiscordPointsAdjust(
+          c.env.DB,
+          kind,
+          targetUserId,
+          amount,
+          reason,
+          platform,
+          discordUserId,
+          discordUsername,
+          staffRole
+        );
+
+        if ("error" in res) {
+          return c.json(createDiscordMessage(`❌ ${res.error}`, true));
+        }
+
+        const color = kind === "give" ? 0x00c853 : 0xd50000;
+        return c.json(
+          createDiscordEmbed(
+            kind === "give" ? "✨ Points Granted" : "🔻 Points Deducted",
+            `${kind === "give" ? "+" : "-"}${amount.toLocaleString()} points for **${res.target.username}** (\`${res.target.userId}\` · ${res.target.clientType})`,
+            color,
+            [
+              { name: "New Balance", value: res.points.toLocaleString(), inline: true },
+              { name: "Tier", value: res.tier, inline: true },
+              { name: "Reason", value: res.reason, inline: false },
+              { name: "Adjustment ID", value: `\`${res.adjustment_id}\``, inline: false },
+            ]
+          )
+        );
+      }
+
+      // /points_check
+      if (commandName === "points_check") {
+        const targetUserId = String(getOpt("user_id"));
+        const platform = getOpt("platform") ? String(getOpt("platform")) : undefined;
+
+        const res = await handleDiscordPointsCheck(c.env.DB, targetUserId, platform, staffRole);
+        if ("error" in res) {
+          return c.json(createDiscordMessage(`❌ ${res.error}`, true));
+        }
+
+        const history = res.recent_adjustments.length
+          ? res.recent_adjustments
+              .map(
+                (a) =>
+                  `${a.points > 0 ? "+" : ""}${a.points.toLocaleString()} · ${a.reason}\n\`${a.id}\``
+              )
+              .join("\n")
+          : "None";
+
+        return c.json(
+          createDiscordEmbed(
+            "📊 User Points & Adjustments",
+            `**${res.target.username}** (\`${res.target.userId}\` · ${res.target.clientType})`,
+            0x5865f2,
+            [
+              { name: "Balance", value: res.display_points, inline: true },
+              { name: "Tier", value: res.tier, inline: true },
+              { name: "Adjustments Total", value: res.adjustments_total.toLocaleString(), inline: true },
+              { name: "Recent Adjustments", value: history, inline: false },
+            ],
+            true
+          )
+        );
+      }
+
+      // /points_undo
+      if (commandName === "points_undo") {
+        const adjustmentId = String(getOpt("adjustment_id") || "").trim();
+        const res = await handleDiscordPointsUndo(c.env.DB, adjustmentId, discordUserId, discordUsername, staffRole);
+
+        if ("error" in res) {
+          return c.json(createDiscordMessage(`❌ ${res.error}`, true));
+        }
+
+        return c.json(
+          createDiscordEmbed(
+            "↩ Adjustment Undone",
+            `Reversed ${res.reversed_points > 0 ? "+" : ""}${res.reversed_points.toLocaleString()} points for \`${res.target.userId}\` (${res.target.clientType}).`,
+            0xffa500,
+            [
+              { name: "New Balance", value: res.points.toLocaleString(), inline: true },
+              { name: "Reversed ID", value: `\`${res.original_id}\``, inline: false },
+            ]
+          )
+        );
+      }
+
       if (commandName === "add") {
         const serverName = String(getOpt("server_name"));
         const guildId = String(getOpt("guild_id"));

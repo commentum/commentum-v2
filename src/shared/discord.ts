@@ -108,6 +108,19 @@ export interface DiscordNotificationData {
   voteType?: "upvote" | "downvote";
   voteScore?: number;
   notes?: string;
+  announcement?: {
+    id: number | string;
+    title: string;
+    content: string;
+    category?: string;
+    author?: string;
+  };
+  report?: {
+    reason: string;
+    notes?: string;
+    reporter_id?: string;
+    reporter_username?: string;
+  };
   dantotsuSync?: {
     status?: "synced" | "dantotsu_origin" | "anymex_only";
     dantotsuCommentId?: number | string;

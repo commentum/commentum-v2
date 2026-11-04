@@ -15,6 +15,8 @@ import { customizationsRoutes } from "./routes/customizations";
 import { usersRoutes } from "./routes/users";
 import { announcementsRoutes } from "./routes/announcements";
 import { discordRoutes } from "./routes/discord";
+import { dantotsuRoutes } from "./routes/dantotsu";
+import { backupRoutes } from "./routes/backup";
 
 const app = new Hono<AppContext>();
 
@@ -24,17 +26,25 @@ app.use(
   "*",
   cors({
     origin: "*",
-    allowHeaders: ["Content-Type", "Authorization", "x-session-token", "appauth", "apikey"],
+    allowHeaders: ["Content-Type", "Authorization", "x-session-token", "x-admin-key", "appauth", "apikey"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   })
 );
 
-// Health Check
+// Health Check & Ping
 app.get("/health", (c) => {
   return c.json({
     status: "healthy",
     service: "Commentum v2 API (Hono + Cloudflare D1)",
     version: "2.0.0",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/ping", (c) => {
+  return c.json({
+    status: "ok",
+    message: "pong",
     timestamp: new Date().toISOString(),
   });
 });
@@ -76,6 +86,8 @@ app.route("/customizations", customizationsRoutes);
 app.route("/users", usersRoutes);
 app.route("/announcements", announcementsRoutes);
 app.route("/discord", discordRoutes);
+app.route("/dantotsu-sync", dantotsuRoutes);
+app.route("/backup-table", backupRoutes);
 
 // Global 404 Handler
 app.notFound((c) => {

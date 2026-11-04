@@ -1,0 +1,21 @@
+anymex.duckdns.org, :8000 {
+    @oauth path /oauth/*
+    handle @oauth {
+        reverse_proxy 172.17.0.1:4000
+    }
+
+    handle /functions/v1/* {
+        uri strip_prefix /functions/v1
+        reverse_proxy functions:9000
+    }
+
+    handle /rest/v1/* {
+        uri strip_prefix /rest/v1
+        reverse_proxy rest:3000
+    }
+
+    handle {
+        respond "Commentum API Gateway" 200
+    }
+}
+

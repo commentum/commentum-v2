@@ -51,108 +51,104 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
   }
   ```
 
-### 1.2. Get Current User Profile
+### 1.2. Get Current Session (`/auth/me`)
 - **Method:** `GET /auth/me`
-- **Auth:** `Authorization: Bearer <session_token>`
-- **Response:** Returns fresh user record with total points, streaks, equipped cosmetics, and linked accounts.
+- **Headers:** `Authorization: Bearer <session_jwt>`
 
-### 1.3. Refresh Session
+### 1.3. Refresh Session (`/auth/refresh`)
 - **Method:** `POST /auth/refresh`
-- **Auth:** `Authorization: Bearer <session_token>`
-- **Response:** Issues a renewed 7-day JWT.
+- **Headers:** `Authorization: Bearer <session_jwt>`
 
 ---
 
 ## 📺 2. Discussions & Media API
 
-### 2.1. Fetch Media Comments
+### 2.1. Fetch Comments for Media (`GET /media`)
 - **Method:** `GET /media`
-- **Auth:** Optional / Recommended
+- **Auth:** Optional (if provided, personal `user_vote` status is populated)
 - **Query Parameters:**
-  | Parameter | Type | Required | Description |
-  |---|---|---|---|
-  | `media_id` | string | **Yes** | AniList / MAL / Simkl media ID |
-  | `client_type` | string | No | Source platform (`anilist`, `mal`, `simkl`) |
-  | `media_type` | string | No | `anime` (default), `manga`, `novel` |
-  | `tag` | integer | No | Specific episode or chapter number (e.g. `12`) |
-  | `sort` | string | No | `newest` (default), `best`, `oldest` |
-  | `page` | integer | No | Page number (default: 1) |
-  | `limit` | integer | No | Items per page (default: 30, max: 100) |
-  | `merge` | string | No | `true` (default: merges equivalent media threads) or `false` |
-- **Response (200 OK):**
-  ```json
-  {
-    "success": true,
-    "media_id": "21",
-    "client_type": "anilist",
-    "media": {
-      "id": "21",
-      "title": "One Piece",
-      "type": "anime",
-      "year": 1999,
-      "poster": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/nx21-tXMK32w8nlMw.jpg"
-    },
-    "total_count": 25,
-    "comments": [
-      {
-        "id": 104,
-        "comment_id": 104,
-        "content": "Incredible episode!",
-        "username": "Sheby",
-        "user_role": "owner",
-        "avatar_decoration": "https://cdn.discordapp.com/...",
-        "tag": 1100,
-        "tags": ["spoiler"],
-        "pinned": true,
-        "vote_score": 142,
-        "user_vote": 1,
-        "replies_count": 3,
-        "replies": [ ... ]
-      }
-    ]
-  }
-  ```
+  * `media_id` (required): Media identifier (e.g., `"21"` for One Piece on MAL, `"21"` on AniList).
+  * `client_type` (optional, default: `"anilist"`): `"anilist"`, `"mal"`, or `"simkl"`.
+  * `tag` (optional): Episode or chapter number (e.g. `1115` for Episode 1115).
+  * `sort` (optional, default: `"newest"`): `"newest"`, `"best"`, `"top"`, `"oldest"`.
+  * `page` (optional, default: `1`): Pagination page.
+  * `limit` (optional, default: `30`, max: `100`): Results per page.
+  * `merge` (optional, default: `"true"`): When `"true"`, cross-platform comments from AniList, MAL, and Simkl are unified into a single thread.
 
 ---
 
-## 💬 3. Comments CRUD
+## 💬 3. Comments CRUD & Anti-Spam
 
-### 3.1. Post a Comment or Reply
+### 3.1. Create Comment
 - **Method:** `POST /comments`
-- **Auth:** `Authorization: Bearer <session_token>`
-- **Request Body (Create):**
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Anti-Spam & Limits Enforced:**
+  * Rejects empty or invisible-only text (Unicode whitespace, Braille blank `\u2800`, zero-width format chars).
+  * 5-second cooldown between comments for non-staff.
+  * Burst limit: 5 comments / rolling minute.
+  * Hourly limit: 20 comments / hour.
+  * Duplicate detection: duplicate text within 10 minutes rejected with 429.
+  * Mentions: automatic extraction of `@username` mentions creating notification alerts.
+  * Points: automatically awards comment points and updates consecutive streaks.
+- **Request Body:**
   ```json
   {
     "action": "create",
     "media_id": "21",
     "media_type": "anime",
-    "content": "This arc is peak fiction!",
-    "tag": 1100,
-    "tags": ["spoiler"],
-    "parent_id": null
+    "content": "This episode was incredible! @Sheby you have to check this out.",
+    "parent_id": null, // or comment_id for replies
+    "tag": 1115 // optional episode or chapter number
   }
   ```
 
-### 3.2. Edit a Comment
+### 3.2. Edit Comment
 - **Method:** `POST /comments`
-- **Auth:** `Authorization: Bearer <session_token>` (Author or Staff)
-- **Request Body (Edit):**
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Limits:** 30 edits / hour.
+- **Request Body:**
   ```json
   {
     "action": "edit",
-    "comment_id": 104,
-    "content": "Updated content..."
+    "comment_id": 1234,
+    "content": "Updated comment text"
   }
   ```
 
-### 3.3. Delete a Comment
+### 3.3. Delete Comment
 - **Method:** `POST /comments`
-- **Auth:** `Authorization: Bearer <session_token>` (Author or Staff)
-- **Request Body (Delete):**
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Limits:** 30 deletes / hour.
+- **Request Body:**
   ```json
   {
     "action": "delete",
-    "comment_id": 104
+    "comment_id": 1234
+  }
+  ```
+
+### 3.4. Moderate Delete Comment (`mod_delete`)
+- **Method:** `POST /comments`
+- **Headers:** `Authorization: Bearer <session_jwt>` (Moderator+)
+- **Request Body:**
+  ```json
+  {
+    "action": "mod_delete",
+    "comment_id": 1234,
+    "reason": "Harassment and offensive language"
+  }
+  ```
+
+### 3.5. On-Demand Translate Comment
+- **Method:** `POST /comments`
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Limits:** 15 translations / minute.
+- **Request Body:**
+  ```json
+  {
+    "action": "translate",
+    "comment_id": 1234,
+    "target_lang": "en"
   }
   ```
 
@@ -160,123 +156,264 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
 
 ## 🗳️ 4. Voting System
 
+### 4.1. Cast / Toggle Vote (`POST /votes`)
 - **Method:** `POST /votes`
-- **Auth:** `Authorization: Bearer <session_token>`
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Limits:** 20 votes / minute.
+- **Rules:**
+  * Voting the same vote again removes it (toggle behavior).
+  * Upvotes award points to the comment author.
+  * Sends vote notification to the comment author if enabled.
 - **Request Body:**
   ```json
   {
-    "comment_id": 104,
-    "vote_type": 1 // 1 for upvote, -1 for downvote, 0 to remove
+    "comment_id": 1234,
+    "vote_type": 1 // 1 (upvote), -1 (downvote), 0 (remove)
   }
   ```
-- **Behavior:** Toggles automatically if clicked again. Returns updated `vote_score`, `upvotes`, and `downvotes`.
 
 ---
 
 ## 🚨 5. Reports & Moderation
 
-### 5.1. File a Report
+### 5.1. File a Report (`POST /reports`)
 - **Method:** `POST /reports`
-- **Auth:** `Authorization: Bearer <session_token>`
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Limits:** 3 reports / minute. Prevents duplicate reports by the same user. Dispatches Discord embed to staff.
 - **Request Body:**
   ```json
   {
     "action": "report",
-    "comment_id": 104,
-    "reason": "spoiler",
-    "notes": "Untagged ending spoilers"
+    "comment_id": 1234,
+    "reason": "harassment",
+    "notes": "User is attacking others"
   }
   ```
 
-### 5.2. Staff Moderation Actions
+### 5.2. Moderation Queue (`POST /moderation`)
 - **Method:** `POST /moderation`
-- **Auth:** `Authorization: Bearer <session_token>` (Requires `moderator` or `admin` role)
-- **Supported Actions:**
-  * `pin_comment` / `unpin_comment`: Pin discussion to top.
-  * `lock_thread` / `unlock_thread`: Prevent new replies.
-  * `warn_user`: Issues structured warning stored on user profile.
-  * `mute_user` / `unmute_user`: Temporarily mutes user from commenting.
-  * `ban_user` / `unban_user`: Permanently or temporarily bans user account.
+- **Headers:** `Authorization: Bearer <session_jwt>` (Moderator+)
+- **Request Body:**
+  ```json
+  {
+    "action": "get_queue",
+    "page": 1,
+    "limit": 20,
+    "status": "pending" // "pending" | "resolved" | "dismissed" | "all"
+  }
+  ```
+
+### 5.3. Warn User (with Auto-Escalation)
+- **Method:** `POST /moderation`
+- **Headers:** `Authorization: Bearer <session_jwt>` (Moderator+)
+- **Auto-Escalation:** 3 warnings auto-mutes for 24 hours; 5 warnings auto-bans the user.
+- **Request Body:**
+  ```json
+  {
+    "action": "warn_user",
+    "target_user_id": "5724017",
+    "client_type": "anilist",
+    "reason": "Spamming discord links"
+  }
+  ```
+
+### 5.4. Unwarn User
+- **Method:** `POST /moderation`
+- **Request Body:**
+  ```json
+  {
+    "action": "unwarn_user",
+    "target_user_id": "5724017",
+    "client_type": "anilist"
+  }
+  ```
+
+### 5.5. Mute / Unmute User
+- **Method:** `POST /moderation`
+- **Request Body:**
+  ```json
+  {
+    "action": "mute_user", // or "unmute_user"
+    "target_user_id": "5724017",
+    "client_type": "anilist",
+    "reason": "Repeated arguments",
+    "muted_until": "2026-11-05T00:00:00Z"
+  }
+  ```
+
+### 5.6. Ban / Unban User (Admin+)
+- **Method:** `POST /moderation`
+- **Request Body:**
+  ```json
+  {
+    "action": "ban_user", // or "unban_user"
+    "target_user_id": "5724017",
+    "client_type": "anilist",
+    "reason": "Severe rule violation"
+  }
+  ```
+
+### 5.7. Shadowban User (Admin+)
+- **Method:** `POST /moderation`
+- **Request Body:**
+  ```json
+  {
+    "action": "shadowban_user", // or "unshadowban_user"
+    "target_user_id": "5724017",
+    "client_type": "anilist",
+    "reason": "Bot activity"
+  }
+  ```
 
 ---
 
 ## 🏆 6. Points, Streaks & Ad Rewards
 
-### 6.1. Get Points Balance
-- **Method:** `GET /points` or `POST /points` (`{ "action": "get_points" }`)
-- **Auth:** `Authorization: Bearer <session_token>`
+Points unify across all linked accounts (AniList + MAL + Simkl).
 
-### 6.2. Global Leaderboard
-- **Method:** `GET /points?action=get_leaderboard&limit=50`
-- **Auth:** None (Public)
-- **Response:** Ranked users by total points with avatar decorations and streaks.
+### 6.1. Get Points Balance & Breakdown
+- **Method:** `GET /points` or `POST /points`
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Response (200 OK):**
+  ```json
+  {
+    "success": true,
+    "points": {
+      "total_points": 1420,
+      "real_points": 1420,
+      "display_points": "1420",
+      "is_infinite": false,
+      "points_spent": 200,
+      "tier": "veteran",
+      "current_streak": 8,
+      "longest_streak": 22,
+      "leaderboard_rank": 4,
+      "next_tier_at": 5000,
+      "points_to_next_tier": 3580,
+      "breakdown": {
+        "from_comments": 850,
+        "from_upvotes_received": 340,
+        "from_downvotes_received": -10,
+        "from_votes_cast": 80,
+        "from_pinned": 30,
+        "from_streak_bonus": 10,
+        "from_role_bonus": 0,
+        "from_ads": 120,
+        "adjustments": 0,
+        "points_spent": 200
+      }
+    }
+  }
+  ```
 
-### 6.3. Claim Ad Points (AdMob)
+### 6.2. Claim Ad Points (AdMob)
 - **Method:** `POST /points`
-- **Auth:** `Authorization: Bearer <session_token>`
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Limits:** 5 claims / min, 30 claims / hour.
 - **Request Body:**
   ```json
   {
     "action": "claim_ad_points",
-    "ad_id": "admob_reward_transaction_abc123",
+    "ad_id": "admob_reward_transaction_uuid",
     "points": 10
   }
   ```
-- **Guarantees:** Atomic deduplication via `user_ad_rewards` table.
+
+### 6.3. Idempotent Point Spending
+- **Method:** `POST /points`
+- **Headers:** `Authorization: Bearer <session_jwt>`
+- **Request Body:**
+  ```json
+  {
+    "action": "spend_points_once",
+    "ref_id": "store_purchase:item_123:user_5724017",
+    "points": 200
+  }
+  ```
+
+### 6.4. Global Leaderboard
+- **Method:** `GET /points?action=get_leaderboard&limit=50`
+- **Auth:** Public
 
 ---
 
 ## 🛍️ 7. Shop & Profile Customizations
 
-### 7.1. Shop Catalog
+### 7.1. Get Catalog (`GET /customizations`)
 - **Method:** `GET /customizations`
-- **Auth:** None (Public)
-- **Query Params:** `type=decoration|banner|nameplate|effect`
+- **Query Parameters:** `type` (`decoration`, `banner`, `nameplate`, `effect`), `category`.
+- **Response:**
+  ```json
+  {
+    "success": true,
+    "decorations_enabled": true,
+    "count": 1672,
+    "items": [
+      {
+        "id": "decor_cyberpunk_neon",
+        "type": "decoration",
+        "title": "Cyberpunk Neon",
+        "points_required": 500,
+        "url": "https://cdn.discordapp.com/...",
+        "metadata": { "bundle": "neon" }
+      }
+    ]
+  }
+  ```
 
-### 7.2. Unlock Item with Points
+### 7.2. Unlock Customization
 - **Method:** `POST /users`
-- **Auth:** `Authorization: Bearer <session_token>`
+- **Headers:** `Authorization: Bearer <session_jwt>`
 - **Request Body:**
   ```json
   {
     "action": "unlock_customization",
-    "customization_id": "discord_neon_cyber_frame"
+    "customization_id": "decor_cyberpunk_neon"
   }
   ```
 
-### 7.3. Equip Profile Cosmetics
+### 7.3. Equip Customizations
 - **Method:** `POST /users`
-- **Auth:** `Authorization: Bearer <session_token>`
+- **Headers:** `Authorization: Bearer <session_jwt>`
 - **Request Body:**
   ```json
   {
     "action": "update_customizations",
     "avatar_decoration": "https://cdn.discordapp.com/...",
-    "banner_url": "https://...",
-    "nameplate_theme": "neon",
-    "profile_effect_url": "https://..."
+    "banner_url": "https://cdn.discordapp.com/...",
+    "banner_theme": "dark_purple",
+    "nameplate_theme": "gold",
+    "profile_effect_url": "https://cdn.discordapp.com/..."
   }
   ```
 
 ---
 
-## 🔗 8. Multi-Service Account Linking
+## 🔗 8. Multi-Service Account Linking & Profiles
 
-### 8.1. Link Secondary Account
+### 8.1. Public User Profile (`GET /users`)
+- **Method:** `GET /users?user_id=5724017&client_type=anilist`
+
+### 8.2. Search Users (`GET /users?action=search_users&q=sheby`)
+- **Method:** `GET /users?action=search_users&q=sheby`
+
+### 8.3. Batch User Customizations
+- **Method:** `GET /users?action=get_batch_customizations&user_ids=1,2,3&client_type=anilist`
+
+### 8.4. Link Account
 - **Method:** `POST /users`
-- **Auth:** `Authorization: Bearer <session_token>`
+- **Headers:** `Authorization: Bearer <session_jwt>`
 - **Request Body:**
   ```json
   {
     "action": "link_account",
     "target_client_type": "mal",
-    "target_access_token": "mal_oauth_access_token_here"
+    "target_access_token": "mal_oauth_access_token"
   }
   ```
 
-### 8.2. Unlink Secondary Account
+### 8.5. Unlink Account
 - **Method:** `POST /users`
-- **Auth:** `Authorization: Bearer <session_token>`
 - **Request Body:**
   ```json
   {
@@ -285,69 +422,147 @@ Commentum v2 operates on the **"Authenticate Once, Authorize Everywhere"** princ
   }
   ```
 
----
-
-## 🔔 9. Notifications & FCM
-
-### 9.1. Register FCM Token
-- **Method:** `POST /notifications`
-- **Auth:** `Authorization: Bearer <session_token>`
+### 8.6. Change Role (Staff Only)
+- **Method:** `POST /users`
+- **Headers:** `Authorization: Bearer <session_jwt>` (Admin+)
+- **Cascades:** Changes role in `commentum_users` and all existing `comments.userRole`.
 - **Request Body:**
   ```json
   {
-    "action": "register_token",
-    "fcm_token": "fcm_device_token_string",
-    "platform": "android",
-    "app_version": "3.5.0"
+    "action": "change_role",
+    "target_user_id": "5724017",
+    "client_type": "anilist",
+    "role": "moderator"
   }
   ```
 
-### 9.2. Notification History & Unread Count
-- `GET /notifications?action=get_history&page=1&limit=30`
-- `GET /notifications?action=get_unread_count`
-- `POST /notifications` with `{ "action": "mark_read", "notification_id": 451 }`
-- `POST /notifications` with `{ "action": "mark_all_read" }`
+---
+
+## 🔔 9. Notifications
+
+### 9.1. Notification History (`GET /notifications`)
+- **Method:** `GET /notifications`
+- **Headers:** `Authorization: Bearer <session_jwt>`
+
+### 9.2. Unread Count (`GET /notifications?action=get_unread_count`)
+- **Method:** `GET /notifications?action=get_unread_count`
+
+### 9.3. Mark as Read (`POST /notifications`)
+- **Request Body:** `{ "action": "mark_read", "notification_id": 42 }` or `{ "action": "mark_all_read" }`
+
+### 9.4. Register / Unregister FCM Token
+- **Register:** `POST /notifications` with `{ "action": "register_token", "fcm_token": "...", "platform": "android" }`
+- **Unregister:** `POST /notifications` with `{ "action": "unregister_token", "fcm_token": "..." }`
+
+### 9.5. Notification Preferences
+- **Get:** `GET /notifications?action=get_preferences`
+- **Update:** `POST /notifications` with:
+  ```json
+  {
+    "action": "update_preferences",
+    "notify_on_reply": true,
+    "notify_on_vote": true,
+    "notify_on_mention": true,
+    "notify_on_mod_action": true,
+    "notify_on_announcement": true
+  }
+  ```
 
 ---
 
 ## 📢 10. Announcements
 
-- `GET /announcements?app_id=anymex`: Public feed of broadcasts with read status.
-- `POST /announcements`: Admin creation and publishing of announcements.
+### 10.1. List Announcements
+- **Method:** `GET /announcements?app_id=anymex`
+
+### 10.2. Record View & Read Status
+- **View:** `POST /announcements` with `{ "action": "view", "announcement_id": 5 }`
+- **Read:** `POST /announcements` with `{ "action": "read", "announcement_id": 5 }`
+
+### 10.3. Analytics (Staff)
+- **Method:** `GET /announcements?action=analytics&id=5`
+
+### 10.4. Publish Announcement (Staff)
+- **Method:** `POST /announcements`
+- **Headers:** `Authorization: Bearer <session_jwt>` (Admin+)
+- **Request Body:**
+  ```json
+  {
+    "title": "Version 2.0 Released!",
+    "content": "Full markdown announcement content...",
+    "category": "update",
+    "priority": 1,
+    "pinned": true
+  }
+  ```
+
+### 10.5. Announcement Studio Web Dashboard & Staff Auth
+- **Web Dashboard:** `GET /announcements/dashboard` or `GET /announcements/admin` (returns full interactive HTML UI)
+- **Auth Status:** `GET /announcements/auth/status` (checks if initial master setup is needed)
+- **Master Setup:** `POST /announcements/auth/setup` `{ "username": "Sheby", "password": "...", "linked_user_id": "5724017" }`
+- **Login:** `POST /announcements/auth/login` `{ "username": "...", "password": "..." }` -> `{ "token": "...", "user": { ... } }`
+- **Logout:** `POST /announcements/auth/logout` (revokes session token)
+- **Current Staff Profile:** `GET /announcements/auth/me`
+- **Change Password:** `POST /announcements/auth/change-password` `{ "current_password": "...", "new_password": "..." }`
+- **Update Staff Profile:** `PATCH /announcements/auth/profile` `{ "display_name": "...", "avatar_url": "..." }`
+- **Staff User List:** `GET /announcements/staff` (Super Admin or Owner)
+- **Create Staff Member:** `POST /announcements/staff` `{ "username": "...", "password": "...", "role": "moderator" }`
+- **Update Staff Member:** `PATCH /announcements/staff/:id`
+- **Delete Staff Member:** `DELETE /announcements/staff/:id` (Owner only)
+- **Unread Count:** `GET /announcements/unread-count?user_id=123&app_id=anymex`
 
 ---
 
-## 🤖 11. Discord Bot System & Gateway Interactions
+## 🤖 11. Discord Bot Slash Commands
 
-Commentum v2 features a standalone Discord Bot integration targeting configured channels in `server_configs` via Discord Bot API and Components V2.
+Commentum v2 supports 28 global slash commands:
 
-### 11.1. Gateway Interactions Endpoint
-- **Method:** `POST /discord`
-- **Security:** Ed25519 signature verified via `X-Signature-Ed25519` and `X-Signature-Timestamp` against `DISCORD_PUBLIC_KEY`.
-- **Supported Interactions:**
-  - `Type 1 (PING)`: Automatic `PONG` response.
-  - `Type 2 (APPLICATION_COMMAND)`: Handles all 24 slash commands:
-    * `/help`: Detailed command list and permission requirements.
-    * `/stats`: Live system analytics, user counts, and active discussions.
-    * `/comment <id>`: Fetches full comment thread and enriched media info.
-    * `/user <username|id>`: Displays user points, warnings, roles, and status.
-    * `/search_comments <query>`: Text search across all comments.
-    * `/queue`: Staff pending moderation review queue.
-    * `/recent`: Recent comments across media titles.
-    * `/register`: Registers user's Discord account and auto-assigns server role.
-    * `/add`: Admin command to configure guild channels (`channel_id`, `updates_channel_id`, `moderation_channel_id`, `role_id`).
-    * `/warn`, `/mute`, `/unmute`, `/ban`, `/unban`: Staff moderation commands.
-    * `/config`: Displays or updates system toggles and auto thresholds.
-    * `/broadcast`: Sends rich announcement to configured Discord channels.
-  - `Type 3 (MESSAGE_COMPONENT)`: Interactive Discord Components V2 action buttons:
-    * `mod_delete:<id>:<user_id>`: Deletes comment and logs action.
-    * `mod_warn:<user_id>`: Issues warning modal or immediate warning.
-    * `mod_mute:<user_id>`: Opens mute duration modal.
-    * `mod_ban:<user_id>`: Bans user account.
-    * `report_approve:<id>`: Resolves report and removes flagged content.
-    * `report_dismiss:<id>`: Dismisses report and restores normal status.
-  - `Type 4 (APPLICATION_COMMAND_AUTOCOMPLETE)`: Dynamic media titles and usernames autocomplete.
-  - `Type 5 (MODAL_SUBMIT)`: Handles submitted reason, duration, and notes forms.
+* **Moderation:**
+  * `/warn <user_id> <reason>`
+  * `/unwarn <user_id>`
+  * `/mute <user_id> [duration] [reason]`
+  * `/unmute <user_id>`
+  * `/ban <user_id> <reason> [shadow]`
+  * `/unban <user_id>`
+  * `/shadowban <user_id> <reason>`
+  * `/unshadowban <user_id>`
+  * `/pin <comment_id>`
+  * `/unpin <comment_id>`
+  * `/lock <comment_id>`
+  * `/unlock <comment_id>`
+  * `/delete <comment_id>`
+  * `/queue`
+  * `/search_comments [query] [user] [media]`
+* **Points & Economy (Migration 052):**
+  * `/points_give <user_id> <amount> <reason> [platform]`
+  * `/points_deduct <user_id> <amount> <reason> [platform]`
+  * `/points_check <user_id> [platform]`
+  * `/points_undo <adjustment_id>`
+* **Server Management & Info:**
+  * `/stats`
+  * `/user <user_id>`
+  * `/comment <comment_id>`
+  * `/config <action> [key] [value]`
+  * `/add <server_name> <guild_id> [channel_id] [moderation_channel_id]`
+  * `/promote <user_id> <role>`
+  * `/demote <user_id> <role>`
 
-### 11.2. Components V2 Notifications
-Dispatched asynchronously on comment events (`comment_created`, `comment_deleted`, `report_filed`, etc.) with message flag `32768` (`IS_COMPONENTS_V2`), container accents, deep link buttons, and moderation buttons.
+---
+
+## 🔄 12. Dantotsu 2-Way Sync Engine
+
+* **Sync Status:** `GET /dantotsu-sync/status`
+  * Returns total mapped comments (`dantotsu_id_mappings`) and cached media (`dantotsu_media_cache`).
+* **Batch Resolve Unknown Media:** `POST /dantotsu-sync/resolve-media`
+  * Resolves unknown media IDs by querying AniList GraphQL and caching metadata into `dantotsu_media_cache` and `media`.
+* **Media Sync:** `POST /dantotsu-sync/sync-media`
+  * Body: `{ "media_id": 21, "media_type": "anime" }`
+  * Ingests external comments and replies from Dantotsu API (`https://api.dantotsu.app`) into Commentum.
+
+---
+
+## 💾 13. Database CSV Backup
+
+* **Download Comments Database:** `GET /backup-table`
+* **Headers:** `Authorization: Bearer <BACKUP_TOKEN | ADMIN_API_KEY>` or `x-admin-key: <ADMIN_API_KEY>`
+* **Response:** RFC 4180 compliant CSV stream attachment (`anymex_global_db.csv`) containing all comment fields.

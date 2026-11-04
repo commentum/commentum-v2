@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { AppContext } from "../types/env";
 import { createDb } from "../db";
-import { customizationsCatalog } from "../db/schema";
+import { customizationsCatalog, config } from "../db/schema";
 import { eq, and, asc } from "drizzle-orm";
 
 export const customizationsRoutes = new Hono<AppContext>();
@@ -16,6 +16,22 @@ customizationsRoutes.get("/", async (c) => {
     const category = c.req.query("category");
     const db = createDb(c.env.DB);
 
+    // Global kill-switch check (033)
+    const toggle = await db
+      .select({ value: config.value })
+      .from(config)
+      .where(eq(config.key, "decorations_enabled"))
+      .limit(1);
+
+    if (toggle.length > 0 && toggle[0].value === "false") {
+      return c.json({
+        success: true,
+        decorations_enabled: false,
+        count: 0,
+        items: [],
+      });
+    }
+
     const filters = [eq(customizationsCatalog.isActive, true)];
     if (type) filters.push(eq(customizationsCatalog.type, type));
     if (category) filters.push(eq(customizationsCatalog.category, category));
@@ -28,6 +44,7 @@ customizationsRoutes.get("/", async (c) => {
 
     return c.json({
       success: true,
+      decorations_enabled: true,
       count: items.length,
       items: items.map((it) => ({
         ...it,
