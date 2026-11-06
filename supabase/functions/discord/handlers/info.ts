@@ -356,7 +356,7 @@ function getHelpContent(role: string): string {
     `📝 **Everyone**\n` +
     `• \`/register platform:<platform> user_id:<id> server:<n>\` - Register your platform account\n` +
     `• \`/report comment_id:<id> reason:<reason> [notes:<text>]\` - Report a comment\n` +
-    `• \`/user user_id:<id> [section:<overview|points|customization|linked>]\` - Full user profile\n` +
+    `• \`/user user_id:<id> [section]\` - Full profile: overview, points, customization, linked (default: everything)\n` +
     `• \`/comment comment_id:<id>\` - Comment details\n` +
     `• \`/search_comments\` - Search comments\n` +
     `• \`/stats\` - System statistics\n` +
@@ -371,7 +371,7 @@ function getHelpContent(role: string): string {
     `• \`/pin\` \`/unpin\` \`/lock\` \`/unlock\` - comment_id [reason]\n` +
     `• \`/resolve comment_id reporter_id resolution [notes]\` - Resolve a report\n` +
     `• \`/queue [page]\` - Pending reports (oldest first)\n` +
-    `• \`/user user_id section:moderation\` - Ban/mute/warning reasons, who and when, notes\n` +
+    `• \`/user user_id\` - For staff the default also includes private moderation details (ban/mute/warning reasons, who and when, notes)\n` +
     `• \`/modlog user_id\` - Full moderation history of a user\n` +
     `• \`/note user_id action:<view|add|clear> [text]\` - Staff notes (clear = admin)\n` +
     `• \`/bans [type] [page]\` - Active bans, shadow bans and mutes\n` +

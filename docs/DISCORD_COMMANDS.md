@@ -10,7 +10,7 @@ the Discord ID in `commentum_users` / `config`.
 |---|---|
 | `/register` | Link your Discord account to a platform account |
 | `/report` | Report a comment |
-| `/user user_id [section] [platform]` | Profile. Sections: `overview` (counts, votes, reports, first/last comment, Discord link, points, per-platform status), `points` (balance, tier, breakdown, streak, spent, ad rewards), `customization`, `linked` |
+| `/user user_id [section] [platform]` | Full profile. With no `section` it shows **everything**: overview (counts, votes, reports, first/last comment, Discord link, per-platform status), points (balance, tier, breakdown, streak, spent, ad rewards), customization and linked accounts. Staff also get the moderation section. Pick one `section` to see only that part |
 | `/comment comment_id` | Comment details: votes, replies, media, tags, pinned/locked/deleted info, language |
 | `/search_comments` | Search with wildcards, user and media autocomplete |
 | `/stats` | Totals, 24h/7d/30d activity, users per platform and role, top commenters, system flags |
@@ -27,7 +27,7 @@ the Discord ID in `commentum_users` / `config`.
 | `/pin` `/unpin` `/lock` `/unlock` | Comment moderation |
 | `/resolve` | Resolve a report |
 | `/queue [page]` | Pending reports, oldest first, with reporter ID, reason and notes |
-| `/user ... section:moderation` | Ban/mute/shadow-ban reasons, who and when, warnings, notes |
+| `/user` (moderation section) | Ban/mute/shadow-ban reasons, who and when, warnings, notes. Included in the default view for staff; replies are private (ephemeral) whenever it is shown |
 | `/modlog user_id` | Full history: warnings, bans, mutes, moderated and deleted comments |
 | `/note user_id action:view\|add\|clear [text]` | Staff notes (`clear` is admin only) |
 | `/bans [type] [page]` | Active bans, shadow bans and mutes |

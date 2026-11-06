@@ -112,7 +112,7 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
   try {
     const input = opt(options, 'user_id')
     if (!input) return createErrorResponse('user_id is required.')
-    const section = String(opt(options, 'section') || 'overview')
+    const section = String(opt(options, 'section') || 'all')
     const staff = isStaff(userRole)
     if (section === 'moderation' && !staff) return createErrorResponse('Only moderators can view moderation details.')
 
@@ -123,10 +123,14 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
     const username = rows[0].commentum_username || 'Unknown'
     const avatar = rows.find((r) => r.commentum_user_avatar)?.commentum_user_avatar
     const role = highestRole(rows.map((r) => (r.commentum_user_role || 'user').toLowerCase()))
-    const fields: any[] = []
+    // 'all' (default) shows every section; moderation only for staff
+    const want = (k: string) => (section === 'all' ? (k !== 'moderation' || staff) : section === k)
+    const groups: { key: string; fields: any[] }[] = []
     let desc = `${rows.map((r) => platformLabel(r.commentum_client_type)).join(' · ')} · ID \`${uid}\``
 
-    if (section === 'overview') {
+    if (want('overview')) {
+      const fields: any[] = []
+      groups.push({ key: 'overview', fields })
       const [total, deleted, replies] = await Promise.all([
         count(supabase.from('comments').select('id', { count: 'exact', head: true }).eq('user_id', uid)),
         count(supabase.from('comments').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('deleted', true)),
@@ -172,7 +176,9 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
       if (rows[0]._partial) desc += '\n*No commentum profile row yet, only comment data exists.*'
     }
 
-    if (section === 'moderation') {
+    if (want('moderation')) {
+      const fields: any[] = []
+      groups.push({ key: 'moderation', fields })
       for (const r of rows) {
         const lines: string[] = []
         if (activeUntil(r.commentum_user_banned, r.commentum_user_banned_until))
@@ -191,7 +197,9 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
       desc += '\nUse `/modlog` for the full history.'
     }
 
-    if (section === 'points') {
+    if (want('points')) {
+      const fields: any[] = []
+      groups.push({ key: 'points', fields })
       const pts = await pointsFor(supabase, rows[0])
       const al = aliases(rows[0].commentum_client_type)
       const { data: up } = await supabase.from('user_points').select('*').eq('user_id', uid).in('client_type', al).limit(1)
@@ -213,7 +221,9 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
         fields.push(f('Recent adjustments', adj.map((a: any) => `${a.points > 0 ? '+' : ''}${fmt(a.points)} · ${clip(a.reason, 50)}`).join('\n'), false))
     }
 
-    if (section === 'customization') {
+    if (want('customization')) {
+      const fields: any[] = []
+      groups.push({ key: 'customization', fields })
       for (const r of rows) {
         fields.push(f(`${platformLabel(r.commentum_client_type)} equipped`,
           [`Decoration: ${r.avatar_decoration || 'none'}`, `Banner: ${r.banner_url || r.banner_theme || 'none'}`, `Nameplate: ${r.nameplate_theme || 'none'}`, `Effect: ${r.profile_effect_url || 'none'}`].join('\n'), false))
@@ -222,7 +232,9 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
       fields.push(f(`Unlocked (${unlocked.length})`, unlocked.length ? clip(unlocked.join(', '), 1000) : 'none', false))
     }
 
-    if (section === 'linked') {
+    if (want('linked')) {
+      const fields: any[] = []
+      groups.push({ key: 'linked', fields })
       for (const r of rows) {
         fields.push(f(`${platformLabel(r.commentum_client_type)} account`, `\`${r.commentum_user_id}\` · ${r.commentum_username}`, false))
       }
@@ -233,11 +245,26 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
       if (isStaff(userRole) && dan !== null) fields.push(f('Dantotsu sync', 'Mappings table available. See `/sync_status`.', false))
     }
 
-    return createEmbedResponse(
-      `👤 ${username}${section === 'overview' ? '' : ` — ${section}`}`,
-      desc, fields, roleColor(role),
-      { text: `ID ${uid} · /user section:overview|moderation|points|customization|linked` },
-      avatar || undefined, !staff && section === 'moderation',
+    const titles: Record<string, string> = { overview: 'Overview', moderation: '🛡️ Moderation (staff)', points: '⭐ Points', customization: '🎨 Customization', linked: '🔗 Linked accounts' }
+    const embeds: any[] = groups.map((g, i) => ({
+      title: i === 0 ? `👤 ${username}${groups.length === 1 && g.key !== 'overview' ? ' — ' + g.key : ''}` : `${username} — ${titles[g.key] || g.key}`,
+      description: i === 0 ? desc : undefined,
+      color: roleColor(role),
+      fields: g.fields.filter((x) => x && x.name && x.value).slice(0, 25),
+      thumbnail: i === 0 && avatar ? { url: avatar } : undefined,
+      footer: i === groups.length - 1 ? { text: `ID ${uid} · /user section:<one part> to view a single section` } : undefined,
+    }))
+    if (groups.length > 1 && groups[0].key === 'overview') embeds[0].title = `👤 ${username}`
+    // Discord allows 6000 characters across all embeds of a message: shrink values until it fits
+    const size = () => embeds.reduce((t, e) => t + (e.title || '').length + (e.description || '').length + (e.footer?.text || '').length + e.fields.reduce((a: number, x: any) => a + x.name.length + x.value.length, 0), 0)
+    for (let cap = 900; size() > 5800 && cap >= 100; cap -= 100) {
+      for (const e of embeds) for (const x of e.fields) x.value = clip(x.value, cap)
+    }
+    // Staff-only moderation details must never be posted to the channel
+    const includesModeration = groups.some((g) => g.key === 'moderation')
+    return new Response(
+      JSON.stringify({ type: 4, data: { embeds, flags: includesModeration ? 64 : 0 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
   } catch (error) {
     console.error('User command error:', error)

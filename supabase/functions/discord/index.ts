@@ -191,10 +191,11 @@ async function handleGlobalCommandSync(): Promise<Response> {
         },
         {
           name: 'section',
-          description: 'Which part of the profile to show',
+          description: 'Which part to show (default: everything)',
           type: 3,
           required: false,
           choices: [
+            { name: 'Everything (default)', value: 'all' },
             { name: 'Overview', value: 'overview' },
             { name: 'Moderation (staff)', value: 'moderation' },
             { name: 'Points', value: 'points' },
