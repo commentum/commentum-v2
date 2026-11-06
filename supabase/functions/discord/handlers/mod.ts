@@ -1,6 +1,7 @@
-import { handleAddCommand, handleRegisterCommand, handleStatsCommand, handleHelpCommand, getAvailableServers } from './info.ts'
-import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand, handleQueueCommand } from './moderation.ts'
-import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleUserCommand, handleCommentCommand, handleReportCommand } from './management.ts'
+import { handleAddCommand, handleRegisterCommand, handleHelpCommand, getAvailableServers } from './info.ts'
+import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand } from './moderation.ts'
+import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleReportCommand } from './management.ts'
+import { handleUserCommand, handleCommentCommand, handleStatsCommand, handleQueueCommand, handleModlogCommand, handleNoteCommand, handleBansCommand, handleLeaderboardCommand, handleMyPointsCommand, handlePurgeCommand, handleAuditCommand, handleSyncStatusCommand, handleAnnouncementsCommand, handleCustomizationsCommand } from './profile.ts'
 import { handlePointsGiveCommand, handlePointsDeductCommand, handlePointsCheckCommand, handlePointsUndoCommand } from './points.ts'
 import { handleAutocomplete, handleSearchCommentsCommand, handleSearchPageInteraction } from './search.ts'
 import { createModalResponse, createDiscordResponse } from '../utils.ts'
@@ -42,13 +43,7 @@ async function handleModalSubmit(supabase: any, interaction: any): Promise<Respo
     .eq('is_active', true)
     .single()
 
-  let userRole = registration?.user_role || 'user'
-  if (userRole !== 'owner') {
-    const fallbackRole = await getUserRole(supabase, userId)
-    if (fallbackRole === 'owner' || (ROLE_HIERARCHY[fallbackRole] || 0) > (ROLE_HIERARCHY[userRole] || 0)) {
-      userRole = fallbackRole
-    }
-  }
+  const userRole = await resolveRole(supabase, userId, registration)
 
   // Extract reason from modal input
   let reason = ''
@@ -477,13 +472,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
     .eq('is_active', true)
     .single()
   
-  let userRole = registration?.user_role || 'user'
-  if (userRole !== 'owner') {
-    const fallbackRole = await getUserRole(supabase, userId)
-    if (fallbackRole === 'owner' || (ROLE_HIERARCHY[fallbackRole] || 0) > (ROLE_HIERARCHY[userRole] || 0)) {
-      userRole = fallbackRole
-    }
-  }
+  const userRole = await resolveRole(supabase, userId, registration)
   
   // Parse custom_id (format: action:id1:id2)
   const parts = customId.split(':')
@@ -511,7 +500,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       case 'select_delete_comment':
       case 'mod_delete': {
         // select_delete_comment:userId or mod_delete:commentId:userId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can delete comments.', true)
         }
         const commentId = action === 'select_delete_comment' ? data?.values?.[0] : id1
@@ -563,7 +552,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_warn': {
         // mod_warn:userId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can warn users.', true)
         }
         const targetUserId = id1
@@ -587,7 +576,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_mute': {
         // mod_mute:userId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can mute users.', true)
         }
         const targetUserId = id1
@@ -630,7 +619,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_ban': {
         // mod_ban:userId
-        if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only admins can ban users.', true)
         }
         const targetUserId = id1
@@ -673,7 +662,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_del_warn': {
         // mod_del_warn:commentId:userId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can perform this action.', true)
         }
         const commentId = id1
@@ -715,7 +704,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
 
       case 'mod_del_ban': {
         // mod_del_ban:commentId:userId
-        if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only admins can ban users.', true)
         }
         const commentId = id1
@@ -770,7 +759,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'report_approve': {
         // report_approve:commentId:userId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can approve reports.', true)
         }
         const commentId = id1
@@ -806,7 +795,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'report_dismiss': {
         // report_dismiss:commentId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can dismiss reports.', true)
         }
         const commentId = id1
@@ -842,7 +831,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_unpin': {
         // mod_unpin:commentId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can unpin comments.', true)
         }
         const commentId = id1
@@ -904,7 +893,7 @@ async function handleButtonInteraction(supabase: any, interaction: any): Promise
       
       case 'mod_unlock': {
         // mod_unlock:commentId
-        if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+        if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
           return createButtonResponse('❌ Only moderators can unlock threads.', true)
         }
         const commentId = id1
@@ -1002,19 +991,36 @@ function createButtonResponse(content: string, ephemeral: boolean = false): Resp
   )
 }
 
+
+// Resolve the effective role: discord_users row, plus the platform ID and the
+// Discord ID looked up in commentum_users / config (highest wins).
+async function resolveRole(supabase: any, discordUserId: string, registration: any): Promise<string> {
+  let role = registration?.user_role || 'user'
+  const ids = [registration?.platform_user_id, discordUserId].filter(Boolean).map(String)
+  for (const id of ids) {
+    try {
+      const r = await getUserRole(supabase, id)
+      if ((ROLE_HIERARCHY[r] || 0) > (ROLE_HIERARCHY[role] || 0)) role = r
+    } catch (_e) { /* keep current */ }
+  }
+  return role
+}
+
 // Role hierarchy for permission checks
 const ROLE_HIERARCHY: Record<string, number> = {
   'user': 0,
   'moderator': 1,
   'admin': 2,
   'super_admin': 3,
-  'owner': 4
+  'app_owner': 4,
+  'owner': 5
 }
 
 // Check if moderator can perform action on target
 function canModerateUser(moderatorRole: string, targetRole: string): boolean {
   if (moderatorRole === 'owner') return true
-  if (moderatorRole === 'super_admin' && targetRole !== 'owner') return true
+  if (moderatorRole === 'app_owner' && targetRole !== 'owner') return true
+  if (moderatorRole === 'super_admin' && !['owner', 'app_owner'].includes(targetRole)) return true
   return (ROLE_HIERARCHY[moderatorRole] || 0) > (ROLE_HIERARCHY[targetRole] || 0)
 }
 
@@ -1085,7 +1091,7 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
     .eq('is_active', true)
     .single()
 
-  const userRole = registration?.user_role || 'user'
+  const userRole = await resolveRole(supabase, userId, registration)
 
   // Route to appropriate command handler
   try {
@@ -1104,7 +1110,7 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
       case 'comment':
         return await handleCommentCommand(supabase, data.options, userRole)
       case 'stats':
-        return await handleStatsCommand(supabase, userRole)
+        return await handleStatsCommand(supabase, userRole, data.options)
       case 'help':
         return await handleHelpCommand(userRole)
 
@@ -1128,7 +1134,7 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
       case 'resolve':
         return await handleResolveCommand(supabase, userId, username, data.options, registration, userRole)
       case 'queue':
-        return await handleQueueCommand(supabase, registration, userRole)
+        return await handleQueueCommand(supabase, data.options, userRole)
       case 'delete':
         return await handleDeleteCommand(supabase, userId, username, data.options, registration, userRole)
       case 'search_comments':
@@ -1161,6 +1167,28 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
         return await handleDemoteCommand(supabase, userId, username, data.options, registration, userRole)
       case 'config':
         return await handleConfigCommand(supabase, userId, username, data.options, registration, userRole)
+
+      // Profiles, logs and staff tools
+      case 'modlog':
+        return await handleModlogCommand(supabase, data.options, userRole)
+      case 'note':
+        return await handleNoteCommand(supabase, userId, username, data.options, userRole)
+      case 'bans':
+        return await handleBansCommand(supabase, data.options, userRole)
+      case 'leaderboard':
+        return await handleLeaderboardCommand(supabase, data.options)
+      case 'mypoints':
+        return await handleMyPointsCommand(supabase, userId, registration)
+      case 'purge':
+        return await handlePurgeCommand(supabase, userId, username, data.options, userRole)
+      case 'audit':
+        return await handleAuditCommand(supabase, data.options, userRole)
+      case 'sync_status':
+        return await handleSyncStatusCommand(supabase, userRole)
+      case 'announcements':
+        return await handleAnnouncementsCommand(supabase, data.options)
+      case 'customizations':
+        return await handleCustomizationsCommand(supabase, data.options, userRole)
 
       default:
         return new Response(

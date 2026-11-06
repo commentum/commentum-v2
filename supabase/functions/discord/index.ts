@@ -107,6 +107,12 @@ async function handleGlobalCommandSync(): Promise<Response> {
     )
   }
 
+  const PLATFORM_CHOICES = [
+    { name: 'AniList', value: 'anilist' },
+    { name: 'MyAnimeList', value: 'myanimelist' },
+    { name: 'SIMKL', value: 'simkl' }
+  ]
+
   // Define all global slash commands
   const globalCommands = [
     {
@@ -174,15 +180,29 @@ async function handleGlobalCommandSync(): Promise<Response> {
     },
     {
       name: 'user',
-      description: 'Get detailed user information',
+      description: 'Full user profile (moderation details are staff only)',
       options: [
         {
           name: 'user_id',
-          description: 'Platform user ID to lookup',
+          description: 'Platform user ID or username',
           type: 3,
           required: true,
           autocomplete: true
-        }
+        },
+        {
+          name: 'section',
+          description: 'Which part of the profile to show',
+          type: 3,
+          required: false,
+          choices: [
+            { name: 'Overview', value: 'overview' },
+            { name: 'Moderation (staff)', value: 'moderation' },
+            { name: 'Points', value: 'points' },
+            { name: 'Customization', value: 'customization' },
+            { name: 'Linked accounts', value: 'linked' }
+          ]
+        },
+        { name: 'platform', description: 'Only if the ID exists on several platforms', type: 3, required: false, choices: PLATFORM_CHOICES }
       ]
     },
     {
@@ -395,7 +415,10 @@ async function handleGlobalCommandSync(): Promise<Response> {
     },
     {
       name: 'queue',
-      description: 'View moderation queue of pending reports'
+      description: 'View moderation queue of pending reports',
+      options: [
+        { name: 'page', description: 'Page number', type: 4, required: false, min_value: 1 }
+      ]
     },
     {
       name: 'points_give',
@@ -836,6 +859,84 @@ async function handleGlobalCommandSync(): Promise<Response> {
           type: 3,
           required: false
         }
+      ]
+    },
+    {
+      name: 'modlog',
+      description: 'Full moderation history of a user (staff)',
+      options: [
+        { name: 'user_id', description: 'Platform user ID or username', type: 3, required: true, autocomplete: true },
+        { name: 'platform', description: 'Only if the ID exists on several platforms', type: 3, required: false, choices: PLATFORM_CHOICES }
+      ]
+    },
+    {
+      name: 'note',
+      description: 'View or add staff notes on a user',
+      options: [
+        { name: 'user_id', description: 'Platform user ID or username', type: 3, required: true, autocomplete: true },
+        {
+          name: 'action', description: 'What to do', type: 3, required: true,
+          choices: [{ name: 'View', value: 'view' }, { name: 'Add', value: 'add' }, { name: 'Clear (admin)', value: 'clear' }]
+        },
+        { name: 'text', description: 'Note text (for add)', type: 3, required: false },
+        { name: 'platform', description: 'Only if the ID exists on several platforms', type: 3, required: false, choices: PLATFORM_CHOICES }
+      ]
+    },
+    {
+      name: 'bans',
+      description: 'List active bans, shadow bans and mutes (staff)',
+      options: [
+        {
+          name: 'type', description: 'Filter', type: 3, required: false,
+          choices: [{ name: 'All', value: 'all' }, { name: 'Bans', value: 'bans' }, { name: 'Shadow bans', value: 'shadowbans' }, { name: 'Mutes', value: 'mutes' }]
+        },
+        { name: 'page', description: 'Page number', type: 4, required: false, min_value: 1 }
+      ]
+    },
+    {
+      name: 'leaderboard',
+      description: 'Points leaderboard',
+      options: [
+        { name: 'platform', description: 'Filter by platform', type: 3, required: false, choices: PLATFORM_CHOICES },
+        { name: 'page', description: 'Page number', type: 4, required: false, min_value: 1 }
+      ]
+    },
+    {
+      name: 'mypoints',
+      description: 'Show your own points (requires /register)'
+    },
+    {
+      name: 'purge',
+      description: 'Delete ALL live comments of a user (admin)',
+      options: [
+        { name: 'user_id', description: 'Platform user ID or username', type: 3, required: true, autocomplete: true },
+        { name: 'reason', description: 'Reason', type: 3, required: true },
+        { name: 'confirm', description: 'Set true to actually delete', type: 5, required: false },
+        { name: 'platform', description: 'Only if the ID exists on several platforms', type: 3, required: false, choices: PLATFORM_CHOICES }
+      ]
+    },
+    {
+      name: 'audit',
+      description: 'Recent moderation actions (staff)',
+      options: [
+        { name: 'limit', description: 'How many entries (5-25)', type: 4, required: false, min_value: 5, max_value: 25 },
+        { name: 'moderator_id', description: 'Only actions by this moderator ID', type: 3, required: false }
+      ]
+    },
+    {
+      name: 'sync_status',
+      description: 'Dantotsu sync health (staff)'
+    },
+    {
+      name: 'announcements',
+      description: 'Latest announcements'
+    },
+    {
+      name: 'customizations',
+      description: 'Customization catalog, or a user\'s equipped items',
+      options: [
+        { name: 'user_id', description: 'Platform user ID or username', type: 3, required: false, autocomplete: true },
+        { name: 'platform', description: 'Only if the ID exists on several platforms', type: 3, required: false, choices: PLATFORM_CHOICES }
       ]
     }
   ]

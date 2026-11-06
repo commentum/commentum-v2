@@ -154,7 +154,7 @@ export async function handleSearchCommentsCommand(
 ): Promise<Response> {
   try {
     // Role check: Only moderators, admins, super_admins, and owners
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators and administrators can search comments.')
     }
 
@@ -217,7 +217,7 @@ export async function handleSearchPageInteraction(
   sessionId: string
 ): Promise<Response> {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return new Response(
         JSON.stringify({
           type: 4,

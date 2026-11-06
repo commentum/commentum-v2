@@ -1,4 +1,4 @@
-import { createDiscordResponse, createErrorResponse, createStatsEmbed, createSimpleEmbed } from '../utils.ts'
+import { createDiscordResponse, createErrorResponse, createStatsEmbed, createSimpleEmbed, createEmbedResponse } from '../utils.ts'
 
 // Discord API configuration
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
@@ -52,7 +52,7 @@ async function getGuildInfo(guildId: string) {
 export async function handleAddCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], userRole: string) {
   try {
     // Check if user has permission (only admins can add servers)
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only administrators can configure servers.')
     }
 
@@ -342,54 +342,59 @@ export async function handleStatsCommand(supabase: any, userRole: string) {
 // Handle help command
 export async function handleHelpCommand(userRole: string) {
   const helpContent = getHelpContent(userRole)
-  return createDiscordResponse(helpContent)
+  // Split on the section headers so each section is its own embed field (<=1024 chars)
+  const sections = helpContent.split(/\n(?=[^\n]*\*\*[^\n]*\*\*\n)/).filter(Boolean)
+  const fields = sections.map((sec, i) => {
+    const [title, ...rest] = sec.replace(/^\n+/, '').split('\n')
+    return { name: title.replace(/\*\*/g, '').slice(0, 256) || `Section ${i + 1}`, value: (rest.join('\n').trim() || '—').slice(0, 1024), inline: false }
+  })
+  return createEmbedResponse('🤖 Commentum Bot Help', 'Commands available for your role', fields.filter((x) => x.value !== '—').slice(0, 25), 0x5865F2, undefined, undefined, true)
 }
 
 function getHelpContent(role: string): string {
   const baseCommands = `🤖 **Commentum Bot Commands**\n\n` +
-    `📝 **User Commands**\n` +
-    `• \`/register platform:<platform> user_id:<id> server:<name>\` - Register your platform account\n` +
+    `📝 **Everyone**\n` +
+    `• \`/register platform:<platform> user_id:<id> server:<n>\` - Register your platform account\n` +
     `• \`/report comment_id:<id> reason:<reason> [notes:<text>]\` - Report a comment\n` +
-    `• \`/user user_id:<id>\` - Get user information\n` +
-    `• \`/comment comment_id:<id>\` - Get comment information\n` +
-    `• \`/stats\` - View system statistics\n` +
-    `• \`/help\` - Show this help message\n`;
+    `• \`/user user_id:<id> [section:<overview|points|customization|linked>]\` - Full user profile\n` +
+    `• \`/comment comment_id:<id>\` - Comment details\n` +
+    `• \`/search_comments\` - Search comments\n` +
+    `• \`/stats\` - System statistics\n` +
+    `• \`/leaderboard [platform] [page]\` - Points leaderboard\n` +
+    `• \`/mypoints\` - Your own points (needs \`/register\`)\n` +
+    `• \`/customizations [user_id]\` - Customization catalog / a user's equipped items\n` +
+    `• \`/announcements\` - Latest announcements\n` +
+    `• \`/help\` - This message\n`;
 
-  const modCommands = `\n🛡️ **Moderator Commands**\n` +
-    `• \`/warn user_id:<id> reason:<reason>\` - Warn a user\n` +
-    `• \`/unwarn user_id:<id> reason:<reason>\` - Remove warning\n` +
-    `• \`/mute user_id:<id> [duration:<hours>] reason:<reason>\` - Mute user\n` +
-    `• \`/unmute user_id:<id> reason:<reason>\` - Unmute user\n` +
-    `• \`/pin comment_id:<id> [reason:<text>]\` - Pin comment\n` +
-    `• \`/unpin comment_id:<id> [reason:<text>]\` - Unpin comment\n` +
-    `• \`/lock comment_id:<id> [reason:<text>]\` - Lock thread\n` +
-    `• \`/unlock comment_id:<id> [reason:<text>]\` - Unlock thread\n` +
-    `• \`/resolve comment_id:<id> reporter_id:<id> resolution:<type> [notes:<text>]\` - Resolve report\n` +
-    `• \`/queue\` - View moderation queue\n` +
-    `• \`/delete comment_id:<id>\` - Delete own comments\n` +
-    `• \`/points_check user_id:<id>\` - Show points and adjustments\n`;
+  const modCommands = `\n🛡️ **Moderator**\n` +
+    `• \`/warn\` \`/unwarn\` \`/mute\` \`/unmute\` - user_id + reason (mute: [duration hours])\n` +
+    `• \`/pin\` \`/unpin\` \`/lock\` \`/unlock\` - comment_id [reason]\n` +
+    `• \`/resolve comment_id reporter_id resolution [notes]\` - Resolve a report\n` +
+    `• \`/queue [page]\` - Pending reports (oldest first)\n` +
+    `• \`/user user_id section:moderation\` - Ban/mute/warning reasons, who and when, notes\n` +
+    `• \`/modlog user_id\` - Full moderation history of a user\n` +
+    `• \`/note user_id action:<view|add|clear> [text]\` - Staff notes (clear = admin)\n` +
+    `• \`/bans [type] [page]\` - Active bans, shadow bans and mutes\n` +
+    `• \`/audit [limit] [moderator_id]\` - Recent moderation actions\n` +
+    `• \`/sync_status\` - Dantotsu sync health\n` +
+    `• \`/delete comment_id\` - Delete a comment\n` +
+    `• \`/points_check user_id\` - Points and adjustments\n`;
 
-  const adminCommands = `\n👑 **Admin Commands**\n` +
-    `• \`/ban user_id:<id> reason:<reason> [shadow:<true/false>]\` - Ban user\n` +
-    `• \`/unban user_id:<id> reason:<reason>\` - Unban user\n` +
-    `• \`/shadowban user_id:<id> reason:<reason>\` - Shadow ban\n` +
-    `• \`/unshadowban user_id:<id> reason:<reason>\` - Remove shadow ban\n` +
-    `• \`/delete comment_id:<id>\` - Delete any comment\n` +
-    `• \`/points_give user_id:<id> amount:<n> reason:<text>\` - Give points\n` +
-    `• \`/points_deduct user_id:<id> amount:<n> reason:<text>\` - Deduct points (can go below zero)\n` +
-    `• \`/points_undo adjustment_id:<uuid>\` - Undo a points adjustment\n`;
+  const adminCommands = `\n👑 **Admin**\n` +
+    `• \`/ban\` \`/unban\` \`/shadowban\` \`/unshadowban\` - user_id + reason\n` +
+    `• \`/purge user_id reason confirm:true\` - Delete all of a user's comments\n` +
+    `• \`/points_give\` \`/points_deduct\` \`/points_undo\`\n`;
 
-  const superAdminCommands = `\n⚡ **Super Admin Commands**\n` +
-    `• \`/promote user_id:<id> role:<role> [reason:<text>]\` - Promote user\n` +
-    `• \`/demote user_id:<id> role:<role> [reason:<text>]\` - Demote user\n` +
-    `• \`/config action:<action> [key:<key>] [value:<value>]\` - Manage config\n` +
-    `• \`/add server_name:<name> guild_id:<id> channel_id:<id> moderation_channel_id:<id> [role_id:<id>]\` - Configure server\n`;
+  const superAdminCommands = `\n⚡ **Super Admin**\n` +
+    `• \`/promote\` \`/demote\` - user_id role [reason]\n` +
+    `• \`/config action [key] [value]\` - Manage config\n` +
+    `• \`/add\` - Configure a server\n`;
 
-  const footer = `\n🔗 **Supported Platforms:** AniList, MyAnimeList, SIMKL\n` +
-    `📚 **Documentation:** Check pinned messages or ask an admin\n` +
-    `❓ **Need Help:** Mention @admin or use the support channel`;
+  const footer = `\n🔗 **Platforms:** AniList, MyAnimeList, SIMKL`;
 
   switch (role) {
+    case 'owner':
+    case 'app_owner':
     case 'super_admin':
       return baseCommands + modCommands + adminCommands + superAdminCommands + footer
     case 'admin':

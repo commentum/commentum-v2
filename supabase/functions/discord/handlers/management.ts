@@ -7,7 +7,7 @@ import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Only admin and super_admin can ban
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only administrators can ban users.')
     }
 
@@ -96,7 +96,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
 export async function handleUnbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Only admin and super_admin can unban
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only administrators can unban users.')
     }
 
@@ -175,7 +175,7 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
 export async function handleShadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Only admin and super_admin can shadowban
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only administrators can shadow ban users.')
     }
 
@@ -264,7 +264,7 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
 export async function handleUnshadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Only admin and super_admin can unshadowban
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only administrators can remove shadow bans.')
     }
 
@@ -339,7 +339,7 @@ export async function handleUnshadowbanCommand(supabase: any, moderatorId: strin
 export async function handlePromoteCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Only super_admin can promote
-    if (!['super_admin', 'owner'].includes(userRole)) {
+    if (!['super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only super administrators can promote users.')
     }
 
@@ -351,7 +351,7 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
       return createErrorResponse('user_id and role are required.')
     }
 
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(newRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(newRole)) {
       return createErrorResponse('Role must be moderator, admin, super_admin, or owner.')
     }
 
@@ -439,7 +439,7 @@ export async function handlePromoteCommand(supabase: any, moderatorId: string, m
 export async function handleDemoteCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Only super_admin can demote
-    if (!['super_admin', 'owner'].includes(userRole)) {
+    if (!['super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only super administrators can demote users.')
     }
 
@@ -542,7 +542,7 @@ export async function handleDemoteCommand(supabase: any, moderatorId: string, mo
 export async function handleConfigCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Only super_admin can manage config
-    if (!['super_admin', 'owner'].includes(userRole)) {
+    if (!['super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only super administrators can manage system configuration.')
     }
 
@@ -711,7 +711,7 @@ export async function handleCommentCommand(supabase: any, options: any, userRole
       return createErrorResponse('Comment not found.')
     }
 
-    const isMod = ['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)
+    const isMod = ['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)
     return createCommentEmbed(comment, false, isMod)
 
   } catch (error) {

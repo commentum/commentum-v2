@@ -7,7 +7,7 @@ import { queueDiscordNotification } from '../../shared/discordNotifications.ts'
 export async function handleWarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Check permissions
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can warn users.')
     }
 
@@ -152,7 +152,7 @@ export async function handleWarnCommand(supabase: any, moderatorId: string, mode
 export async function handleUnwarnCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
     // Check permissions
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can remove warnings.')
     }
 
@@ -260,7 +260,7 @@ export async function handleUnwarnCommand(supabase: any, moderatorId: string, mo
 // Handle mute command
 export async function handleMuteCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can mute users.')
     }
 
@@ -348,7 +348,7 @@ export async function handleMuteCommand(supabase: any, moderatorId: string, mode
 // Handle unmute command
 export async function handleUnmuteCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can unmute users.')
     }
 
@@ -421,7 +421,7 @@ export async function handleUnmuteCommand(supabase: any, moderatorId: string, mo
 // Handle pin command
 export async function handlePinCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can pin comments.')
     }
 
@@ -520,7 +520,7 @@ export async function handlePinCommand(supabase: any, moderatorId: string, moder
 // Handle unpin command
 export async function handleUnpinCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can unpin comments.')
     }
 
@@ -615,7 +615,7 @@ export async function handleUnpinCommand(supabase: any, moderatorId: string, mod
 // Handle lock command
 export async function handleLockCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can lock threads.')
     }
 
@@ -712,7 +712,7 @@ export async function handleLockCommand(supabase: any, moderatorId: string, mode
 // Handle unlock command
 export async function handleUnlockCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can unlock threads.')
     }
 
@@ -831,7 +831,7 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
 
     // Check permissions
     const canDelete = comment.user_id === moderatorId || 
-                     ['admin', 'super_admin', 'owner'].includes(userRole)
+                     ['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)
 
     if (!canDelete) {
       return createErrorResponse('You can only delete your own comments (admins can delete any comment).')
@@ -938,7 +938,7 @@ export async function handleDeleteCommand(supabase: any, moderatorId: string, mo
 // Handle resolve command
 export async function handleResolveCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can resolve reports.')
     }
 
@@ -1022,7 +1022,7 @@ export async function handleResolveCommand(supabase: any, moderatorId: string, m
 // Handle queue command
 export async function handleQueueCommand(supabase: any, registration: any, userRole: string) {
   try {
-    if (!['moderator', 'admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['moderator', 'admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only moderators can view the moderation queue.')
     }
 
@@ -1071,7 +1071,7 @@ export async function handleQueueCommand(supabase: any, registration: any, userR
 // Handle ban command — NOW USES commentum_users instead of comments
 export async function handleBanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only admins can ban users.')
     }
 
@@ -1168,7 +1168,7 @@ export async function handleBanCommand(supabase: any, moderatorId: string, moder
 // Handle unban command — NOW USES commentum_users instead of comments
 export async function handleUnbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only admins can unban users.')
     }
 
@@ -1243,7 +1243,7 @@ export async function handleUnbanCommand(supabase: any, moderatorId: string, mod
 // Handle shadowban command — NOW USES commentum_users instead of comments
 export async function handleShadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only admins can shadowban users.')
     }
 
@@ -1334,7 +1334,7 @@ export async function handleShadowbanCommand(supabase: any, moderatorId: string,
 // Handle unshadowban command — NOW USES commentum_users instead of comments
 export async function handleUnshadowbanCommand(supabase: any, moderatorId: string, moderatorName: string, options: any[], registration: any, userRole: string) {
   try {
-    if (!['admin', 'super_admin', 'owner'].includes(userRole)) {
+    if (!['admin', 'super_admin', 'app_owner', 'owner'].includes(userRole)) {
       return createErrorResponse('Only admins can unshadowban users.')
     }
 
