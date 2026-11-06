@@ -113,8 +113,7 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
     const input = opt(options, 'user_id')
     if (!input) return createErrorResponse('user_id is required.')
     const section = String(opt(options, 'section') || 'all')
-    const staff = isStaff(userRole)
-    if (section === 'moderation' && !staff) return createErrorResponse('Only moderators can view moderation details.')
+    const staff = true // channels are private: show everything to whoever can run the command
 
     const { rows, error } = await findUserRows(supabase, String(input), opt(options, 'platform'))
     if (error) return createErrorResponse(error)
@@ -123,8 +122,8 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
     const username = rows[0].commentum_username || 'Unknown'
     const avatar = rows.find((r) => r.commentum_user_avatar)?.commentum_user_avatar
     const role = highestRole(rows.map((r) => (r.commentum_user_role || 'user').toLowerCase()))
-    // 'all' (default) shows every section; moderation only for staff
-    const want = (k: string) => (section === 'all' ? (k !== 'moderation' || staff) : section === k)
+    // 'all' (default) shows every section in ONE embed, nothing hidden
+    const want = (k: string) => (section === 'all' || section === k)
     const groups: { key: string; fields: any[] }[] = []
     let desc = `${rows.map((r) => platformLabel(r.commentum_client_type)).join(' · ')} · ID \`${uid}\``
 
@@ -217,7 +216,7 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
       fields.push(f('Streak', u0 ? `${u0.current_streak} (best ${u0.longest_streak}) · last active ${u0.last_activity_date || 'n/a'}` : 'n/a', false))
       fields.push(f('Spent', fmt((spends || []).reduce((s: number, x: any) => s + x.points, 0)) + ` (${(spends || []).length} purchases)`))
       fields.push(f('Ad rewards', fmt((ads || []).reduce((s: number, x: any) => s + x.points, 0)) + ` (${(ads || []).length} claims)`))
-      if (isStaff(userRole) && adj?.length)
+      if (adj?.length)
         fields.push(f('Recent adjustments', adj.map((a: any) => `${a.points > 0 ? '+' : ''}${fmt(a.points)} · ${clip(a.reason, 50)}`).join('\n'), false))
     }
 
@@ -242,28 +241,62 @@ export async function handleUserCommand(supabase: any, options: any[], userRole:
       const l = rows.find((r) => r.linked_anilist_id || r.linked_mal_id || r.linked_simkl_id) || rows[0]
       for (const x of [link('Linked AniList', l.linked_anilist_id, l.linked_anilist_username), link('Linked MAL', l.linked_mal_id, l.linked_mal_username), link('Linked SIMKL', l.linked_simkl_id, l.linked_simkl_username)]) if (x) fields.push(x)
       const { data: dan } = await supabase.from('dantotsu_id_mappings').select('dantotsu_comment_id').limit(1)
-      if (isStaff(userRole) && dan !== null) fields.push(f('Dantotsu sync', 'Mappings table available. See `/sync_status`.', false))
+      if (dan !== null) fields.push(f('Dantotsu sync', 'Mappings table available. See `/sync_status`.', false))
     }
 
-    const titles: Record<string, string> = { overview: 'Overview', moderation: '🛡️ Moderation (staff)', points: '⭐ Points', customization: '🎨 Customization', linked: '🔗 Linked accounts' }
-    const embeds: any[] = groups.map((g, i) => ({
-      title: i === 0 ? `👤 ${username}${groups.length === 1 && g.key !== 'overview' ? ' — ' + g.key : ''}` : `${username} — ${titles[g.key] || g.key}`,
-      description: i === 0 ? desc : undefined,
-      color: roleColor(role),
-      fields: g.fields.filter((x) => x && x.name && x.value).slice(0, 25),
-      thumbnail: i === 0 && avatar ? { url: avatar } : undefined,
-      footer: i === groups.length - 1 ? { text: `ID ${uid} · /user section:<one part> to view a single section` } : undefined,
-    }))
-    if (groups.length > 1 && groups[0].key === 'overview') embeds[0].title = `👤 ${username}`
-    // Discord allows 6000 characters across all embeds of a message: shrink values until it fits
-    const size = () => embeds.reduce((t, e) => t + (e.title || '').length + (e.description || '').length + (e.footer?.text || '').length + e.fields.reduce((a: number, x: any) => a + x.name.length + x.value.length, 0), 0)
-    for (let cap = 900; size() > 5800 && cap >= 100; cap -= 100) {
-      for (const e of embeds) for (const x of e.fields) x.value = clip(x.value, cap)
+    const titles: Record<string, string> = { overview: '📋 Overview', moderation: '🛡️ Moderation', points: '⭐ Points', customization: '🎨 Customization', linked: '🔗 Linked accounts' }
+    const color = roleColor(role)
+    const footer = { text: `ID ${uid} · /user section:<one part> shows a single section` }
+
+    let fieldsOut: any[] = []
+    if (groups.length === 1) {
+      fieldsOut = groups[0].fields.filter((x) => x && x.name && x.value).slice(0, 25)
+    } else {
+      // ONE embed with every section. Each section is rendered as text lines and
+      // split into <=1024-char fields; values are shrunk until the 6000-char
+      // embed limit is met.
+      const render = (cap: number) => {
+        const out: any[] = []
+        for (const g of groups) {
+          const lines = g.fields.filter((x) => x && x.name && x.value).map((x) => {
+            const v = clip(String(x.value), cap)
+            return v.includes('\n') ? `**${x.name}**\n${v}` : `**${x.name}:** ${v}`
+          })
+          let buf = '', part = 0
+          const flush = () => { if (buf) { out.push({ name: titles[g.key] + (part ? ' (cont.)' : ''), value: buf.trim(), inline: false }); buf = ''; part++ } }
+          for (const ln of lines) {
+            const line = clip(ln, 1000)
+            if ((buf + '\n' + line).length > 1024) flush()
+            buf += (buf ? '\n' : '') + line
+          }
+          flush()
+        }
+        return out
+      }
+      const total = (fs: any[]) => (`👤 ${username}`).length + desc.length + footer.text.length + fs.reduce((t, x) => t + x.name.length + x.value.length, 0)
+      for (let cap = 700; cap >= 60; cap -= 40) {
+        fieldsOut = render(cap)
+        if (fieldsOut.length <= 25 && total(fieldsOut) <= 5800) break
+      }
+      fieldsOut = fieldsOut.slice(0, 25)
     }
-    // Staff-only moderation details must never be posted to the channel
-    const includesModeration = groups.some((g) => g.key === 'moderation')
+
     return new Response(
-      JSON.stringify({ type: 4, data: { embeds, flags: includesModeration ? 64 : 0 } }),
+      JSON.stringify({
+        type: 4,
+        data: {
+          embeds: [{
+            title: `👤 ${username}${groups.length === 1 && groups[0].key !== 'overview' ? ' — ' + groups[0].key : ''}`,
+            description: desc,
+            color,
+            fields: fieldsOut,
+            thumbnail: avatar ? { url: avatar } : undefined,
+            footer,
+            timestamp: new Date().toISOString(),
+          }],
+          flags: 0,
+        },
+      }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
   } catch (error) {
@@ -279,7 +312,7 @@ export async function handleCommentCommand(supabase: any, options: any[], userRo
     if (!id) return createErrorResponse('comment_id is required.')
     const { data: c, error } = await supabase.from('comments').select('*').eq('id', id).single()
     if (error || !c) return createErrorResponse('Comment not found.')
-    const staff = isStaff(userRole)
+    const staff = true // channels are private: show everything to whoever can run the command
 
     const replies = await count(supabase.from('comments').select('id', { count: 'exact', head: true }).eq('parent_id', c.id).eq('deleted', false))
     const reports = safeJson(c.reports, [])
@@ -334,7 +367,7 @@ export async function handleCommentCommand(supabase: any, options: any[], userRo
 // ═════════════════════════════ /stats ═════════════════════════════
 export async function handleStatsCommand(supabase: any, userRole: string, options: any[] = []) {
   try {
-    const staff = isStaff(userRole)
+    const staff = true // channels are private: show everything to whoever can run the command
     const nowIso = new Date().toISOString()
     const ago = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
     const head = (t: string) => supabase.from(t).select('*', { count: 'exact', head: true })
@@ -427,7 +460,7 @@ export async function handleQueueCommand(supabase: any, options: any[], userRole
     const page = Math.max(1, Number(opt(options, 'page') || 1))
     const per = 6
     const total = await count(supabase.from('comments').select('id', { count: 'exact', head: true }).eq('reported', true).eq('report_status', 'pending'))
-    if (total === 0) return createDiscordResponse('📋 **Moderation Queue**\n\n✅ No pending reports to review.', true)
+    if (total === 0) return createDiscordResponse('📋 **Moderation Queue**\n\n✅ No pending reports to review.', false)
     const { data: comments, error } = await supabase.from('comments').select('*').eq('reported', true).eq('report_status', 'pending').order('created_at', { ascending: true }).range((page - 1) * per, page * per - 1)
     if (error) throw error
     const pages = Math.ceil(total / per)
@@ -440,7 +473,7 @@ export async function handleQueueCommand(supabase: any, options: any[], userRole
         `🚩 ${reports.length} pending: ${detail || '—'}\n📄 ${clip(c.content || '', 150)}\n🎬 ${clip(c.media_title || '', 40)} · ${when(c.created_at)}`, false)
     })
     return createEmbedResponse(`📋 Moderation Queue (${total} pending)`, 'Oldest first. Handle with `/resolve`, or `/comment` for full details.',
-      fields, 0xFF8C00, { text: `Page ${page}/${pages} · /queue page:<n>` }, undefined, true)
+      fields, 0xFF8C00, { text: `Page ${page}/${pages} · /queue page:<n>` }, undefined, false)
   } catch (error) {
     console.error('Queue command error:', error)
     return createErrorResponse(`Failed to fetch moderation queue: ${(error as Error).message}`)
@@ -480,7 +513,7 @@ export async function handleModlogCommand(supabase: any, options: any[], userRol
     const seen = new Set<string>()
     const lines = ev.filter((e) => (seen.has(e.line) ? false : (seen.add(e.line), true))).slice(0, 15).map((e) => e.line)
     return createEmbedResponse(`📜 Mod log: ${rows[0].commentum_username}`, lines.length ? clip(lines.join('\n\n'), 4000) : 'No moderation history.', [], 0xE17055,
-      { text: `ID ${uid} · newest first` }, rows[0].commentum_user_avatar || undefined, true)
+      { text: `ID ${uid} · newest first` }, rows[0].commentum_user_avatar || undefined, false)
   } catch (error) {
     console.error('Modlog error:', error)
     return createErrorResponse(`Failed to build mod log: ${(error as Error).message}`)
@@ -502,7 +535,7 @@ export async function handleNoteCommand(supabase: any, moderatorId: string, mode
 
     if (action === 'view') {
       const lines = [...new Set(rows.flatMap((r) => String(r.commentum_user_notes || '').split('\n')).filter(Boolean))]
-      return createEmbedResponse(`📝 Notes: ${rows[0].commentum_username}`, lines.length ? clip(lines.join('\n'), 4000) : 'No notes.', [], 0xFDCB6E, { text: `ID ${uid}` }, undefined, true)
+      return createEmbedResponse(`📝 Notes: ${rows[0].commentum_username}`, lines.length ? clip(lines.join('\n'), 4000) : 'No notes.', [], 0xFDCB6E, { text: `ID ${uid}` }, undefined, false)
     }
     for (const r of rows) {
       if (!canModerate(userRole, r.commentum_user_role || 'user')) return createErrorResponse('Cannot edit notes on a user with equal or higher role.')
@@ -515,7 +548,7 @@ export async function handleNoteCommand(supabase: any, moderatorId: string, mode
         const { error: e } = await supabase.from('commentum_users').update({ commentum_user_notes: next.slice(-8000) }).eq('id', r.id)
         if (e) throw e
       }
-      return createDiscordResponse(`📝 Note added to **${rows[0].commentum_username}** (\`${uid}\`).`, true)
+      return createDiscordResponse(`📝 Note added to **${rows[0].commentum_username}** (\`${uid}\`).`, false)
     }
     if (action === 'clear') {
       if (!isAdmin(userRole)) return createErrorResponse('Only admins can clear notes.')
@@ -523,7 +556,7 @@ export async function handleNoteCommand(supabase: any, moderatorId: string, mode
         const { error: e } = await supabase.from('commentum_users').update({ commentum_user_notes: null }).eq('id', r.id)
         if (e) throw e
       }
-      return createDiscordResponse(`🧹 Notes cleared for **${rows[0].commentum_username}**.`, true)
+      return createDiscordResponse(`🧹 Notes cleared for **${rows[0].commentum_username}**.`, false)
     }
     return createErrorResponse('Unknown action.')
   } catch (error) {
@@ -557,7 +590,7 @@ export async function handleBansCommand(supabase: any, options: any[], userRole:
     const per = 10
     const pages = Math.max(1, Math.ceil(items.length / per))
     const slice = items.slice((page - 1) * per, page * per)
-    return createEmbedResponse(`🚫 Active restrictions (${items.length})`, slice.length ? slice.map((i) => i.line).join('\n') : 'Nothing active.', [], 0xD63031, { text: `Page ${page}/${pages} · filter: ${type}` }, undefined, true)
+    return createEmbedResponse(`🚫 Active restrictions (${items.length})`, slice.length ? slice.map((i) => i.line).join('\n') : 'Nothing active.', [], 0xD63031, { text: `Page ${page}/${pages} · filter: ${type}` }, undefined, false)
   } catch (error) {
     console.error('Bans error:', error)
     return createErrorResponse(`Failed to list restrictions: ${(error as Error).message}`)
@@ -573,7 +606,7 @@ export async function handleLeaderboardCommand(supabase: any, options: any[]) {
     if (error) throw new Error(error.message)
     if (data?.enabled === false) return createErrorResponse('The leaderboard is disabled.')
     const list: any[] = data?.leaderboard || []
-    if (!list.length) return createDiscordResponse('🏆 Nothing on this page yet.', true)
+    if (!list.length) return createDiscordResponse('🏆 Nothing on this page yet.', false)
     const medal = (r: number) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : `**${r}.**`)
     const lines = list.map((e) => `${medal(e.rank)} ${e.username} (${platformLabel(e.client_type)}) — ${e.is_infinite ? '∞' : fmt(e.points)} · ${e.tier} · ${fmt(e.comment_count)} comments`)
     const total = data?.pagination?.total || 0
@@ -600,7 +633,7 @@ export async function handleMyPointsCommand(supabase: any, discordUserId: string
       up?.[0] ? f('Streak', `${up[0].current_streak} (best ${up[0].longest_streak})`) : null,
       pts.breakdown ? f('Breakdown', Object.entries(pts.breakdown).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${fmt(v)}`).join('\n'), false) : null,
     ].filter(Boolean)
-    return createEmbedResponse('⭐ Your points', `${platformLabel(registration.platform_type)} · \`${registration.platform_user_id}\``, fields, 0xFDCB6E, undefined, undefined, true)
+    return createEmbedResponse('⭐ Your points', `${platformLabel(registration.platform_type)} · \`${registration.platform_user_id}\``, fields, 0xFDCB6E, undefined, undefined, false)
   } catch (error) {
     return createErrorResponse(`Failed to load points: ${(error as Error).message}`)
   }
@@ -620,7 +653,7 @@ export async function handlePurgeCommand(supabase: any, moderatorId: string, mod
     for (const r of rows) if (!canModerate(userRole, r.commentum_user_role || 'user')) return createErrorResponse('Cannot moderate a user with equal or higher role.')
     const n = await count(supabase.from('comments').select('id', { count: 'exact', head: true }).eq('user_id', uid).eq('deleted', false))
     if (n === 0) return createErrorResponse('This user has no live comments.')
-    if (!confirm) return createDiscordResponse(`⚠️ This will delete **${fmt(n)}** comment(s) by **${rows[0].commentum_username}** (\`${uid}\`).\nRun again with \`confirm:true\` to proceed.`, true)
+    if (!confirm) return createDiscordResponse(`⚠️ This will delete **${fmt(n)}** comment(s) by **${rows[0].commentum_username}** (\`${uid}\`).\nRun again with \`confirm:true\` to proceed.`, false)
     const { error: e } = await supabase.from('comments').update({
       deleted: true, deleted_at: new Date().toISOString(), deleted_by: moderatorId,
       moderated: true, moderated_at: new Date().toISOString(), moderated_by: moderatorId,
@@ -667,7 +700,7 @@ export async function handleAuditCommand(supabase: any, options: any[], userRole
     }
     ev.sort((a, b) => b.t - a.t)
     const lines = ev.slice(0, limit).map((e) => e.line)
-    return createEmbedResponse('🗂 Audit log', lines.length ? clip(lines.join('\n'), 4000) : 'No recorded actions.', [], 0x636E72, { text: `Latest ${limit}${filterMod ? ` · moderator ${filterMod}` : ''} · derived from stored moderation fields` }, undefined, true)
+    return createEmbedResponse('🗂 Audit log', lines.length ? clip(lines.join('\n'), 4000) : 'No recorded actions.', [], 0x636E72, { text: `Latest ${limit}${filterMod ? ` · moderator ${filterMod}` : ''} · derived from stored moderation fields` }, undefined, false)
   } catch (error) {
     console.error('Audit error:', error)
     return createErrorResponse(`Audit failed: ${(error as Error).message}`)
@@ -685,7 +718,7 @@ export async function handleSyncStatusCommand(supabase: any, userRole: string) {
     const lines = (meta || []).map((m: any) => `\`${m.key}\`: ${/token|secret|key|auth/i.test(m.key) ? '••••' : clip(m.value, 60)} (${when(m.updated_at)})`)
     return createEmbedResponse('🔄 Dantotsu sync', lines.join('\n') || 'No sync metadata yet.', [
       f('Comment mappings', fmt(maps)), f('Media ID map', fmt(media)), f('Media cache', fmt(cache)),
-    ], 0x0984E3, undefined, undefined, true)
+    ], 0x0984E3, undefined, undefined, false)
   } catch (error) {
     return createErrorResponse(`Failed to read sync status: ${(error as Error).message}`)
   }
@@ -697,7 +730,7 @@ export async function handleAnnouncementsCommand(supabase: any, options: any[]) 
     const nowIso = new Date().toISOString()
     const { data, error } = await supabase.from('announcements').select('id, app_id, title, short_description, category, pinned, published_at').eq('status', 'published').or(`expires_at.is.null,expires_at.gt.${nowIso}`).order('pinned', { ascending: false }).order('published_at', { ascending: false }).limit(5)
     if (error) throw error
-    if (!data?.length) return createDiscordResponse('📢 No active announcements.', true)
+    if (!data?.length) return createDiscordResponse('📢 No active announcements.', false)
     const fields = data.map((a: any) => f(`${a.pinned ? '📌 ' : ''}${a.title}`, `${clip(a.short_description, 200)}\n*${a.app_id} · ${a.category} · ${when(a.published_at)}*`, false))
     return createEmbedResponse('📢 Announcements', 'Latest published', fields, 0x6C5CE7)
   } catch (error) {
