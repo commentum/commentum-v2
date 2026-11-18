@@ -770,3 +770,263 @@ export function getNotificationTargetUserId(
 
   return null
 }
+
+// ============================================
+// ANNOUNCEMENT BROADCAST
+// Built for thousands of devices: ONE access token, ONE DB client, bounded
+// concurrency, bulk history inserts. The per-user queue above starts a send
+// for every user at once (thousands of DB clients in one 512MB worker), which
+// kills the worker before any history row is written ("Pushed 0").
+// Any fatal problem is written to the notifications table so the dashboard
+// shows the reason instead of a silent zero.
+// ============================================
+
+const FCM_CONCURRENCY = 25
+const DB_INSERT_CHUNK = 500
+const URL_FILTER_CHUNK = 20 // fcm tokens are long; keep PostgREST URLs short
+
+export interface AnnouncementBroadcastInput {
+  announcement: {
+    id: number | string
+    app_id: string
+    title: string
+    short_description?: string | null
+    full_content?: string | null
+    category?: string
+    pinned?: boolean
+    author_id?: string
+  }
+  tokens: { user_id: string; fcm_token: string }[]
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+async function runPool<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
+  let next = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next++
+      if (i >= items.length) return
+      await worker(items[i])
+    }
+  })
+  await Promise.all(runners)
+}
+
+export async function broadcastAnnouncementFcm(
+  input: AnnouncementBroadcastInput
+): Promise<{ users: number; sent: number; failed: number }> {
+  const { announcement, tokens } = input
+  const announcementId = String(announcement.id)
+  const result = { users: 0, sent: 0, failed: 0 }
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  )
+
+  const payload: FcmNotificationPayload = {
+    type: 'announcement_published',
+    targetUserId: '',
+    targetClientType: announcement.app_id,
+    announcementTitle: announcement.title,
+    announcementContent: announcement.short_description || announcement.full_content || '',
+    announcementId,
+  }
+  const { title, body } = getNotificationContent(payload)
+  const clickAction = 'anymex://notifications'
+
+  const baseRow = (userId: string, fcmSent: boolean, fcmDelivered: boolean, fcmError: string | null, isRead = false) => ({
+    client_type: announcement.app_id,
+    user_id: userId,
+    type: 'announcement_published',
+    title,
+    body,
+    comment_id: null,
+    media_id: null,
+    media_type: null,
+    media_title: null,
+    actor_id: null,
+    actor_username: null,
+    actor_avatar: null,
+    moderator_id: null,
+    moderator_username: null,
+    reason: null,
+    metadata: {
+      announcement_id: announcementId,
+      category: announcement.category ?? null,
+      pinned: String(announcement.pinned ?? false),
+      raw_comment_content: null,
+    },
+    click_action: clickAction,
+    is_read: isRead,
+    fcm_sent: fcmSent,
+    fcm_delivered: fcmDelivered,
+    fcm_error: fcmError,
+  })
+
+  // Record a fatal problem as one history row so the dashboard shows WHY.
+  const recordFatal = async (reason: string) => {
+    console.error(`[FCM] announcement ${announcementId} broadcast aborted: ${reason}`)
+    if (!announcement.author_id) return
+    const { error } = await supabase
+      .from('notifications')
+      .insert(baseRow(String(announcement.author_id), false, false, reason.slice(0, 500), true))
+    if (error) console.error('[FCM] failed to record failure row:', error)
+  }
+
+  try {
+    // 1. Global switches (same rules as the per-user path)
+    const { data: enabledRow } = await supabase.from('config').select('value').eq('key', 'fcm_notifications_enabled').single()
+    if (!enabledRow || JSON.parse(enabledRow.value) !== true) {
+      await recordFatal('FCM disabled: config.fcm_notifications_enabled is not true')
+      return result
+    }
+    const { data: typesRow } = await supabase.from('config').select('value').eq('key', 'fcm_notification_types').single()
+    const enabledTypes: string[] = typesRow ? JSON.parse(typesRow.value) : []
+    if (!enabledTypes.includes('announcement_published')) {
+      await recordFatal('announcement_published is missing from config.fcm_notification_types')
+      return result
+    }
+
+    // 2. Users who opted out of announcements
+    const optedOut = new Set<string>()
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase
+        .from('notification_preferences')
+        .select('user_id')
+        .eq('notify_on_announcement', false)
+        .range(from, from + 999)
+      if (error) { console.error('[FCM] prefs lookup failed:', error); break }
+      for (const r of data || []) optedOut.add(String(r.user_id))
+      if (!data || data.length < 1000) break
+    }
+    const eligible = tokens.filter((t) => t.fcm_token && !optedOut.has(String(t.user_id)))
+    if (eligible.length === 0) {
+      await recordFatal(`No eligible devices (${tokens.length} tokens, ${optedOut.size} opted-out users)`)
+      return result
+    }
+
+    // 3. One OAuth token for the whole broadcast
+    let accessToken: string
+    try {
+      accessToken = await getFcmAccessToken()
+    } catch (err: any) {
+      await recordFatal(`Could not get FCM access token: ${err?.message || err}`)
+      return result
+    }
+
+    const projectId = Deno.env.get('FCM_PROJECT_ID')!
+    const sendUrl = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`
+    const data = {
+      type: 'announcement_published',
+      title,
+      body,
+      announcement_id: announcementId,
+      comment_id: '',
+      media_id: '',
+      media_type: '',
+      media_title: '',
+      client_type: announcement.app_id,
+      actor_id: '',
+      actor_username: '',
+      actor_avatar: '',
+      click_action: clickAction,
+      timestamp: new Date().toISOString(),
+      channel_id: 'announcements',
+    }
+    const buildMessage = (token: string) => ({
+      message: {
+        token,
+        notification: { title, body },
+        data,
+        android: {
+          priority: 'HIGH' as const,
+          notification: { channel_id: 'announcements', sound: 'default', default_vibrate_timings: true },
+        },
+        apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+      },
+    })
+
+    const sendOne = async (token: string): Promise<{ ok: boolean; invalid?: boolean; error?: string }> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const resp = await fetch(sendUrl, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildMessage(token)),
+          })
+          if (resp.ok) {
+            await resp.body?.cancel()
+            return { ok: true }
+          }
+          const errData = await resp.json().catch(() => ({}))
+          const errMsg: string = errData?.error?.message || `HTTP ${resp.status}`
+          const errStatus: string = errData?.error?.status || ''
+          if (resp.status === 401 && attempt === 0) {
+            cachedAccessToken = null
+            accessToken = await getFcmAccessToken()
+            continue
+          }
+          if (resp.status === 404 || errStatus === 'NOT_FOUND' || errStatus === 'UNREGISTERED' || /NotRegistered|not-registered|UNREGISTERED/.test(errMsg)) {
+            return { ok: false, invalid: true, error: `(${resp.status}) ${errMsg}` }
+          }
+          if ((resp.status === 429 || resp.status >= 500) && attempt === 0) {
+            await sleep(500)
+            continue
+          }
+          return { ok: false, error: `(${resp.status}) ${errMsg}` }
+        } catch (e: any) {
+          if (attempt === 0) { await sleep(300); continue }
+          return { ok: false, error: String(e?.message || e) }
+        }
+      }
+      return { ok: false, error: 'unknown error' }
+    }
+
+    // 4. Send with bounded concurrency
+    const perUser = new Map<string, { ok: number; fail: number; err: string | null }>()
+    const invalidTokens: string[] = []
+    await runPool(eligible, FCM_CONCURRENCY, async (t) => {
+      const uid = String(t.user_id)
+      let entry = perUser.get(uid)
+      if (!entry) { entry = { ok: 0, fail: 0, err: null }; perUser.set(uid, entry) }
+      const res = await sendOne(t.fcm_token)
+      if (res.ok) { entry.ok++; result.sent++ }
+      else {
+        entry.fail++; result.failed++; entry.err = res.error || 'send failed'
+        if (res.invalid) invalidTokens.push(t.fcm_token)
+      }
+    })
+    result.users = perUser.size
+
+    // 5. Deactivate dead tokens (short URL chunks)
+    for (let i = 0; i < invalidTokens.length; i += URL_FILTER_CHUNK) {
+      const { error } = await supabase
+        .from('fcm_tokens')
+        .update({ is_active: false })
+        .in('fcm_token', invalidTokens.slice(i, i + URL_FILTER_CHUNK))
+      if (error) console.error('[FCM] token deactivation failed:', error)
+    }
+
+    // 6. Bulk-write history (one row per user) so the dashboard counts are real
+    const rows = Array.from(perUser.entries()).map(([uid, e]) =>
+      baseRow(
+        uid,
+        true,
+        e.ok > 0,
+        e.fail > 0 ? `success: ${e.ok}, failure: ${e.fail}: ${e.err}`.slice(0, 500) : null
+      )
+    )
+    for (let i = 0; i < rows.length; i += DB_INSERT_CHUNK) {
+      const { error } = await supabase.from('notifications').insert(rows.slice(i, i + DB_INSERT_CHUNK))
+      if (error) console.error('[FCM] history insert failed:', error)
+    }
+
+    console.log(`[FCM] announcement ${announcementId}: ${result.sent} sent, ${result.failed} failed, ${result.users} users, ${invalidTokens.length} dead tokens`)
+    return result
+  } catch (err: any) {
+    await recordFatal(`Unexpected error: ${err?.message || err}`)
+    return result
+  }
+}

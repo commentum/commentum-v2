@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifyClientToken } from '../shared/clientAuth.ts'
 import { sendDiscordNotificationBlocking } from '../shared/discordNotifications.ts'
-import { queueFcmNotification } from '../shared/fcmNotifications.ts'
+import { broadcastAnnouncementFcm } from '../shared/fcmNotifications.ts'
 import { renderAnnouncementDashboard } from './dashboard.ts'
 import {
   getDashboardUsers,
@@ -1275,84 +1275,77 @@ async function sendAnnouncementFcmNotifications(supabase: any, announcement: any
     const targetRoles = announcement.target_roles
     const targetPlatforms = announcement.target_platforms
 
-    // client_type-agnostic: tokens register under whatever client the user is
-    // on (anilist/mal/simkl/...), never under the announcement's app_id, so
-    // filtering by client_type=app_id matched nothing and every broadcast
-    // silently sent zero pushes ("[FCM] No active tokens found for
-    // app_id=anymex"). Same policy as the per-user send path: deliver to
-    // every ACTIVE token; platform/role targeting still applies; per-user
-    // notification preferences are enforced in the send path; dead tokens
-    // are auto-deactivated by the FCM error handler.
-    let query = supabase
-      .from('fcm_tokens')
-      .select('id, user_id, fcm_token, platform, last_used_at')
-      .eq('is_active', true)
-
-    if (targetPlatforms && targetPlatforms.length > 0) {
-      query = query.in('platform', targetPlatforms)
+    // Tokens register under whatever client the user is on (anilist/mal/simkl),
+    // never under the announcement's app_id, so deliver to every ACTIVE token.
+    // Paginate: one request returns at most 1000 rows on some setups.
+    const activeTokens: any[] = []
+    for (let from = 0; ; from += 1000) {
+      let query = supabase
+        .from('fcm_tokens')
+        .select('id, user_id, fcm_token, platform')
+        .eq('is_active', true)
+        .order('id', { ascending: true })
+        .range(from, from + 999)
+      if (targetPlatforms && targetPlatforms.length > 0) {
+        query = query.in('platform', targetPlatforms)
+      }
+      const { data, error } = await query
+      if (error) {
+        console.error(`[FCM] token query failed (announcement ${announcement.id}):`, error)
+        return
+      }
+      activeTokens.push(...(data || []))
+      if (!data || data.length < 1000) break
     }
 
-    const { data: activeTokens, error: tokensError } = await query
-
-    if (tokensError || !activeTokens || activeTokens.length === 0) {
-      console.log(`[FCM] No active tokens found (announcement ${announcement.id}), tokensError=${JSON.stringify(tokensError)}`)
+    if (activeTokens.length === 0) {
+      console.log(`[FCM] No active tokens found (announcement ${announcement.id})`)
       return
     }
 
     let eligibleTokens = activeTokens
     if (targetRoles && targetRoles.length > 0) {
-      const userIds = activeTokens.map(t => t.user_id)
-      const { data: userRoles } = await supabase
-        .from('commentum_users')
-        .select('commentum_user_id, commentum_user_role')
-        .in('commentum_user_id', userIds)
-
-      const userRoleMap = new Map(
-        (userRoles || []).map(u => [u.commentum_user_id, u.commentum_user_role])
+      // Chunk the id list: thousands of ids in one GET URL gets rejected.
+      const allIds = Array.from(new Set(activeTokens.map((t) => String(t.user_id))))
+      const userRoleMap = new Map<string, string>()
+      for (let i = 0; i < allIds.length; i += 100) {
+        const { data: userRoles } = await supabase
+          .from('commentum_users')
+          .select('commentum_user_id, commentum_user_role')
+          .in('commentum_user_id', allIds.slice(i, i + 100))
+        for (const u of userRoles || []) {
+          userRoleMap.set(String(u.commentum_user_id), u.commentum_user_role)
+        }
+      }
+      eligibleTokens = activeTokens.filter((token) =>
+        targetRoles.includes(userRoleMap.get(String(token.user_id)) || 'user')
       )
-
-      eligibleTokens = activeTokens.filter(token => {
-        const userRole = userRoleMap.get(token.user_id) || 'user'
-        return targetRoles.includes(userRole)
-      })
     }
 
-    // Deduplicate by fcm_token first so a single physical device with multiple accounts
-    // (e.g. AniList + SIMKL on the same phone) only receives one push notification.
-    const seenFcmTokens = new Set<string>()
-    const uniqueTokens = eligibleTokens.filter(token => {
-      if (!token.fcm_token || seenFcmTokens.has(token.fcm_token)) {
-        return false
-      }
-      seenFcmTokens.add(token.fcm_token)
+    // One push per physical device (a phone with several accounts has one token).
+    const seen = new Set<string>()
+    const uniqueTokens = eligibleTokens.filter((t) => {
+      if (!t.fcm_token || seen.has(t.fcm_token)) return false
+      seen.add(t.fcm_token)
       return true
     })
 
-    // Now deduplicate by user_id from these unique device tokens
-    const uniqueEligibleUsers = Array.from(new Set(uniqueTokens.map(t => t.user_id)))
+    console.log(`[FCM] Broadcasting announcement ${announcement.id} to ${uniqueTokens.length} devices`)
 
-    for (const userId of uniqueEligibleUsers) {
-      try {
-        queueFcmNotification({
-          type: 'announcement_published',
-          targetUserId: userId,
-          targetClientType: announcement.app_id,
-          announcementTitle: announcement.title,
-          announcementContent: announcement.short_description || announcement.full_content,
-          announcementId: String(announcement.id),
-          metadata: {
-            announcement_id: String(announcement.id),
-            category: announcement.category,
-            pinned: String(announcement.pinned),
-          }
-        })
-      } catch (err) {
-        console.error(`Failed to queue FCM notification for user ${userId}:`, err)
-      }
+    // Runs after the HTTP response; waitUntil keeps the worker alive for it.
+    const job = broadcastAnnouncementFcm({
+      announcement,
+      tokens: uniqueTokens.map((t) => ({ user_id: String(t.user_id), fcm_token: t.fcm_token })),
+    }).catch((err) => console.error('[FCM] broadcast crashed:', err))
+
+    // @ts-ignore
+    if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+      // @ts-ignore
+      EdgeRuntime.waitUntil(job)
+    } else {
+      await job
     }
-    console.log(`[FCM] Queued announcement notifications for ${uniqueEligibleUsers.length} users`)
   } catch (error) {
     console.error('Error broadcasting FCM announcement notifications:', error)
   }
 }
-
