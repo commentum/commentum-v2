@@ -1,6 +1,7 @@
 import { handleAddCommand, handleRegisterCommand, handleHelpCommand, getAvailableServers } from './info.ts'
 import { handleWarnCommand, handleUnwarnCommand, handleMuteCommand, handleUnmuteCommand, handleBanCommand, handleUnbanCommand, handleShadowbanCommand, handleUnshadowbanCommand, handlePinCommand, handleUnpinCommand, handleLockCommand, handleUnlockCommand, handleDeleteCommand, handleResolveCommand } from './moderation.ts'
 import { handlePromoteCommand, handleDemoteCommand, handleConfigCommand, handleReportCommand } from './management.ts'
+import { handleNotificationsCommand } from './notifications.ts'
 import { handleUserCommand, handleCommentCommand, handleStatsCommand, handleQueueCommand, handleModlogCommand, handleNoteCommand, handleBansCommand, handleLeaderboardCommand, handleMyPointsCommand, handlePurgeCommand, handleAuditCommand, handleSyncStatusCommand, handleAnnouncementsCommand, handleCustomizationsCommand } from './profile.ts'
 import { handlePointsGiveCommand, handlePointsDeductCommand, handlePointsCheckCommand, handlePointsUndoCommand } from './points.ts'
 import { handleAutocomplete, handleSearchCommentsCommand, handleSearchPageInteraction } from './search.ts'
@@ -1167,6 +1168,8 @@ export async function routeInteraction(supabase: any, interaction: any): Promise
         return await handleDemoteCommand(supabase, userId, username, data.options, registration, userRole)
       case 'config':
         return await handleConfigCommand(supabase, userId, username, data.options, registration, userRole)
+      case 'notifications':
+        return await handleNotificationsCommand(supabase, userId, username, data.options, registration, userRole)
 
       // Profiles, logs and staff tools
       case 'modlog':

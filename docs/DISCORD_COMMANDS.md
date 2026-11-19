@@ -40,7 +40,13 @@ the Discord ID in `commentum_users` / `config`.
 `/purge user_id reason confirm:true` (soft-deletes all live comments of a user; without `confirm` it only reports the count).
 
 ## Super admin and above
-`/promote` `/demote` `/config` `/add`.
+`/promote` `/demote` `/config` `/notifications` `/add`.
+
+`/notifications` (super admin and above to change, admin and above to view) turns push notifications on or off for users.
+Pick an action (Status, Turn ON, Turn OFF) and then a type from the list: Upvote, Downvote, Vote removed, New comment,
+Reply, Mention, Comment edited/deleted, Pinned, Locked, Report filed/resolved/dismissed, Warned, Muted, Banned,
+Shadow-banned, Other moderation action, Announcement, or ALL (master switch). Changes apply immediately and turning a
+type back on restores it exactly.
 
 ## Notes
 - Replies are public in the channel (nothing is ephemeral), because the bot is used in private channels.

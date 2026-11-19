@@ -592,11 +592,15 @@ export async function handleConfigCommand(supabase: any, moderatorId: string, mo
       }
 
       // Validate value format for specific keys
-      if (key.includes('users') || key === 'banned_keywords' || key === 'discord_webhook_urls' || key === 'discord_notification_types') {
+      if (key.includes('users') || key === 'banned_keywords' || key === 'discord_webhook_urls' || key === 'discord_notification_types' || key === 'fcm_notification_types') {
+        let parsed: any
         try {
-          JSON.parse(value)
+          parsed = JSON.parse(value)
         } catch {
           return createErrorResponse(`Value for "${key}" must be valid JSON.`)
+        }
+        if ((key === 'discord_notification_types' || key === 'fcm_notification_types') && !Array.isArray(parsed)) {
+          return createErrorResponse(`Value for "${key}" must be a JSON array. Tip: use /notifications to switch types on or off.`)
         }
       }
 

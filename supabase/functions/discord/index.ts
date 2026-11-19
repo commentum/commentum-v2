@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7/denonext/supabase-js.mjs'
 import { verifySignature } from './utils.ts'
 import { routeInteraction } from './router.ts'
+import { NOTIFICATION_TYPE_CHOICES } from './handlers/notifications.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -823,6 +824,30 @@ async function handleGlobalCommandSync(): Promise<Response> {
           description: 'New configuration value',
           type: 3,
           required: false
+        }
+      ]
+    },
+    {
+      name: 'notifications',
+      description: 'Turn push notifications on or off for users (Super Admin only)',
+      options: [
+        {
+          name: 'action',
+          description: 'What to do',
+          type: 3,
+          required: true,
+          choices: [
+            { name: 'Status (show what is on/off)', value: 'status' },
+            { name: 'Turn ON', value: 'on' },
+            { name: 'Turn OFF', value: 'off' }
+          ]
+        },
+        {
+          name: 'type',
+          description: 'Which notification (not needed for Status)',
+          type: 3,
+          required: false,
+          choices: NOTIFICATION_TYPE_CHOICES
         }
       ]
     },

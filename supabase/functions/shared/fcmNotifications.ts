@@ -465,6 +465,15 @@ async function sendFcmNotification(payload: FcmNotificationPayload): Promise<voi
       return
     }
 
+    // 2b. Separate upvote / downvote switches (missing key = enabled)
+    if (payload.type === 'vote_cast' && (payload.voteType === 'upvote' || payload.voteType === 'downvote')) {
+      const flagKey = payload.voteType === 'upvote' ? 'fcm_vote_up_enabled' : 'fcm_vote_down_enabled'
+      const { data: flagRow } = await supabase.from('config').select('value').eq('key', flagKey).maybeSingle()
+      if (flagRow && String(flagRow.value).trim().toLowerCase() === 'false') {
+        return
+      }
+    }
+
     // 3. Check user preferences (skip for forced types like bans/warnings)
     // client_type-agnostic: a user may hold anilist/mal/simkl identities, so
     // match preferences by user_id only; if ANY row explicitly disables this
